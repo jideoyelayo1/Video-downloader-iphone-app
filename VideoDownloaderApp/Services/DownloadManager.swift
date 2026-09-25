@@ -441,7 +441,7 @@ extension DownloadManager: AVAssetDownloadDelegate {
             guard let item = self.item(id), associate(assetDownloadTask, item: item, id: id, isHLS: true) else { return }
             hlsLocations[id] = location
             // Persist early so a relaunch can find (and clean up) the package.
-            item(id)?.localFileName = DownloadStorage.managedPath(for: location)
+            item.localFileName = DownloadStorage.managedPath(for: location)
             save()
         }
     }
