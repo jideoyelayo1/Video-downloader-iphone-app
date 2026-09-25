@@ -1,0 +1,88 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		D10000000000000000000001 = {isa = PBXContainerItemProxy; containerPortal = E10000000000000000000001 /* Project object */; proxyType = 1; remoteGlobalIDString = E10000000000000000000002; remoteInfo = VideoDownloaderApp; };
+		D10000000000000000000002 = {isa = PBXContainerItemProxy; containerPortal = E10000000000000000000001 /* Project object */; proxyType = 1; remoteGlobalIDString = E10000000000000000000002; remoteInfo = VideoDownloaderApp; };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		C10000000000000000000001 /* VideoDownloaderApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VideoDownloaderApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C10000000000000000000002 /* VideoDownloaderAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VideoDownloaderAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C10000000000000000000003 /* VideoDownloaderAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VideoDownloaderAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		E10000000000000000000030 /* Exceptions for "VideoDownloaderApp" folder in "VideoDownloaderApp" target */ = {isa = PBXFileSystemSynchronizedBuildFileExceptionSet; membershipExceptions = ( Info.plist, ); target = E10000000000000000000002 /* VideoDownloaderApp */; };
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		E10000000000000000000003 /* VideoDownloaderApp */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = ( E10000000000000000000030 /* Exceptions for "VideoDownloaderApp" folder in "VideoDownloaderApp" target */, ); path = VideoDownloaderApp; sourceTree = "<group>"; };
+		E10000000000000000000008 /* VideoDownloaderAppTests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = VideoDownloaderAppTests; sourceTree = "<group>"; };
+		E10000000000000000000020 /* VideoDownloaderAppUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = VideoDownloaderAppUITests; sourceTree = "<group>"; };
+		E10000000000000000000026 /* Support */ = {isa = PBXFileSystemSynchronizedRootGroup; name = "Shared test support"; path = VideoDownloaderAppTests/Support; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F10000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+		F10000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+		F10000000000000000000008 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		E10000000000000000000009 = {isa = PBXGroup; children = ( E10000000000000000000003 /* VideoDownloaderApp */, E10000000000000000000008 /* VideoDownloaderAppTests */, E10000000000000000000020 /* VideoDownloaderAppUITests */, E10000000000000000000026 /* Support */, E1000000000000000000000A /* Products */, ); sourceTree = "<group>"; };
+		E1000000000000000000000A /* Products */ = {isa = PBXGroup; children = ( C10000000000000000000001 /* VideoDownloaderApp.app */, C10000000000000000000002 /* VideoDownloaderAppTests.xctest */, C10000000000000000000003 /* VideoDownloaderAppUITests.xctest */, ); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E10000000000000000000002 /* VideoDownloaderApp */ = {isa = PBXNativeTarget; buildConfigurationList = E1000000000000000000000B /* Build configuration list for PBXNativeTarget "VideoDownloaderApp" */; buildPhases = ( F10000000000000000000004 /* Sources */, F10000000000000000000002 /* Frameworks */, F10000000000000000000005 /* Resources */, ); buildRules = ( ); dependencies = ( ); fileSystemSynchronizedGroups = ( E10000000000000000000003 /* VideoDownloaderApp */, ); name = VideoDownloaderApp; productName = VideoDownloaderApp; productReference = C10000000000000000000001 /* VideoDownloaderApp.app */; productType = "com.apple.product-type.application"; };
+		E1000000000000000000000C /* VideoDownloaderAppTests */ = {isa = PBXNativeTarget; buildConfigurationList = E1000000000000000000000D /* Build configuration list for PBXNativeTarget "VideoDownloaderAppTests" */; buildPhases = ( F10000000000000000000006 /* Sources */, F10000000000000000000003 /* Frameworks */, F10000000000000000000007 /* Resources */, ); buildRules = ( ); dependencies = ( E1000000000000000000000E /* PBXTargetDependency */, ); fileSystemSynchronizedGroups = ( E10000000000000000000008 /* VideoDownloaderAppTests */, ); name = VideoDownloaderAppTests; productName = VideoDownloaderAppTests; productReference = C10000000000000000000002 /* VideoDownloaderAppTests.xctest */; productType = "com.apple.product-type.bundle.unit-test"; };
+		E10000000000000000000021 /* VideoDownloaderAppUITests */ = {isa = PBXNativeTarget; buildConfigurationList = E10000000000000000000022 /* Build configuration list for PBXNativeTarget "VideoDownloaderAppUITests" */; buildPhases = ( F10000000000000000000009 /* Sources */, F10000000000000000000008 /* Frameworks */, F1000000000000000000000A /* Resources */, ); buildRules = ( ); dependencies = ( E10000000000000000000023 /* PBXTargetDependency */, ); fileSystemSynchronizedGroups = ( E10000000000000000000020 /* VideoDownloaderAppUITests */, E10000000000000000000026 /* Support */, ); name = VideoDownloaderAppUITests; productName = VideoDownloaderAppUITests; productReference = C10000000000000000000003 /* VideoDownloaderAppUITests.xctest */; productType = "com.apple.product-type.bundle.ui-testing"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E10000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = { BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; TargetAttributes = { E10000000000000000000002 = { CreatedOnToolsVersion = 16.0; }; E1000000000000000000000C = { CreatedOnToolsVersion = 16.0; TestTargetID = E10000000000000000000002; }; E10000000000000000000021 = { CreatedOnToolsVersion = 16.0; TestTargetID = E10000000000000000000002; }; }; }; buildConfigurationList = E1000000000000000000000F /* Build configuration list for PBXProject "VideoDownloaderApp" */; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = ( en, Base, ); mainGroup = E10000000000000000000009; minimizedProjectReferenceProxies = 1; preferredProjectObjectVersion = 77; productRefGroup = E1000000000000000000000A /* Products */; projectDirPath = ""; projectRoot = ""; targets = ( E10000000000000000000002 /* VideoDownloaderApp */, E1000000000000000000000C /* VideoDownloaderAppTests */, E10000000000000000000021 /* VideoDownloaderAppUITests */, ); };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F10000000000000000000005 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+		F10000000000000000000007 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+		F1000000000000000000000A /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F10000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+		F10000000000000000000006 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+		F10000000000000000000009 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		E1000000000000000000000E /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = E10000000000000000000002 /* VideoDownloaderApp */; targetProxy = D10000000000000000000001; };
+		E10000000000000000000023 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = E10000000000000000000002 /* VideoDownloaderApp */; targetProxy = D10000000000000000000002; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		E10000000000000000000014 /* Project Debug */ = {isa = XCBuildConfiguration; name = Debug; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_OPTIMIZATION_LEVEL = 0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; };
+		E10000000000000000000015 /* Project Release */ = {isa = XCBuildConfiguration; name = Release; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; VALIDATE_PRODUCT = YES; }; };
+		E10000000000000000000010 /* Debug */ = {isa = XCBuildConfiguration; name = Debug; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = VideoDownloaderApp/Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "Video Downloader"; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; LD_RUNPATH_SEARCH_PATHS = ( "$(inherited)", "@executable_path/Frameworks", ); MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.jideoyelayo.VideoDownloaderApp; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; };
+		E10000000000000000000011 /* Release */ = {isa = XCBuildConfiguration; name = Release; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = VideoDownloaderApp/Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "Video Downloader"; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; LD_RUNPATH_SEARCH_PATHS = ( "$(inherited)", "@executable_path/Frameworks", ); MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.jideoyelayo.VideoDownloaderApp; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; };
+		E10000000000000000000012 /* Tests Debug */ = {isa = XCBuildConfiguration; name = Debug; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.jideoyelayo.VideoDownloaderAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/VideoDownloaderApp.app/VideoDownloaderApp"; }; };
+		E10000000000000000000013 /* Tests Release */ = {isa = XCBuildConfiguration; name = Release; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.jideoyelayo.VideoDownloaderAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/VideoDownloaderApp.app/VideoDownloaderApp"; }; };
+		E10000000000000000000024 /* UITests Debug */ = {isa = XCBuildConfiguration; name = Debug; buildSettings = { CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.jideoyelayo.VideoDownloaderAppUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = VideoDownloaderApp; }; };
+		E10000000000000000000025 /* UITests Release */ = {isa = XCBuildConfiguration; name = Release; buildSettings = { CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = com.jideoyelayo.VideoDownloaderAppUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = VideoDownloaderApp; }; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		E1000000000000000000000B /* Build configuration list for PBXNativeTarget "VideoDownloaderApp" */ = {isa = XCConfigurationList; buildConfigurations = ( E10000000000000000000010 /* Debug */, E10000000000000000000011 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		E1000000000000000000000D /* Build configuration list for PBXNativeTarget "VideoDownloaderAppTests" */ = {isa = XCConfigurationList; buildConfigurations = ( E10000000000000000000012 /* Tests Debug */, E10000000000000000000013 /* Tests Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		E10000000000000000000022 /* Build configuration list for PBXNativeTarget "VideoDownloaderAppUITests" */ = {isa = XCConfigurationList; buildConfigurations = ( E10000000000000000000024 /* UITests Debug */, E10000000000000000000025 /* UITests Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		E1000000000000000000000F /* Build configuration list for PBXProject "VideoDownloaderApp" */ = {isa = XCConfigurationList; buildConfigurations = ( E10000000000000000000014 /* Project Debug */, E10000000000000000000015 /* Project Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = E10000000000000000000001 /* Project object */;
+}

@@ -1,37 +1,61 @@
 # VideoDownloaderApp
 
-An iOS 17+ SwiftUI app with a `WKWebView` browser, media discovery, background direct-file downloads, HLS offline downloads, and an offline AVKit library.
+A personal iOS 17+ SwiftUI app: an in-app browser that finds the videos a page plays, downloads them in the background, and keeps them in an offline library.
 
-## Open and run
+- **Browse** — `WKWebView` browser with bookmarks, back/forward, and a **Found videos** sheet. Each candidate is checked before it can be downloaded and shows *Ready* (with size/duration and HLS quality choices), *Expired*, *Protected (DRM)*, *Live*, or *Unavailable*.
+- **Downloads** — progress, cancel, retry (resumes where possible), and clear error messages. Ordinary files use a background `URLSession`; HLS streams use `AVAssetDownloadURLSession`. Downloads continue while the app is suspended and are recovered after relaunch.
+- **Library** — offline playback with AVKit, rename, delete, and export (share sheet / Save to Files) for ordinary video files. HLS downloads play inside the app only.
 
-Open `VideoDownloaderApp.xcodeproj` in Xcode, select an iOS 17+ simulator or a connected iPhone, set a signing team, and run the `VideoDownloaderApp` scheme. The first browser tab starts at the supplied My***REMOVED*** URL; both supplied URLs are available from the Starter sites bookmark menu.
+It supports media a page exposes over HTTP(S): direct files and unprotected, finite HLS. It does not bypass DRM, anti-bot challenges, or `blob:`-only players.
 
-The app only offers HTTP(S) media URLs exposed to the page. It deliberately ignores `blob:` and `data:` URLs and does not bypass DRM, authentication controls, paywalls, or anti-bot challenges. A site can therefore load successfully while providing no downloadable candidate. Downloads intentionally do not copy browser authentication cookies into background requests; session-protected media may require a site-provided public URL.
+## Install on your iPhone
+
+1. Open `VideoDownloaderApp.xcodeproj` in Xcode 26 or later.
+2. Select the **VideoDownloaderApp** target → *Signing & Capabilities* → choose your **Team** (a free personal Apple ID works). If Xcode says the bundle ID is taken, change `com.jideoyelayo.VideoDownloaderApp` to something unique.
+3. Connect and unlock the iPhone, trust the Mac, and enable **Developer Mode** (*Settings → Privacy & Security*) if prompted.
+4. Choose the iPhone as the run destination and press **Run**.
+5. The first launch may be blocked until you trust the developer: *Settings → General → VPN & Device Management → your Apple ID → Trust*.
+
+With a free account the app must be re-installed from Xcode every 7 days.
+
+## Using it
+
+1. In **Browse**, open a page (the bookmark menu has the two starter sites) and start the video playing — many players only load their stream after Play.
+2. Tap **Found videos**. Wait for *Ready*, then tap **Download** (for HLS choose a quality or *Best quality*). If nothing appears, tap **Refresh** in the sheet.
+3. Watch progress in **Downloads**; play, rename, export, or delete in **Library**.
+
+If a link shows *Expired*, replay the video in Browse (sites issue short-lived stream URLs) and download again.
 
 ## Architecture
 
-- `MediaDiscovery` receives candidates from a document-start WebKit script injected into the main page and child frames. It observes media elements, dynamically inserted nodes, playback events, source mutations, navigation changes, and resource timing entries.
-- `DownloadManager` persists queue metadata under Application Support, uses background `URLSession` for ordinary files, and `AVAssetDownloadURLSession` for HLS.
-- The Library tab opens completed files with AVKit. Completed ordinary files can be exported with the system share sheet; HLS packages stay inside the app for playback.
+| Area | Files |
+| --- | --- |
+| Discovery | `Services/MediaDiscovery.swift` (document-start script in every frame: media elements, DOM mutations, resource timing, `fetch`/XHR response types, SPA navigation), `Services/MediaDiscoveryCore.swift` (payload rules, segment filtering, stale-message detection) |
+| Validation | `Services/CandidateValidator.swift` (4 KB range probe for files; manifest, variant, DRM/live, and first-segment checks for HLS), `Services/HLSManifest.swift` |
+| Request context | `Services/BrowserSession.swift`, `Services/RequestContext.swift` — only cookies eligible under RFC 6265 domain/path/secure rules, the browser User-Agent, and an origin-only Referer for cross-origin media. Cookies go through the URL loading system's cookie store; host-only cookies are not eligible for another host, while domain cookies can be eligible for matching subdomains. Strict cross-host behavior for background-session redirects remains unverified. |
+| Downloads | `Services/DownloadManager.swift`, `Services/DownloadError.swift`, `Services/DownloadResponseValidation.swift`, `Services/Filenames.swift` |
+| Storage | SwiftData models in `Models/DownloadItem.swift` (`DownloadItem`, `Bookmark`); files in Application Support; HLS packages stay where AVFoundation puts them. Old `downloads.json` queues are imported once. |
+| UI | `Views/`, `WebView/BrowserView.swift` |
 
-## Current verification
+Debug builds add a **Diagnostics** screen (bookmark menu) listing every media request each frame made, with a *Share log* button, for checking new sites. The same log is written to `Documents/diagnostics.log` in the app container.
 
-The app and XCTest targets compile successfully against Xcode's `iphonesimulator26.5` SDK with code signing disabled. XCTest execution and UI smoke tests remain pending because no matching simulator runtime/destination is installed. The two live URLs have not passed the required download/offline acceptance test. My***REMOVED*** previously stopped at Cloudflare verification during inspection; ***REMOVED*** loaded an embedded `***REMOVED***` player, but the stream and download path remain unverified.
+`Info.plist` allows plain-HTTP loads because this is a general browser whose sites and media hosts are chosen by the user.
 
-Navigation clears candidates and filters stale same-host document messages. Cross-origin embedded frames remain eligible because players commonly run on a different host, so a frame that continues emitting after a page transition can require a manual refresh.
-
-Reproduce the SDK builds from the project directory with:
+## Tests
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-  xcodebuild -project VideoDownloaderApp.xcodeproj \
-  -target VideoDownloaderApp -sdk iphonesimulator -configuration Debug \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-  xcodebuild -project VideoDownloaderApp.xcodeproj \
-  -target VideoDownloaderAppTests -sdk iphonesimulator -configuration Debug \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-
-python3 portable_tests.py
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer   # xcode-select points at CommandLineTools
+xcodebuild -project VideoDownloaderApp.xcodeproj -scheme VideoDownloaderApp \
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' test
+python3 portable_tests.py   # Foundation-only checks + the discovery script under Node
 ```
+
+- Unit tests cover discovery rules, cookie scoping, HLS parsing, error mapping, filenames, and persistence.
+- Integration tests run the real download and validation code against `LocalMediaServer`, a localhost HTTP server in `VideoDownloaderAppTests/Support/` with MP4/HLS fixtures and routes for cookies, Referer, redirects, expiry, dropped connections, and slow transfers.
+- UI tests (`VideoDownloaderAppUITests/`) drive browse → detect → download → library → play → export → rename → delete against the same server.
+
+Don't pass `CODE_SIGNING_ALLOWED=NO` when running tests: background `URLSession` downloads fail with `NSURLErrorUnknown` in an unsigned app. The simulator's default "Sign to Run Locally" is enough.
+
+The simulator can't download HLS for offline use (an Apple limitation), so HLS downloads, background transfers with the app suspended, and airplane-mode playback have to be checked on a physical iPhone. See `TEST_REPORT.md`.
+
+Launch arguments used by tests and diagnostics: `-StartURL <url>`, `-NoInitialLoad`, `-UITestInMemory` (in-memory store), and `-DiagnosticsAutoplay` (Debug only; muted autoplay in every frame).
