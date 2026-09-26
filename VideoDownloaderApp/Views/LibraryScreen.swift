@@ -193,24 +193,17 @@ private struct VideoThumbnailView: View {
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: item.localFileName) {
+            image = nil
             let cached = DownloadStorage.thumbnailURL(for: item.id)
             if let data = try? Data(contentsOf: cached), let cachedImage = UIImage(data: data) {
                 image = cachedImage
                 return
             }
             guard let mediaURL = item.localURL else { return }
-            let data = await Task.detached(priority: .utility) { () -> Data? in
-                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: mediaURL))
-                generator.appliesPreferredTrackTransform = true
-                generator.maximumSize = CGSize(width: 240, height: 160)
-                let time = CMTime(seconds: 1, preferredTimescale: 600)
-                guard let frame = (try? generator.copyCGImage(at: time, actualTime: nil)) ??
-                    (try? generator.copyCGImage(at: .zero, actualTime: nil)) else { return nil }
-                let data = UIImage(cgImage: frame).jpegData(compressionQuality: 0.8)
-                try? data?.write(to: cached, options: .atomic)
-                return data
-            }.value
-            if let data { image = UIImage(data: data) }
+            guard let data = await VideoThumbnailService.imageData(for: mediaURL, kind: item.kind),
+                  !Task.isCancelled else { return }
+            try? data.write(to: cached, options: .atomic)
+            image = UIImage(data: data)
         }
     }
 }

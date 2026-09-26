@@ -1,4 +1,5 @@
 import AVFoundation
+import UIKit
 import XCTest
 @testable import VideoDownloaderApp
 
@@ -53,6 +54,21 @@ final class LocalMediaServerTests: XCTestCase {
         XCTAssertTrue(server.fixtures.hlsMediaPlaylist.contains("#EXT-X-ENDLIST"))
         XCTAssertFalse(server.fixtures.hlsSegments.isEmpty)
         XCTAssertEqual(server.url("/video.mp4").absoluteString, "http://127.0.0.1:\(server.port!)/video.mp4")
+    }
+
+    @MainActor
+    func testThumbnailsForSavedFileAndOrdinaryHLS() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("mp4")
+        try mp4.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let directData = await VideoThumbnailService.imageData(for: file, kind: .video)
+        let direct = try XCTUnwrap(directData)
+        XCTAssertNotNil(UIImage(data: direct))
+
+        // This playlist has regular media segments and no I-frame-only rendition.
+        let hlsData = await VideoThumbnailService.imageData(for: server.url("/hls/master.m3u8"), kind: .hls)
+        let hls = try XCTUnwrap(hlsData)
+        XCTAssertNotNil(UIImage(data: hls))
     }
 
     func testHLSCaptionTrackIsExposedForOfflineSelection() async throws {
