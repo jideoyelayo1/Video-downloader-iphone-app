@@ -224,6 +224,7 @@ struct PlayerScreen: View {
     @State private var playbackError: String?
     @State private var playbackEnded = false
     @State private var showingFullScreen = false
+    @State private var isInPictureInPicture = false
 
     var body: some View {
         NavigationStack {
@@ -232,7 +233,13 @@ struct PlayerScreen: View {
                     ContentUnavailableView("Unable to play video", systemImage: "exclamationmark.triangle",
                                            description: Text(playbackError))
                 } else if let url = item.localURL, FileManager.default.fileExists(atPath: url.path) {
-                    VideoPlayer(player: player).ignoresSafeArea(edges: .bottom).accessibilityIdentifier("player.video")
+                    if let player {
+                        NativePlayer(player: player, isInPictureInPicture: $isInPictureInPicture)
+                            .ignoresSafeArea(edges: .bottom)
+                            .accessibilityIdentifier("player.video")
+                    } else {
+                        ProgressView("Loading video")
+                    }
                 } else {
                     ContentUnavailableView("File unavailable", systemImage: "exclamationmark.triangle")
                 }
@@ -256,7 +263,8 @@ struct PlayerScreen: View {
             }
             .fullScreenCover(isPresented: $showingFullScreen) {
                 if let player {
-                    FullScreenPlayer(player: player) { showingFullScreen = false }
+                    NativePlayer(player: player, isInPictureInPicture: $isInPictureInPicture,
+                                 dismiss: { showingFullScreen = false })
                         .ignoresSafeArea()
                 }
             }
@@ -298,7 +306,7 @@ struct PlayerScreen: View {
                 }
             }
             .onDisappear {
-                guard !showingFullScreen else { return }
+                guard !showingFullScreen && !isInPictureInPicture else { return }
                 savePosition()
                 player?.pause()
                 player = nil
@@ -314,31 +322,69 @@ struct PlayerScreen: View {
     }
 }
 
-private struct FullScreenPlayer: UIViewControllerRepresentable {
+private struct NativePlayer: UIViewControllerRepresentable {
     let player: AVPlayer
-    let dismiss: () -> Void
+    @Binding var isInPictureInPicture: Bool
+    var dismiss: (() -> Void)? = nil
+
+    func makeCoordinator() -> Coordinator { Coordinator(isInPictureInPicture: $isInPictureInPicture) }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.player = player
+        controller.delegate = context.coordinator
         controller.showsPlaybackControls = true
+        controller.allowsPictureInPicturePlayback = true
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.view.backgroundColor = .black
-        let close = UIButton(type: .system)
-        close.setTitle("Done", for: .normal)
-        close.accessibilityIdentifier = "player.fullScreenDone"
-        close.addAction(UIAction { _ in dismiss() }, for: .touchUpInside)
-        close.translatesAutoresizingMaskIntoConstraints = false
-        controller.contentOverlayView?.addSubview(close)
-        if let overlay = controller.contentOverlayView {
-            NSLayoutConstraint.activate([
-                close.topAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.topAnchor, constant: 8),
-                close.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -16)
-            ])
+        if let dismiss {
+            let close = UIButton(type: .system)
+            close.setTitle("Done", for: .normal)
+            close.accessibilityIdentifier = "player.fullScreenDone"
+            close.addAction(UIAction { _ in dismiss() }, for: .touchUpInside)
+            close.translatesAutoresizingMaskIntoConstraints = false
+            controller.contentOverlayView?.addSubview(close)
+            if let overlay = controller.contentOverlayView {
+                NSLayoutConstraint.activate([
+                    close.topAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.topAnchor, constant: 8),
+                    close.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -16)
+                ])
+            }
         }
         return controller
     }
 
     func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
         if controller.player !== player { controller.player = player }
+    }
+
+    final class Coordinator: NSObject, AVPlayerViewControllerDelegate {
+        private var isInPictureInPicture: Binding<Bool>
+
+        init(isInPictureInPicture: Binding<Bool>) {
+            self.isInPictureInPicture = isInPictureInPicture
+        }
+
+        func playerViewControllerShouldAutomaticallyDismissAtPictureInPictureStart(_ playerViewController: AVPlayerViewController) -> Bool {
+            false
+        }
+
+        func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+            isInPictureInPicture.wrappedValue = true
+        }
+
+        func playerViewController(_ playerViewController: AVPlayerViewController,
+                                  failedToStartPictureInPictureWithError error: Error) {
+            isInPictureInPicture.wrappedValue = false
+        }
+
+        func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
+            isInPictureInPicture.wrappedValue = false
+        }
+
+        func playerViewController(_ playerViewController: AVPlayerViewController,
+                                  restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+            completionHandler(true)
+        }
     }
 }
