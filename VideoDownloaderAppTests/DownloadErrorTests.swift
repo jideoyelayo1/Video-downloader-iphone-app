@@ -34,6 +34,9 @@ final class DownloadErrorTests: XCTestCase {
         XCTAssertEqual(DownloadError.from(CancellationError()), .cancelled)
         let error = NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Boom"])
         XCTAssertEqual(DownloadError.from(error), .other("Boom"))
+        let hls500 = NSError(domain: "CoreMediaErrorDomain", code: -16847,
+                             userInfo: [NSLocalizedDescriptionKey: "The operation couldn’t be completed. (HTTP 500: Internal Server Error)"])
+        XCTAssertTrue(DownloadError.from(hls500).message.contains("Replay the episode"))
     }
 
     func testStorageCheckUsesSafetyMargin() {
@@ -49,7 +52,7 @@ final class DownloadErrorTests: XCTestCase {
     }
 
     func testMessagesAreShortAndActionable() {
-        let all: [DownloadError] = [.expiredLink, .notFound, .httpStatus(503), .notVideo, .hlsPlaylistAsFile, .protectedStream, .liveStream,
+        let all: [DownloadError] = [.expiredLink, .notFound, .httpStatus(503), .notVideo, .streamSegment, .hlsPlaylistAsFile, .protectedStream, .liveStream,
                                     .insufficientStorage(required: nil, available: nil), .insufficientStorage(required: 2_000_000_000, available: 1_000_000_000),
                                     .offline, .networkLost, .timedOut, .cancelled]
         for error in all {

@@ -6,6 +6,8 @@ struct ProbeResult: Equatable {
     /// Master-playlist variants, highest bandwidth first; empty for files and single-rendition streams.
     var variants: [HLSVariant] = []
     var duration: Double?
+    /// The origin rejects requests unless they include the player frame's Referer.
+    var requiresReferer = false
 }
 
 enum CandidateStatus: Equatable {
@@ -18,7 +20,7 @@ enum CandidateStatus: Equatable {
 
 /// Checks a discovered URL before it is offered for download.
 struct CandidateValidator {
-    static let refererRequiredMessage = "This stream only plays with the player's Referer header, which iOS offline HLS downloads can't send."
+    static let refererRequiredMessage = "This stream requires the player's Referer header. Download it through the in-app stream relay and keep the app open."
 
     let session: URLSession
 
@@ -33,6 +35,7 @@ struct CandidateValidator {
     }
 
     func validate(_ candidate: MediaCandidate, context: RequestContext?) async -> CandidateStatus {
+        if MediaDiscovery.segmentExtensions.contains(candidate.url.pathExtension.lowercased()) { return .unavailable(.streamSegment) }
         do {
             if candidate.kind == .hls { return try await validateHLS(candidate.url, context: context) }
             return try await validateFile(candidate, context: context)
@@ -83,29 +86,40 @@ struct CandidateValidator {
 
     // MARK: HLS
 
-    /// AVFoundation sends cookies and User-Agent but no Referer, so streams are probed the same way.
+    /// Probe without Referer first to determine whether AVFoundation can fetch the
+    /// stream directly. If Referer is required, validate it again for the relay.
     private func validateHLS(_ url: URL, context: RequestContext?) async throws -> CandidateStatus {
         var avContext = context
         avContext?.referer = nil
-        let (text, finalURL) = try await fetchPlaylist(url, context: avContext, fullContext: context)
+        do {
+            return try await validateHLS(url, requestContext: avContext, fullContext: context, requiresReferer: false)
+        } catch let error as DownloadError {
+            guard case .other(let message) = error, message == Self.refererRequiredMessage,
+                  context?.referer != nil else { throw error }
+            return try await validateHLS(url, requestContext: context, fullContext: nil, requiresReferer: true)
+        }
+    }
+
+    private func validateHLS(_ url: URL, requestContext: RequestContext?, fullContext: RequestContext?, requiresReferer: Bool) async throws -> CandidateStatus {
+        let (text, finalURL) = try await fetchPlaylist(url, context: requestContext, fullContext: fullContext)
         guard let manifest = HLSManifest.parse(text, baseURL: finalURL) else { return .unavailable(.notVideo) }
         switch manifest {
         case .master(let variants):
             guard let best = variants.first else { return .unavailable(.notVideo) }
-            let (mediaText, mediaURL) = try await fetchPlaylist(best.url, context: avContext, fullContext: context)
+            let (mediaText, mediaURL) = try await fetchPlaylist(best.url, context: requestContext, fullContext: fullContext)
             guard case .media(let isFinite, let drm, _, let duration)? = HLSManifest.parse(mediaText, baseURL: mediaURL) else {
                 return .unavailable(.notVideo)
             }
             if drm { return .unavailable(.protectedStream) }
             if !isFinite { return .unavailable(.liveStream) }
-            try await checkFirstSegment(of: mediaText, baseURL: mediaURL, context: avContext, fullContext: context)
+            try await checkFirstSegment(of: mediaText, baseURL: mediaURL, context: requestContext, fullContext: fullContext)
             let bytes = best.bandwidth.map { Int64(Double($0) / 8 * duration) }
-            return .ready(ProbeResult(kind: .hls, expectedBytes: bytes, variants: variants, duration: duration))
+            return .ready(ProbeResult(kind: .hls, expectedBytes: bytes, variants: variants, duration: duration, requiresReferer: requiresReferer))
         case .media(let isFinite, let drm, _, let duration):
             if drm { return .unavailable(.protectedStream) }
             if !isFinite { return .unavailable(.liveStream) }
-            try await checkFirstSegment(of: text, baseURL: finalURL, context: avContext, fullContext: context)
-            return .ready(ProbeResult(kind: .hls, duration: duration))
+            try await checkFirstSegment(of: text, baseURL: finalURL, context: requestContext, fullContext: fullContext)
+            return .ready(ProbeResult(kind: .hls, duration: duration, requiresReferer: requiresReferer))
         }
     }
 
@@ -141,7 +155,7 @@ struct CandidateValidator {
         }
     }
 
-    /// On 401/403, retries with the Referer; if that succeeds the stream is blocked by a platform limitation, not an expired link.
+    /// On 401/403, retry with Referer to distinguish a relay-eligible stream from an expired link.
     private func throwRefererBlockerIfNeeded(_ url: URL, status: Int, fullContext: RequestContext?) async throws {
         guard [401, 403].contains(status), fullContext?.referer != nil else { return }
         let (_, response) = try await fetchPrefix(url, context: fullContext)

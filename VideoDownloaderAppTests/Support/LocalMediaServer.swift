@@ -190,7 +190,23 @@ final class LocalMediaServer {
         let origin = baseURL?.absoluteString ?? ""
         switch request.path {
         case "/video.mp4", "/noext/stream": return mp4
+        case "/invalid/video.mp4": return .data(Data("not an MP4 movie".utf8), "video/mp4")
         case "/hls/master.m3u8": return .text(masterPlaylist, Self.hlsType)
+        case "/hls/referer-master.m3u8":
+            return request.header("referer")?.hasPrefix(origin + "page") == true
+                ? .text(refererMasterPlaylist, Self.hlsType) : .text("Forbidden", "text/plain", status: 403)
+        case "/hls/referer-media.m3u8":
+            return request.header("referer")?.hasPrefix(origin + "page") == true
+                ? .text(fixtures.hlsMediaPlaylist.replacingOccurrences(of: "fixture_seg", with: "referer-seg"), Self.hlsType)
+                : .text("Forbidden", "text/plain", status: 403)
+        case "/hls/captions-master.m3u8": return .text(captionMasterPlaylist, Self.hlsType)
+        case "/hls/separate-audio-master.m3u8": return .text(separateAudioMasterPlaylist, Self.hlsType)
+        case "/hls/video-only.m3u8": return .text("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXTINF:5,\nvideo-only.ts\n#EXT-X-ENDLIST\n", Self.hlsType)
+        case "/hls/audio-only.m3u8": return .text("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXTINF:5,\naudio-only.ts\n#EXT-X-ENDLIST\n", Self.hlsType)
+        case "/hls/video-only.ts": return .data(fixtures.hlsVideoOnly, "video/mp2t")
+        case "/hls/audio-only.ts": return .data(fixtures.hlsAudioOnly, "video/mp2t")
+        case "/hls/subtitles.m3u8": return .text("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nsubtitle.vtt\n#EXT-X-ENDLIST\n", Self.hlsType)
+        case "/hls/subtitle.vtt": return .text("WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nTest caption\n", "text/vtt")
         case "/hls/media.m3u8": return .text(fixtures.hlsMediaPlaylist, Self.hlsType)
         case "/hls/live.m3u8": return .text(livePlaylist, Self.hlsType)
         case "/hls/drm.m3u8": return .text(drmPlaylist, Self.hlsType)
@@ -211,6 +227,11 @@ final class LocalMediaServer {
         case "/drop/video.mp4": return .data(fixtures.mp4, "video/mp4", delivery: .drop)
         case "/slow/video.mp4": return .data(fixtures.mp4, "video/mp4", delivery: .slow)
         default:
+            if request.path.hasPrefix("/hls/referer-seg"),
+               let segment = fixtures.hlsSegments[String(request.path.dropFirst(5)).replacingOccurrences(of: "referer-seg", with: "fixture_seg")] {
+                return request.header("referer")?.hasPrefix(origin + "page") == true
+                    ? .data(segment, "video/mp2t") : .text("Forbidden", "text/plain", status: 403)
+            }
             if request.path.hasPrefix("/page/"), let html = Self.pages[String(request.path.dropFirst(6))] {
                 return .text(html, "text/html; charset=utf-8")
             }
@@ -245,6 +266,39 @@ final class LocalMediaServer {
         media.m3u8
         #EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360,CODECS="avc1.42c01e,mp4a.40.2"
         media.m3u8
+
+        """
+    }
+
+    private var captionMasterPlaylist: String {
+        """
+        #EXTM3U
+        #EXT-X-VERSION:3
+        #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="subtitles.m3u8"
+        #EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=640x360,CODECS="avc1.42c01e,mp4a.40.2",SUBTITLES="subs"
+        media.m3u8
+
+        """
+    }
+
+    private var separateAudioMasterPlaylist: String {
+        """
+        #EXTM3U
+        #EXT-X-VERSION:3
+        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="audio-only.m3u8"
+        #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="subtitles.m3u8"
+        #EXT-X-STREAM-INF:BANDWIDTH=600000,RESOLUTION=320x180,CODECS="avc1.42c01e,mp4a.40.2",AUDIO="audio",SUBTITLES="subs"
+        video-only.m3u8
+
+        """
+    }
+
+    private var refererMasterPlaylist: String {
+        """
+        #EXTM3U
+        #EXT-X-VERSION:3
+        #EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=320x180,CODECS="avc1.42c01e,mp4a.40.2"
+        referer-media.m3u8
 
         """
     }
@@ -286,6 +340,8 @@ final class LocalMediaServer {
             """),
         "iframe.html": page("Iframe Video Page", #"<iframe id="frame" src="/page/basic.html" width="360" height="260"></iframe>"#),
         "hls.html": page("HLS Video Page", #"<video id="video" src="/hls/master.m3u8" controls playsinline width="320" height="180"></video>"#),
+        "referer-hls.html": page("Referer HLS Page", #"<video id="video" src="/hls/referer-master.m3u8" controls playsinline width="320" height="180"></video>"#),
+        "fragment.html": page("Fragment Page", #"<video id="video" src="/hls/seg-57-s1080p-v1-a1.m4s" controls playsinline width="320" height="180"></video>"#),
         "links.html": page("Test Links", """
             <ul>
             <li><a id="basic" href="/page/basic.html">Basic video</a></li>
@@ -376,6 +432,8 @@ final class LocalMediaServer {
 /// Fixture bytes served by `LocalMediaServer`.
 struct FixtureSet {
     var mp4: Data
+    var hlsVideoOnly: Data
+    var hlsAudioOnly: Data
     /// Media playlist text; segment URIs are bare file names resolved against `/hls/`.
     var hlsMediaPlaylist: String
     var hlsSegments: [String: Data]
@@ -387,7 +445,10 @@ struct FixtureSet {
         for line in playlist.components(separatedBy: .newlines) where !line.isEmpty && !line.hasPrefix("#") {
             segments[line] = try load(line, in: bundle)
         }
-        return FixtureSet(mp4: try load("fixture.mp4", in: bundle), hlsMediaPlaylist: playlist, hlsSegments: segments)
+        return FixtureSet(mp4: try load("fixture.mp4", in: bundle),
+                          hlsVideoOnly: try load("fixture_video_only.ts.bin", in: bundle),
+                          hlsAudioOnly: try load("fixture_audio_only.ts.bin", in: bundle),
+                          hlsMediaPlaylist: playlist, hlsSegments: segments)
     }
 
     /// Finds a resource by file name whether the bundle flattened `Fixtures/` or kept it as a folder.

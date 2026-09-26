@@ -31,10 +31,12 @@ final class MediaDiscoveryTests: XCTestCase {
 final class MediaDiscoveryRulesTests: XCTestCase {
     let page = URL(string: "https://example.com/watch?ep=1")!
 
-    func testSegmentsAreOnlyAcceptedFromMediaElements() {
+    func testSegmentsAreNeverOfferedAsCompleteVideos() {
         XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/seg-001.ts", "kind": "video"], sourcePageURL: page))
         XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/seg-001.m4s"], sourcePageURL: page))
-        XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/movie.ts", "mediaElement": true], sourcePageURL: page))
+        XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://***REMOVED***.top/vd/episode/seg-57-s1080p-v1-a1.m4s", "mediaElement": true], sourcePageURL: page))
+        XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/movie.ts", "mediaElement": true], sourcePageURL: page))
+        XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://***REMOVED***.top/vd/episode/master.m3u8"], sourcePageURL: page))
         XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/movie.mp4"], sourcePageURL: page))
     }
 
@@ -77,6 +79,11 @@ final class BrowserViewModelTests: XCTestCase {
 
     func testEpisodeChangeClearsCandidatesButTrivialHistoryUpdatesDoNot() {
         let model = makeModel()
+        model.pageDidChange(to: URL(string: "https://site.example/watch?ep=1"), force: true)
+        model.discovery.onFragment?()
+        XCTAssertTrue(model.observedFragments)
+        model.pageDidChange(to: URL(string: "https://site.example/watch?ep=2"), force: true)
+        XCTAssertFalse(model.observedFragments)
         model.pageDidChange(to: URL(string: "https://site.example/watch?ep=1"), force: true)
         model.add(MediaCandidate(url: URL(string: "http://127.0.0.1:9/a.mp4")!, sourcePageURL: URL(string: "https://site.example/watch?ep=1")!))
         XCTAssertEqual(model.candidates.count, 1)

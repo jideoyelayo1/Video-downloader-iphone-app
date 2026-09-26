@@ -12,7 +12,7 @@ struct ContentView: View {
             BrowserScreen(model: browser, showDownloads: { selection = .downloads })
                 .tabItem { Label("Browse", systemImage: "safari") }
                 .tag(Tab.browse)
-            DownloadsScreen()
+            DownloadsScreen(openSource: { url in browser.navigate(to: url.absoluteString); selection = .browse })
                 .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
                 .tag(Tab.downloads)
             LibraryScreen()

@@ -4,6 +4,7 @@ import WebKit
 final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
     var onCandidate: ((MediaCandidate) -> Void)?
     var onNavigation: ((URL?) -> Void)?
+    var onFragment: (() -> Void)?
     var diagnostics: DiagnosticsLog?
     weak var webView: WKWebView?
 
@@ -15,6 +16,21 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       if (!handler) return;
       const post = payload => { try { handler.postMessage(payload); } catch (_) {} };
       let seen = new Set();
+      let reportedFragment = false;
+      let interactionTime = null;
+      // Network resources include ad clips and tracking previews. A playlist may be
+      // prepared before playback, but ordinary file requests must follow a real tap.
+      const relevantResource = (url, startedAt) => {
+        let path;
+        try { path = new URL(url, document.baseURI).pathname.toLowerCase(); } catch (_) { return false; }
+        if (path.endsWith('.m3u8')) return true;
+        return interactionTime !== null && startedAt >= interactionTime - 500;
+      };
+      const activate = event => {
+        if (event && event.isTrusted === false) return;
+        if (interactionTime === null) interactionTime = performance.now();
+        scanResources();
+      };
       const classify = (absolute, contentType) => {
         const type = (contentType || '').toLowerCase();
         if (type.includes('mpegurl')) return 'hls';
@@ -28,6 +44,16 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         if (!url || typeof url !== 'string' || url.startsWith('blob:') || url.startsWith('data:')) return;
         let absolute;
         try { absolute = new URL(url, document.baseURI).href; } catch (_) { return; }
+        const path = new URL(absolute).pathname.toLowerCase();
+        if (path.endsWith('.m4s') || path.endsWith('.ts')) {
+          if (!reportedFragment) { reportedFragment = true; post({ event: 'fragment', url: absolute }); }
+          return;
+        }
+        const type = (contentType || '').toLowerCase();
+        if (type.startsWith('video/iso.segment') || type.startsWith('video/mp2t')) {
+          if (!reportedFragment) { reportedFragment = true; post({ event: 'fragment', url: absolute }); }
+          return;
+        }
         const kind = classify(absolute, contentType);
         if (!mediaElement && kind === 'unknown') return;
         const key = absolute + '|' + mediaElement + '|' + (contentType || '');
@@ -40,7 +66,8 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         if (!url) return;
         if (window.__vdaDiagnostics) post({ event: 'response', url, contentType: contentType || null, via });
         const type = (contentType || '').toLowerCase();
-        if (type.includes('mpegurl') || type.startsWith('video/')) send(url, null, false, contentType, via);
+        if (type.includes('mpegurl') ||
+            (interactionTime !== null && type.startsWith('video/'))) send(url, null, false, contentType, via);
       };
       const inspect = node => {
         if (!node) return;
@@ -57,7 +84,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
             if (window.__vdaDiagnostics && ['xmlhttprequest', 'fetch', 'video', 'audio', 'other'].includes(e.initiatorType)) {
               post({ event: 'resource', url: e.name, via: e.initiatorType });
             }
-            send(e.name, null, false, null, 'resource');
+            if (relevantResource(e.name, e.startTime)) send(e.name, null, false, null, 'resource');
           });
         } catch (_) {}
       };
@@ -72,11 +99,14 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       document.querySelectorAll('video,audio,source').forEach(inspect);
       document.addEventListener('loadedmetadata', event => inspect(event.target), true);
       document.addEventListener('play', event => inspect(event.target), true);
+      document.addEventListener('pointerdown', activate, true);
+      document.addEventListener('touchstart', activate, true);
+      document.addEventListener('keydown', activate, true);
       new MutationObserver(mutations => mutations.forEach(m => {
         if (m.type === 'attributes') inspect(m.target);
         m.addedNodes.forEach(inspect);
       })).observe(document.documentElement || document, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
-      const notifyNavigation = () => { seen = new Set(); post({ event: 'navigation', url: location.href }); };
+      const notifyNavigation = () => { seen = new Set(); reportedFragment = false; post({ event: 'navigation', url: location.href }); };
       window.addEventListener('popstate', notifyNavigation);
       window.addEventListener('hashchange', notifyNavigation);
       const pushState = history.pushState;
@@ -105,7 +135,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
           if (window.__vdaDiagnostics && ['xmlhttprequest', 'fetch', 'video', 'audio', 'other'].includes(e.initiatorType)) {
             post({ event: 'resource', url: e.name, via: e.initiatorType });
           }
-          send(e.name, null, false, null, 'resource');
+          if (relevantResource(e.name, e.startTime)) send(e.name, null, false, null, 'resource');
         })).observe({ type: 'resource', buffered: true });
       } catch (_) {}
     })();
@@ -152,6 +182,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
             diagnostics?.record(event: event, url: rawURL, frameURL: frameURL, isMainFrame: isMainFrame,
                                 contentType: dictionary["contentType"] as? String, note: dictionary["via"] as? String)
             if event == "navigation", isMainFrame { onNavigation?(URL(string: rawURL)) }
+            if event == "fragment" { onFragment?() }
             return
         }
 

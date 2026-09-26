@@ -5,7 +5,8 @@ import XCTest
 @MainActor
 final class PersistenceTests: XCTestCase {
     private func makeContainer() throws -> ModelContainer {
-        try ModelContainer(for: DownloadItem.self, Bookmark.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        try ModelContainer(for: DownloadItem.self, Bookmark.self, DownloadFolder.self,
+                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     }
 
     func testDownloadItemRoundTrip() throws {
@@ -13,7 +14,8 @@ final class PersistenceTests: XCTestCase {
         let context = container.mainContext
         let item = DownloadItem(title: "Episode 1", remoteURL: URL(string: "https://cdn.example/a.m3u8")!,
                                 sourcePageURL: URL(string: "https://site.example/watch")!,
-                                refererURL: URL(string: "https://player.example/")!, kind: .hls, preferredBitrate: 800_000)
+                                refererURL: URL(string: "https://player.example/")!, kind: .hls,
+                                preferredBitrate: 800_000, requiresReferer: true)
         context.insert(item)
         item.status = .completed
         item.localFileName = "@managed/Library/com.apple.UserManagedAssets.X/Episode_1.movpkg"
@@ -24,6 +26,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(fetched.kind, .hls)
         XCTAssertEqual(fetched.status, .completed)
         XCTAssertEqual(fetched.preferredBitrate, 800_000)
+        XCTAssertTrue(fetched.requiresReferer)
         XCTAssertEqual(fetched.refererURL?.absoluteString, "https://player.example/")
         XCTAssertEqual(fetched.localURL, DownloadStorage.containerRoot.appendingPathComponent("Library/com.apple.UserManagedAssets.X/Episode_1.movpkg"))
     }
@@ -33,6 +36,31 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(DownloadStorage.managedPath(for: inside), "@managed/Library/pkg.movpkg")
         XCTAssertEqual(DownloadStorage.storedURL("@managed/Library/pkg.movpkg"), inside)
         XCTAssertEqual(DownloadStorage.storedURL("video.mp4"), DownloadStorage.libraryDirectory.appendingPathComponent("video.mp4"))
+    }
+
+    func testOldSegmentDownloadIsRecognisedAsAFragment() {
+        let item = DownloadItem(title: "Episode", remoteURL: URL(string: "https://***REMOVED***.top/vd/episode/seg-57-s1080p-v1-a1.m4s")!,
+                                sourcePageURL: URL(string: "https://example.com/watch")!, kind: .video)
+        XCTAssertTrue(item.isStreamFragment)
+    }
+
+    func testFolderAndPlaybackPositionPersist() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let folder = DownloadFolder(title: "Anime")
+        let item = DownloadItem(title: "Episode", remoteURL: URL(string: "https://cdn.example/a.mp4")!,
+                                sourcePageURL: URL(string: "https://site.example/watch")!, kind: .video)
+        context.insert(folder)
+        context.insert(item)
+        item.folderID = folder.id
+        item.playbackPosition = 123.5
+        try context.save()
+
+        let reopened = ModelContext(container)
+        let storedItem = try XCTUnwrap(reopened.fetch(FetchDescriptor<DownloadItem>()).first)
+        let storedFolder = try XCTUnwrap(reopened.fetch(FetchDescriptor<DownloadFolder>()).first)
+        XCTAssertEqual(storedItem.folderID, storedFolder.id)
+        XCTAssertEqual(storedItem.playbackPosition, 123.5)
     }
 
     func testLegacyJSONImportMarksInterruptedItemsAndRenamesFile() throws {
@@ -53,6 +81,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(items.map(\.title), ["Old", "Half"])
         XCTAssertEqual(items[0].status, .completed)
         XCTAssertEqual(items[1].status, .failed)
+        XCTAssertFalse(items[0].requiresReferer)
         XCTAssertNotNil(items[1].errorMessage)
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.appendingPathExtension("imported").path))

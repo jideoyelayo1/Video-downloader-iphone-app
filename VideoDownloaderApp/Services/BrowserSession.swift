@@ -13,7 +13,9 @@ enum BrowserSession {
 
     static func requestContext(for mediaURL: URL, referer: URL?) async -> RequestContext {
         let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
-        return RequestContext(cookies: RequestContext.cookies(from: cookies, for: mediaURL), userAgent: userAgent,
+        // HLS child playlists and segments can live on a different host. Keep the
+        // browser's cookies in memory and scope them at each actual request.
+        return RequestContext(cookies: cookies, userAgent: userAgent,
                               referer: referer.map { refererValue(for: $0, requesting: mediaURL) })
     }
 

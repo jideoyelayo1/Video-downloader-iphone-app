@@ -1,5 +1,6 @@
 import AVFoundation
 import XCTest
+@testable import VideoDownloaderApp
 
 final class LocalMediaServerTests: XCTestCase {
     private var server: LocalMediaServer!
@@ -53,6 +54,36 @@ final class LocalMediaServerTests: XCTestCase {
         XCTAssertFalse(server.fixtures.hlsSegments.isEmpty)
         XCTAssertEqual(server.url("/video.mp4").absoluteString, "http://127.0.0.1:\(server.port!)/video.mp4")
     }
+
+    func testHLSCaptionTrackIsExposedForOfflineSelection() async throws {
+        let asset = AVURLAsset(url: server.url("/hls/captions-master.m3u8"))
+        let group = try await asset.loadMediaSelectionGroup(for: .legible)
+        let option = try XCTUnwrap(group?.options.first)
+        XCTAssertEqual(option.locale?.language.languageCode?.identifier, "en")
+        let preferred = try await asset.load(.preferredMediaSelection)
+        let selection = try XCTUnwrap(preferred.mutableCopy() as? AVMutableMediaSelection)
+        selection.select(option, in: try XCTUnwrap(group))
+        XCTAssertEqual(selection.selectedMediaOption(in: try XCTUnwrap(group)), option)
+    }
+
+    func testSeparateAudioIsSelectedAlongsideCaptions() async throws {
+        let asset = AVURLAsset(url: server.url("/hls/separate-audio-master.m3u8"))
+        let loadedAudioGroup = try await asset.loadMediaSelectionGroup(for: .audible)
+        let loadedCaptionGroup = try await asset.loadMediaSelectionGroup(for: .legible)
+        let audioGroup = try XCTUnwrap(loadedAudioGroup)
+        let captionGroup = try XCTUnwrap(loadedCaptionGroup)
+        let selections = await HLSMediaSelections.forDownload(asset: asset)
+        XCTAssertEqual(selections.count, captionGroup.options.count)
+        XCTAssertFalse(selections.isEmpty)
+        for selection in selections {
+            XCTAssertNotNil(selection.selectedMediaOption(in: audioGroup), "Every caption download must retain audio")
+            XCTAssertNotNil(selection.selectedMediaOption(in: captionGroup))
+        }
+        let (audio, response) = try await session.data(from: server.url("/hls/audio-only.ts"))
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(audio, server.fixtures.hlsAudioOnly)
+    }
+
 
     func testServesMP4WithHeaders() async throws {
         let (data, response) = try await fetch("/video.mp4")

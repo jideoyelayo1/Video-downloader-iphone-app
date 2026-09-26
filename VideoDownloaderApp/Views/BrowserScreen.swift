@@ -37,7 +37,8 @@ struct BrowserScreen: View {
                     var candidate = candidate
                     candidate.kind = probe?.kind ?? candidate.kind
                     showingCandidates = false
-                    if downloads.start(candidate, expectedBytes: probe?.expectedBytes, preferredBitrate: variant?.bandwidth) != nil { showDownloads() }
+                    if downloads.start(candidate, expectedBytes: probe?.expectedBytes, preferredBitrate: variant?.bandwidth,
+                                       requiresReferer: probe?.requiresReferer ?? false) != nil { showDownloads() }
                 }
                 .presentationDetents([.medium, .large])
             }
@@ -108,9 +109,9 @@ private struct CandidateSheet: View {
     private var sorted: [MediaCandidate] {
         func rank(_ candidate: MediaCandidate) -> Int {
             switch model.statuses[candidate.id] {
-            case .ready?: return 0
-            case .checking?, nil: return 1
-            case .unavailable?: return 2
+            case .ready(let probe)?: return probe.kind == .hls && !probe.variants.isEmpty ? 0 : 1
+            case .checking?, nil: return 2
+            case .unavailable?: return 3
             }
         }
         return model.candidates.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
@@ -120,11 +121,20 @@ private struct CandidateSheet: View {
         NavigationStack {
             List {
                 if model.candidates.isEmpty {
-                    ContentUnavailableView("No videos found yet", systemImage: "film.stack",
-                                           description: Text("Start playing the video on the page, then tap Refresh."))
+                    if model.observedFragments {
+                        ContentUnavailableView("Stream pieces found", systemImage: "square.stack.3d.up.slash",
+                                               description: Text("The player is loading video fragments, but no complete HLS playlist was found. Try another server on the page, then tap Refresh."))
+                    } else {
+                        ContentUnavailableView("No videos found yet", systemImage: "film.stack",
+                                               description: Text("Complete any site verification, start the video on the page, then tap Refresh. Some protected streams cannot be saved."))
+                    }
                 }
                 ForEach(sorted) { candidate in
-                    CandidateRow(candidate: candidate, status: model.statuses[candidate.id] ?? .checking, download: download)
+                    CandidateRow(candidate: candidate, status: model.statuses[candidate.id] ?? .checking,
+                                 masterAvailable: model.statuses.values.contains(where: {
+                        if case .ready(let probe) = $0 { return probe.kind == .hls && !probe.variants.isEmpty }
+                        return false
+                    }), download: download)
                 }
             }
             .navigationTitle("Found videos")
@@ -142,6 +152,7 @@ private struct CandidateSheet: View {
 private struct CandidateRow: View {
     let candidate: MediaCandidate
     let status: CandidateStatus
+    let masterAvailable: Bool
     let download: (MediaCandidate, ProbeResult?, HLSVariant?) -> Void
 
     var body: some View {
@@ -151,6 +162,10 @@ private struct CandidateRow: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text(candidate.url.absoluteString).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
             statusView
+            if masterAvailable, case .ready(let probe) = status, probe.kind == .hls, probe.variants.isEmpty {
+                Text("Choose the master playlist above when available; this single playlist may omit separate audio or captions.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             downloadControl
         }
         .padding(.vertical, 4)
@@ -197,7 +212,8 @@ private struct CandidateRow: View {
     }
 
     private func readyDetail(_ probe: ProbeResult) -> String {
-        var parts = ["Ready"]
+        var parts = [probe.requiresReferer ? "Ready · keep app open" : "Ready"]
+        if probe.kind == .hls && !probe.variants.isEmpty { parts.append("Master playlist") }
         if let bytes = probe.expectedBytes { parts.append((probe.kind == .hls ? "about " : "") + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) }
         if let duration = probe.duration, duration > 0 { parts.append(Duration.seconds(duration).formatted(.time(pattern: duration >= 3600 ? .hourMinuteSecond : .minuteSecond))) }
         return parts.joined(separator: " · ")

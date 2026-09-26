@@ -84,7 +84,8 @@ final class DownloadIntegrationTests: XCTestCase {
         XCTAssertEqual(denied.status, .failed)
         XCTAssertEqual(denied.errorMessage, DownloadError.expiredLink.message)
 
-        requestContext = RequestContext(cookies: [sessionCookie()], userAgent: "FixtureAgent/1", referer: nil)
+        requestContext = RequestContext(cookies: [sessionCookie(), sessionCookie(domain: "other.example")],
+                                        userAgent: "FixtureAgent/1", referer: nil)
         manager.retry(denied)
         try await waitForFinish(denied)
         XCTAssertEqual(denied.status, .completed, denied.errorMessage ?? "")
@@ -127,6 +128,21 @@ final class DownloadIntegrationTests: XCTestCase {
         XCTAssertEqual(item.errorMessage, DownloadError.notVideo.message)
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: DownloadStorage.libraryDirectory.path)
         XCTAssertFalse(leftovers.contains { $0.contains(item.id.uuidString) })
+    }
+
+    func testInvalidMP4IsNotAddedToLibrary() async throws {
+        let item = try start("/invalid/video.mp4")
+        try await waitForFinish(item)
+        XCTAssertEqual(item.status, .failed)
+        XCTAssertNil(item.localURL)
+        XCTAssertTrue(item.errorMessage?.contains("cannot play") == true)
+    }
+
+    func testStreamSegmentCannotBeQueuedAsVideo() throws {
+        let fragment = candidate("/hls/seg-57-s1080p-v1-a1.m4s", kind: .video)
+        XCTAssertNil(manager.start(fragment))
+        XCTAssertEqual(manager.startError, DownloadError.streamSegment.message)
+        XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<DownloadItem>()), 0)
     }
 
     func testNetworkInterruptionFailsAndCanBeRetried() async throws {
@@ -278,6 +294,12 @@ final class CandidateValidatorTests: XCTestCase {
         XCTAssertEqual(server.requests(to: "/video.mp4").last?.header("Range"), "bytes=0-4095")
     }
 
+    func testStreamSegmentIsUnavailableBeforeNetworkProbe() async {
+        let status = await validate("/hls/seg-57-s1080p-v1-a1.m4s", kind: .video)
+        XCTAssertEqual(status, .unavailable(.streamSegment))
+        XCTAssertTrue(server.requests(to: "/hls/seg-57-s1080p-v1-a1.m4s").isEmpty)
+    }
+
     func testExtensionlessFileIsClassifiedAsVideo() async {
         guard case .ready(let probe) = await validate("/noext/stream?id=1", kind: .unknown) else { return XCTFail() }
         XCTAssertEqual(probe.kind, .video)
@@ -326,11 +348,11 @@ final class CandidateValidatorTests: XCTestCase {
         XCTAssertTrue(status.isReady)
     }
 
-    func testStreamThatNeedsRefererIsReportedAsBlocker() async {
-        // AVFoundation can't send a Referer for HLS, so a 403 that the Referer fixes is a platform blocker, not an expired link.
+    func testStreamThatNeedsRefererUsesRelay() async {
         let context = RequestContext(cookies: [], userAgent: nil, referer: server.url("/page/basic.html"))
-        let status = await validate("/referer/video.mp4", kind: .hls, context: context)
-        XCTAssertEqual(status, .unavailable(.other(CandidateValidator.refererRequiredMessage)))
+        let status = await validate("/hls/referer-master.m3u8", kind: .hls, context: context)
+        guard case .ready(let probe) = status else { return XCTFail("Expected ready Referer-only HLS: \(status)") }
+        XCTAssertTrue(probe.requiresReferer)
         let fileStatus = await validate("/referer/video.mp4", kind: .video, context: context)
         XCTAssertTrue(fileStatus.isReady, "direct downloads do send the Referer")
     }

@@ -14,6 +14,15 @@ enum DownloadStorage {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }()
+    static let thumbnailDirectory: URL = {
+        let directory = applicationSupportDirectory.appendingPathComponent("Thumbnails", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }()
+
+    static func thumbnailURL(for id: UUID) -> URL {
+        thumbnailDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("jpg")
+    }
 
     static func storedURL(_ path: String) -> URL {
         if path.hasPrefix("@managed/") { return containerRoot.appendingPathComponent(String(path.dropFirst("@managed/".count))) }
@@ -74,11 +83,17 @@ final class DownloadItem {
     var createdAt: Date
     var completedAt: Date?
     var fileSize: Int64?
+    /// Last watched position in seconds; zero starts from the beginning.
+    var playbackPosition: Double?
+    /// Optional Library folder. Kept as an ID so deleting a folder never deletes media.
+    var folderID: UUID?
     /// Minimum HLS variant bitrate chosen by the user, if any.
     var preferredBitrate: Int?
+    /// Relay HLS requests through the app when the host requires a Referer.
+    var requiresRefererRaw: Bool?
 
     init(id: UUID = UUID(), title: String, remoteURL: URL, sourcePageURL: URL, refererURL: URL? = nil, kind: MediaKind,
-         status: DownloadStatus = .queued, createdAt: Date = Date(), preferredBitrate: Int? = nil) {
+         status: DownloadStatus = .queued, createdAt: Date = Date(), preferredBitrate: Int? = nil, requiresReferer: Bool = false) {
         self.id = id
         self.title = title
         self.remoteURL = remoteURL
@@ -89,6 +104,7 @@ final class DownloadItem {
         self.progress = 0
         self.createdAt = createdAt
         self.preferredBitrate = preferredBitrate
+        self.requiresRefererRaw = requiresReferer
     }
 
     var kind: MediaKind {
@@ -104,6 +120,24 @@ final class DownloadItem {
     var localURL: URL? { localFileName.map(DownloadStorage.storedURL) }
     var resumeDataURL: URL { DownloadStorage.resumeDataDirectory.appendingPathComponent(id.uuidString) }
     var isActive: Bool { status == .queued || status == .downloading }
+    var isStreamFragment: Bool { MediaDiscovery.segmentExtensions.contains(remoteURL.pathExtension.lowercased()) }
+    var requiresReferer: Bool {
+        get { requiresRefererRaw == true }
+        set { requiresRefererRaw = newValue }
+    }
+}
+
+@Model
+final class DownloadFolder {
+    @Attribute(.unique) var id: UUID
+    var title: String
+    var createdAt: Date
+
+    init(id: UUID = UUID(), title: String, createdAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.createdAt = createdAt
+    }
 }
 
 @Model

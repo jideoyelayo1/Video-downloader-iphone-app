@@ -3,7 +3,8 @@ import Foundation
 /// Pure URL/payload parsing shared by the WebKit bridge and SDK-free tests.
 enum MediaDiscovery {
     static let messageName = "mediaDiscovery"
-    /// HLS/DASH segment extensions; never offered unless a media element points at them directly.
+    /// Fragmented stream pieces are not standalone videos, even if a player
+    /// momentarily exposes one as an element's currentSrc.
     static let segmentExtensions: Set<String> = ["ts", "m4s"]
 
     static func candidate(from payload: Any, sourcePageURL: URL, frameURL: URL? = nil, isMainFrame: Bool = true) -> MediaCandidate? {
@@ -20,11 +21,12 @@ enum MediaDiscovery {
         let kind = MediaKind(contentType: contentType)
             ?? MediaKind(rawValue: (dictionary["kind"] as? String) ?? "").flatMap { $0 == .unknown ? nil : $0 }
             ?? MediaKind(url: url)
-        // Resource timing contains every image, script, and stylesheet, and players
-        // fetch hundreds of segments. Those are accepted only from media elements.
+        if segmentExtensions.contains(url.pathExtension.lowercased()) { return nil }
+        let mediaType = contentType?.lowercased() ?? ""
+        if mediaType.hasPrefix("video/iso.segment") || mediaType.hasPrefix("video/mp2t") { return nil }
+        // Resource timing contains every image, script, and stylesheet.
         if !isMediaElement {
             guard kind != .unknown else { return nil }
-            if MediaKind(contentType: contentType) == nil && segmentExtensions.contains(url.pathExtension.lowercased()) { return nil }
         }
         let documentURL = (dictionary["documentURL"] as? String).flatMap(URL.init(string:))
         return MediaCandidate(url: url, sourcePageURL: sourcePageURL, frameURL: documentURL ?? frameURL, isMainFrame: isMainFrame,

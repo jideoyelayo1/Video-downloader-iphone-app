@@ -8,7 +8,8 @@ struct BrowserView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.allowsInlineMediaPlayback = true
+        // On iPhone, WebKit presents the native full-screen player for HTML5 video.
+        configuration.allowsInlineMediaPlayback = false
         if LaunchOptions.autoplay { configuration.mediaTypesRequiringUserActionForPlayback = [] }
         let contentController = WKUserContentController()
         contentController.add(WeakScriptMessageHandler(model.discovery), name: MediaDiscovery.messageName)
@@ -68,6 +69,7 @@ final class BrowserViewModel: ObservableObject {
     @Published private(set) var url: URL?
     @Published var addressText = ""
     @Published private(set) var candidates: [MediaCandidate] = []
+    @Published private(set) var observedFragments = false
     @Published private(set) var statuses: [UUID: CandidateStatus] = [:]
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -96,6 +98,7 @@ final class BrowserViewModel: ObservableObject {
         discovery.diagnostics = diagnostics
         discovery.onCandidate = { [weak self] candidate in self?.add(candidate) }
         discovery.onNavigation = { [weak self] newURL in self?.pageDidChange(to: newURL, force: false) }
+        discovery.onFragment = { [weak self] in self?.observedFragments = true }
     }
 
     var readyCount: Int { statuses.values.filter(\.isReady).count }
@@ -148,6 +151,7 @@ final class BrowserViewModel: ObservableObject {
         if !force, let newURL, let url, MediaDiscovery.normalizedURL(newURL) == MediaDiscovery.normalizedURL(url) { return }
         generation += 1
         candidates.removeAll()
+        observedFragments = false
         statuses.removeAll()
         variantURLs.removeAll()
         if let newURL, ["http", "https"].contains(newURL.scheme?.lowercased()) {

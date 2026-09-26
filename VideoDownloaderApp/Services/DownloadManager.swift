@@ -13,6 +13,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     /// Progress is kept in memory and only persisted occasionally, so ticks don't hit the store.
     @Published private(set) var liveProgress: [UUID: Double] = [:]
+    @Published private(set) var liveEstimatedSeconds: [UUID: TimeInterval] = [:]
     /// A start that was refused before any item was created (e.g. insufficient storage).
     @Published var startError: String?
 
@@ -22,6 +23,7 @@ final class DownloadManager: NSObject, ObservableObject {
     private let directConfiguration: URLSessionConfiguration
     private var directTasks: [UUID: URLSessionDownloadTask] = [:]
     private var hlsTasks: [UUID: AVAssetDownloadTask] = [:]
+    private var hlsProxies: [UUID: HLSRefererProxy] = [:]
     private var hlsLocations: [UUID: URL] = [:]
     private var injectedCookies: [UUID: [HTTPCookie]] = [:]
     private var userCancelled: Set<UUID> = []
@@ -38,6 +40,7 @@ final class DownloadManager: NSObject, ObservableObject {
     private var pendingBegins: [UUID: UUID] = [:]
     private var backgroundCompletionHandlers: [String: () -> Void] = [:]
     private var lastProgressSave: [UUID: Date] = [:]
+    private var progressSamples: [UUID: (date: Date, progress: Double)] = [:]
 
     private lazy var session = URLSession(configuration: directConfiguration, delegate: self, delegateQueue: .main)
     private lazy var hlsSession: AVAssetDownloadURLSession = {
@@ -64,7 +67,12 @@ final class DownloadManager: NSObject, ObservableObject {
     // MARK: Queue actions
 
     @discardableResult
-    func start(_ candidate: MediaCandidate, expectedBytes: Int64? = nil, preferredBitrate: Int? = nil) -> DownloadItem? {
+    func start(_ candidate: MediaCandidate, expectedBytes: Int64? = nil, preferredBitrate: Int? = nil,
+               requiresReferer: Bool = false) -> DownloadItem? {
+        if MediaDiscovery.segmentExtensions.contains(candidate.url.pathExtension.lowercased()) {
+            startError = DownloadError.streamSegment.message
+            return nil
+        }
         if let existing = items(for: candidate.url).first(where: \.isActive) { return existing }
         if let error = DownloadError.storageCheck(expectedBytes: expectedBytes, availableBytes: DownloadStorage.availableCapacity()) {
             startError = error.message
@@ -72,7 +80,8 @@ final class DownloadManager: NSObject, ObservableObject {
         }
         let title = candidate.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let item = DownloadItem(title: title.isEmpty ? "Video" : title, remoteURL: candidate.url, sourcePageURL: candidate.sourcePageURL,
-                                refererURL: candidate.referer, kind: candidate.kind, preferredBitrate: preferredBitrate)
+                                refererURL: candidate.referer, kind: candidate.kind, preferredBitrate: preferredBitrate,
+                                requiresReferer: requiresReferer)
         context.insert(item)
         begin(item)
         return item
@@ -85,6 +94,8 @@ final class DownloadManager: NSObject, ObservableObject {
         if let cancelledAttemptID { cancelledAttempts[item.id] = cancelledAttemptID }
         userCancelled.insert(item.id)
         item.status = .cancelled
+        liveEstimatedSeconds[item.id] = nil
+        progressSamples[item.id] = nil
         save()
         let resumeURL = item.resumeDataURL
         let id = item.id
@@ -99,10 +110,21 @@ final class DownloadManager: NSObject, ObservableObject {
             }
         })
         hlsTasks.removeValue(forKey: item.id)?.cancel()
+        hlsProxies.removeValue(forKey: item.id)?.stop()
     }
 
     func retry(_ item: DownloadItem) {
         guard !item.isActive else { return }
+        userCancelled.remove(item.id)
+        begin(item)
+    }
+
+    func restart(_ item: DownloadItem) {
+        guard !item.isActive else { return }
+        try? FileManager.default.removeItem(at: item.resumeDataURL)
+        if let localURL = item.localURL { try? FileManager.default.removeItem(at: localURL) }
+        item.localFileName = nil
+        item.progress = 0
         userCancelled.remove(item.id)
         begin(item)
     }
@@ -113,10 +135,14 @@ final class DownloadManager: NSObject, ObservableObject {
         userCancelled.insert(item.id)
         directTasks.removeValue(forKey: item.id)?.cancel()
         hlsTasks.removeValue(forKey: item.id)?.cancel()
+        hlsProxies.removeValue(forKey: item.id)?.stop()
         if let location = hlsLocations.removeValue(forKey: item.id) ?? item.localURL { try? FileManager.default.removeItem(at: location) }
         try? FileManager.default.removeItem(at: item.resumeDataURL)
+        try? FileManager.default.removeItem(at: DownloadStorage.thumbnailURL(for: item.id))
         releaseCookies(for: item.id)
         liveProgress[item.id] = nil
+        liveEstimatedSeconds[item.id] = nil
+        progressSamples[item.id] = nil
         context.delete(item)
         save()
     }
@@ -129,6 +155,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     func progress(of item: DownloadItem) -> Double { liveProgress[item.id] ?? item.progress }
+    func estimatedSeconds(of item: DownloadItem) -> TimeInterval? { liveEstimatedSeconds[item.id] }
 
     func setBackgroundCompletionHandler(_ handler: @escaping () -> Void, for identifier: String) {
         backgroundCompletionHandlers[identifier] = handler
@@ -140,6 +167,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     /// Marks the item as downloading immediately, then creates the task once the browser context is gathered.
     private func begin(_ item: DownloadItem) {
+        if item.kind == .hls || !FileManager.default.fileExists(atPath: item.resumeDataURL.path) { item.progress = 0 }
         let attemptID = UUID()
         attemptIDs[item.id] = attemptID
         cancelledAttempts[item.id] = nil
@@ -147,22 +175,25 @@ final class DownloadManager: NSObject, ObservableObject {
         item.status = .downloading
         item.errorMessage = nil
         liveProgress[item.id] = item.progress
+        liveEstimatedSeconds[item.id] = nil
+        progressSamples[item.id] = nil
         save()
         Task {
             let requestContext = await requestContextProvider?(item.remoteURL, item.refererURL)
-            if pendingBegins[item.id] == attemptID { pendingBegins[item.id] = nil }
             guard attemptIDs[item.id] == attemptID,
                   item.modelContext != nil,
                   item.status == .downloading,
                   !userCancelled.contains(item.id) else { return }
-            if item.kind == .hls { beginHLS(item, requestContext, attemptID: attemptID) } else { beginDirect(item, requestContext, attemptID: attemptID) }
+            if item.kind == .hls { await beginHLS(item, requestContext, attemptID: attemptID) } else { beginDirect(item, requestContext, attemptID: attemptID) }
+            if pendingBegins[item.id] == attemptID { pendingBegins[item.id] = nil }
         }
     }
 
     private func beginDirect(_ item: DownloadItem, _ requestContext: RequestContext?, attemptID: UUID) {
         // Cookies go through the session's cookie storage rather than a header, so the URL loading
         // system scopes them per host on redirects (background sessions don't call the redirect delegate).
-        if let cookies = requestContext?.cookies, !cookies.isEmpty {
+        let cookies = RequestContext.cookies(from: requestContext?.cookies ?? [], for: item.remoteURL)
+        if !cookies.isEmpty {
             cookieStorage.setCookies(cookies, for: item.remoteURL, mainDocumentURL: item.remoteURL)
             injectedCookies[item.id] = cookies
         }
@@ -182,21 +213,46 @@ final class DownloadManager: NSObject, ObservableObject {
         task.resume()
     }
 
-    private func beginHLS(_ item: DownloadItem, _ requestContext: RequestContext?, attemptID: UUID) {
+    private func beginHLS(_ item: DownloadItem, _ requestContext: RequestContext?, attemptID: UUID) async {
         // Do not let a package path reported by an older task become the location
         // for this retry before AVFoundation reports the new task's package.
         hlsLocations[item.id] = nil
         var assetOptions: [String: Any] = [:]
         if let cookies = requestContext?.cookies, !cookies.isEmpty { assetOptions[AVURLAssetHTTPCookiesKey] = cookies }
         if let userAgent = requestContext?.userAgent { assetOptions[AVURLAssetHTTPUserAgentKey] = userAgent }
-        let asset = AVURLAsset(url: item.remoteURL, options: assetOptions)
-        // Without a minimum bitrate AVFoundation downloads the highest-quality variant.
-        var options: [String: Any] = [:]
-        if let bitrate = item.preferredBitrate { options[AVAssetDownloadTaskMinimumRequiredMediaBitrateKey] = NSNumber(value: bitrate) }
-        guard let task = hlsSession.makeAssetDownloadTask(asset: asset, assetTitle: item.title, assetArtworkData: nil, options: options) else {
-            fail(item, .other("Unable to create an HLS download task."))
-            return
+        let assetURL: URL
+        if item.requiresReferer {
+            guard let requestContext, requestContext.referer != nil else {
+                fail(item, .other("The player context expired. Open the page, play the video, then download again."))
+                return
+            }
+            do {
+                let proxy = try HLSRefererProxy(context: requestContext)
+                assetURL = try proxy.start(for: item.remoteURL)
+                hlsProxies[item.id] = proxy
+            } catch {
+                fail(item, .other("Couldn't start the in-app stream relay. Try again while the app is open."))
+                return
+            }
+            assetOptions.removeAll()
+        } else {
+            assetURL = item.remoteURL
         }
+        let asset = AVURLAsset(url: assetURL, options: assetOptions)
+        let configuration = AVAssetDownloadConfiguration(asset: asset, title: item.title)
+        if let bitrate = item.preferredBitrate {
+            configuration.primaryContentConfiguration.variantQualifiers = [
+                AVAssetVariantQualifier(predicate: NSPredicate(format: "averageBitRate >= %d", bitrate))
+            ]
+        }
+        // Include the default audible rendition in every caption selection.
+        let mediaSelections = await HLSMediaSelections.forDownload(asset: asset)
+        if !mediaSelections.isEmpty { configuration.primaryContentConfiguration.mediaSelections = mediaSelections }
+        guard attemptIDs[item.id] == attemptID,
+              item.modelContext != nil,
+              item.status == .downloading,
+              !userCancelled.contains(item.id) else { return }
+        let task = hlsSession.makeAssetDownloadTask(downloadConfiguration: configuration)
         task.taskDescription = Self.taskDescription(itemID: item.id, attemptID: attemptID)
         hlsTasks[item.id] = task
         task.resume()
@@ -226,7 +282,23 @@ final class DownloadManager: NSObject, ObservableObject {
             if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
             try FileManager.default.moveItem(at: location, to: destination)
             item.localFileName = filename
-            markCompleted(item, size: DownloadStorage.allocatedSize(of: destination))
+            save()
+            let attemptID = Self.attemptID(task)
+            Task { [weak self] in
+                guard let self else { return }
+                let playable = (try? await AVURLAsset(url: destination).load(.isPlayable)) == true
+                guard let current = self.item(id), current.status == .downloading,
+                      current.localFileName == filename, self.attemptIDs[id] == attemptID else { return }
+                if playable {
+                    self.markCompleted(current, size: DownloadStorage.allocatedSize(of: destination))
+                } else {
+                    try? FileManager.default.removeItem(at: destination)
+                    current.localFileName = nil
+                    self.diagnostics?.record(event: "download", url: current.remoteURL.absoluteString,
+                                             note: "Downloaded file is not playable by AVFoundation")
+                    self.fail(current, .other("This file downloaded, but iPhone cannot play its video format. Choose another source."))
+                }
+            }
         } catch {
             fail(item, DownloadError.from(error))
         }
@@ -248,6 +320,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
         if task is AVAssetDownloadTask {
             hlsTasks[id] = nil
+            hlsProxies.removeValue(forKey: id)?.stop()
             let location = hlsLocations.removeValue(forKey: id) ?? item.localURL
             if let error {
                 let nsError = error as NSError
@@ -257,7 +330,28 @@ final class DownloadManager: NSObject, ObservableObject {
                 if wasCancelled { item.status = .cancelled; save() } else { fail(item, DownloadError.from(error)) }
             } else if let location {
                 item.localFileName = DownloadStorage.managedPath(for: location)
-                markCompleted(item, size: DownloadStorage.allocatedSize(of: location))
+                save()
+                let attemptID = Self.attemptID(task)
+                Task { [weak self] in
+                    guard let self else { return }
+                    let savedAsset = AVURLAsset(url: location)
+                    let playable = (try? await savedAsset.load(.isPlayable)) == true
+                    let audioMissing = playable ? await HLSMediaSelections.isOfflineAudioMissing(in: savedAsset) : false
+                    guard let current = self.item(id), current.status == .downloading,
+                          current.localFileName == DownloadStorage.managedPath(for: location),
+                          self.attemptIDs[id] == attemptID else { return }
+                    if playable && !audioMissing {
+                        self.markCompleted(current, size: DownloadStorage.allocatedSize(of: location))
+                    } else {
+                        try? FileManager.default.removeItem(at: location)
+                        current.localFileName = nil
+                        self.diagnostics?.record(event: "download", url: current.remoteURL.absoluteString,
+                                                 note: "Downloaded HLS package is not playable by AVFoundation")
+                        self.fail(current, .other(audioMissing
+                            ? "The stream saved without its audio track. Replay it in Browse and download again."
+                            : "This stream downloaded, but iPhone cannot play the saved video. Choose another source."))
+                    }
+                }
             } else {
                 fail(item, .other("The stream finished without saving any media."))
             }
@@ -283,6 +377,8 @@ final class DownloadManager: NSObject, ObservableObject {
         item.completedAt = Date()
         item.errorMessage = nil
         liveProgress[item.id] = nil
+        liveEstimatedSeconds[item.id] = nil
+        progressSamples[item.id] = nil
         try? FileManager.default.removeItem(at: item.resumeDataURL)
         save()
     }
@@ -291,13 +387,23 @@ final class DownloadManager: NSObject, ObservableObject {
         item.status = error == .cancelled ? .cancelled : .failed
         item.errorMessage = error == .cancelled ? nil : error.message
         if let progress = liveProgress.removeValue(forKey: item.id) { item.progress = progress }
+        liveEstimatedSeconds[item.id] = nil
+        progressSamples[item.id] = nil
         save()
     }
 
     private func updateProgress(_ id: UUID, _ value: Double) {
         let value = min(max(value, 0), 1)
-        liveProgress[id] = value
         let now = Date()
+        if let sample = progressSamples[id] {
+            let elapsed = now.timeIntervalSince(sample.date)
+            if elapsed >= 2, let estimate = DownloadTimeEstimate.seconds(elapsed: elapsed, from: sample.progress, to: value) {
+                let previous = liveEstimatedSeconds[id]
+                liveEstimatedSeconds[id] = previous.map { $0 * 0.7 + estimate * 0.3 } ?? estimate
+                progressSamples[id] = (now, value)
+            }
+        } else { progressSamples[id] = (now, value) }
+        liveProgress[id] = value
         if now.timeIntervalSince(lastProgressSave[id] ?? .distantPast) > 2, let item = item(id) {
             lastProgressSave[id] = now
             item.progress = value
@@ -321,6 +427,11 @@ final class DownloadManager: NSObject, ObservableObject {
         for task in await hlsSession.allTasks {
             guard let id = Self.itemID(task), let item = item(id), let assetTask = task as? AVAssetDownloadTask,
                   item.isActive, pendingBegins[id] == nil else { task.cancel(); continue }
+            if item.requiresReferer {
+                // The previous process's loopback relay no longer exists.
+                task.cancel()
+                continue
+            }
             let attemptID = Self.attemptID(task) ?? UUID()
             if let currentAttempt = attemptIDs[id], currentAttempt != attemptID { task.cancel(); continue }
             assetTask.taskDescription = Self.taskDescription(itemID: id, attemptID: attemptID)
@@ -403,6 +514,14 @@ final class DownloadManager: NSObject, ObservableObject {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         return try? handle.read(upToCount: 4096)
+    }
+}
+
+enum DownloadTimeEstimate {
+    static func seconds(elapsed: TimeInterval, from previous: Double, to current: Double) -> TimeInterval? {
+        let delta = current - previous
+        guard elapsed >= 2, delta > 0.001, current > 0, current < 1 else { return nil }
+        return min((1 - current) * elapsed / delta, 7 * 24 * 3600)
     }
 }
 
