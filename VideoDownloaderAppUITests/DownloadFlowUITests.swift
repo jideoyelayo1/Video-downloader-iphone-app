@@ -62,6 +62,12 @@ final class DownloadFlowUITests: XCTestCase {
         // Playback
         libraryItem.tap()
         XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 5) || app.otherElements["Video"].waitForExistence(timeout: 2))
+        let fullScreen = app.buttons["player.fullScreen"]
+        XCTAssertTrue(fullScreen.waitForExistence(timeout: 5))
+        fullScreen.tap()
+        let exitFullScreen = app.buttons["player.fullScreenDone"]
+        XCTAssertTrue(exitFullScreen.waitForExistence(timeout: 5))
+        exitFullScreen.tap()
         let export = app.buttons["player.export"]
         XCTAssertTrue(export.waitForExistence(timeout: 5))
         export.tap()
@@ -69,9 +75,11 @@ final class DownloadFlowUITests: XCTestCase {
                       "share sheet should appear")
         // iOS 18 presents a sheet (swipe down); iOS 26 a popover (tap outside).
         let shareSheet = app.otherElements["ActivityListView"]
-        if app.buttons["Close"].exists { app.buttons["Close"].tap() } else { app.swipeDown(velocity: .fast) }
-        if shareSheet.exists { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)).tap() }
-        let done = app.buttons["Done"]
+        let closeShare = app.buttons["Close"].firstMatch
+        if closeShare.waitForExistence(timeout: 3) { closeShare.tap() } else { app.swipeDown(velocity: .fast) }
+        // Give the swipe time to finish; tapping too early can hit "Edit Actions…" inside the sheet.
+        if !shareSheet.waitForNonExistence(timeout: 3) { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)).tap() }
+        let done = app.navigationBars.buttons["Done"].firstMatch
         if done.waitForExistence(timeout: 5) { done.tap() }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: libraryItem)], timeout: 5), .completed)
 
@@ -120,5 +128,53 @@ final class DownloadFlowUITests: XCTestCase {
         download.tap()
         XCTAssertTrue(app.buttons["360p"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["180p"].exists)
+    }
+
+    func testFragmentIsExplainedWithoutDownloadButton() throws {
+        launch(at: "/page/fragment.html")
+        let button = app.buttons["browser.foundVideos"]
+        XCTAssertTrue(button.waitForExistence(timeout: 10))
+        button.tap()
+        XCTAssertTrue(app.staticTexts["Stream pieces found"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["candidate.download"].exists)
+    }
+
+    func testRefererProtectedHLSIsOfferedThroughRelay() throws {
+        launch(at: "/page/referer-hls.html")
+        waitForReadyCandidates(1).tap()
+        let download = app.buttons["candidate.download"].firstMatch
+        XCTAssertTrue(download.waitForExistence(timeout: 5))
+        XCTAssertTrue(download.isEnabled)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'keep app open'")).firstMatch.exists)
+    }
+
+    func testLibraryCanCreateFolderAndSearchDownloadedVideo() throws {
+        launch(at: "/page/basic.html")
+        waitForReadyCandidates(1).tap()
+        app.buttons["candidate.download"].firstMatch.tap()
+        let status = app.staticTexts.matching(identifier: "download.status").firstMatch
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH 'Completed'"), object: status)], timeout: 20), .completed)
+        XCTAssertTrue(app.staticTexts["Downloads used"].exists)
+        XCTAssertTrue(app.staticTexts["Available on iPhone"].exists)
+
+        app.tabBars.buttons["Library"].tap()
+        let item = app.buttons["library.item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        app.buttons["library.folders"].tap()
+        app.buttons["New Folder"].tap()
+        let name = app.alerts.textFields.firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.typeText("Anime")
+        app.alerts.buttons["Create"].tap()
+        XCTAssertTrue(app.staticTexts["No matching videos"].waitForExistence(timeout: 5))
+        app.buttons["library.folders"].tap()
+        app.buttons["All Videos"].tap()
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("not this episode")
+        XCTAssertTrue(app.staticTexts["No matching videos"].waitForExistence(timeout: 5))
     }
 }
