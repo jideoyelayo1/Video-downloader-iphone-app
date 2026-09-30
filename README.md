@@ -4,7 +4,7 @@ A personal iOS 17+ SwiftUI app: an in-app browser that finds the videos a page p
 
 - **Browse** — `WKWebView` browser with bookmarks, back/forward, and a **Found videos** sheet. Each candidate is checked before it can be downloaded and shows *Ready* (with size/duration and HLS quality choices), *Expired*, *Protected (DRM)*, *Live*, or *Unavailable*.
 - **Downloads** — progress, estimated time remaining, space used and available, search, cancel, retry, and a Start Over choice when a direct file has resume data. Ordinary files use a background `URLSession`; HLS streams use `AVAssetDownloadURLSession`. Downloads continue while the app is suspended and are recovered after relaunch.
-- **Library** — thumbnails, search, folders, offline playback with a Resume or Start from Beginning choice, rename, delete, and export (share sheet / Save to Files) for ordinary video files. HLS downloads play inside the app only.
+- **My Videos** — the opening screen shows Continue Watching, larger thumbnails, search, folders, and offline playback. Rename, delete, and export (share sheet / Save to Files) remain available for ordinary video files. HLS downloads play inside the app only.
 
 It supports media a page exposes over HTTP(S): direct files and unprotected, finite HLS. It does not bypass DRM, anti-bot challenges, or `blob:`-only players.
 
@@ -22,9 +22,9 @@ With a free account the app must be re-installed from Xcode every 7 days.
 
 1. In **Browse**, open a page (the bookmark menu has the two starter sites) and start the video playing — many players only load their stream after Play.
 2. Tap **Found videos**. Wait for *Ready*, then tap **Download** (for HLS choose a quality or *Best quality*). If nothing appears, tap **Refresh** in the sheet.
-3. Watch progress and storage in **Downloads**; search, organize into folders, play, rename, export, or delete in **Library**. The folder button creates folders; long-press a video to move it. When you reopen a partly watched video, choose Resume or Start from Beginning.
+3. Watch progress and storage in **Downloads**; search, organize into folders, play, rename, export, or delete in **My Videos**. The folder button creates folders; long-press a video to move it. Tap a Continue Watching card to resume immediately.
 
-Browser videos open in iPhone's native full-screen player. In Library, tap **Full Screen** while a saved video is playing. The native player offers Picture in Picture on supported devices: tap its PiP control or leave the app while the video is playing. The player provides a captions control when the video contains subtitle tracks. HLS downloads include the caption languages advertised by the stream; videos without separate caption tracks cannot gain captions automatically. Library playback uses the video audio session so the iPhone's Ring/Silent setting does not mute saved videos. For HLS, choose the **master playlist** when it appears: a single quality playlist can leave out separate audio and caption renditions. If an older download is silent, delete it and download from the master playlist again.
+Browser videos stay in the website's inline player when it supports inline playback, preserving site-provided subtitle overlays such as the English captions on ***REMOVED***'s ***REMOVED*** player. Saved videos open directly in the native full-screen player. On supported iPhones, leaving the app while a saved video is playing starts Picture in Picture; the PiP control is also available in the native player. The **Captions** menu lists subtitle tracks in the saved video and says when none were saved. HLS downloads request the caption languages advertised by the stream, but captions supplied only by a website's separate player are not part of the downloaded video. Playback uses the video audio session so the iPhone's Ring/Silent setting does not mute saved videos. For HLS, choose the **master playlist** when it appears: a single quality playlist can leave out separate audio and caption renditions. Older downloads with missing tracks may need to be downloaded again.
 
 Library thumbnails are generated from saved video frames. For HLS streams without an I-frame-only track, the app briefly plays the saved stream muted to capture a frame; the resulting JPEG is cached for later visits.
 
@@ -32,6 +32,7 @@ If a link shows *Expired*, replay the video in Browse (sites issue short-lived s
 If Found videos says **Ready · keep app open**, the stream needs the player’s Referer header. The app relays its HLS playlists, segments, and subtitle URLs through a local connection while downloading. Keep the app in the foreground until it completes; retry from the playing page if the stream URL expires.
 **Found videos** excludes individual `.m4s` and `.ts` stream fragments. Those files are not complete videos. If the page plays but no full HLS playlist appears, try another server on the page; a DASH-only or protected player cannot be saved by the current downloader.
 If an HLS download reports HTTP 500, its video server failed during the transfer. Use **Open Page** to replay the episode and obtain a fresh stream link. iOS does not expose resume data for failed HLS asset downloads, so Retry starts that stream again.
+HTTP 429 means the video server is limiting requests. Wait before trying again, or open the page to obtain another source. Repeating an immediate retry usually cannot fix a server limit.
 
 ## Architecture
 
@@ -44,7 +45,7 @@ If an HLS download reports HTTP 500, its video server failed during the transfer
 | Storage | SwiftData models in `Models/DownloadItem.swift` (`DownloadItem`, `Bookmark`); files in Application Support; HLS packages stay where AVFoundation puts them. Old `downloads.json` queues are imported once. |
 | UI | `Views/`, `WebView/BrowserView.swift` |
 
-Debug builds add a **Diagnostics** screen (bookmark menu) listing every media request each frame made, with a *Share log* button, for checking new sites. The same log is written to `Documents/diagnostics.log` in the app container.
+**Downloads → Error log** opens the shareable diagnostics log in every build. It records download, validation, playback, caption, and PiP events across launches, keeping the latest 1,000 entries. URLs in the log omit credentials, query values, and fragments. Debug builds additionally record detailed browser requests. The log is written to `Documents/diagnostics.log` in the app container.
 
 `Info.plist` allows plain-HTTP loads because this is a general browser whose sites and media hosts are chosen by the user.
 
