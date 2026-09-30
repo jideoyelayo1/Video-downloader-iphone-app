@@ -90,10 +90,8 @@ struct BrowserScreen: View {
             } label: { Label("Add This Page", systemImage: "plus") }
             .disabled(model.url == nil)
             Button { showingBookmarks = true } label: { Label("Edit Bookmarks", systemImage: "pencil") }
-            if model.diagnostics != nil {
-                Divider()
-                Button { showingDiagnostics = true } label: { Label("Diagnostics", systemImage: "stethoscope") }
-            }
+            Divider()
+            Button { showingDiagnostics = true } label: { Label("Diagnostics", systemImage: "stethoscope") }
         } label: {
             Label("Bookmarks", systemImage: "book")
         }

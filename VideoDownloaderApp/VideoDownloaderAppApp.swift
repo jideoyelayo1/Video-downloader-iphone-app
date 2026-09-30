@@ -12,6 +12,7 @@ struct VideoDownloaderAppApp: App {
             ContentView()
                 .environmentObject(services.downloads)
                 .environmentObject(services.diagnostics)
+                .environmentObject(services.playback)
         }
         .modelContainer(services.container)
     }
@@ -32,6 +33,7 @@ final class AppServices {
     let container: ModelContainer
     let downloads: DownloadManager
     let diagnostics = DiagnosticsLog()
+    let playback: PlaybackCoordinator
 
     private init() {
         let inMemory = LaunchOptions.isRunningUnitTests || LaunchOptions.flag("-UITestInMemory")
@@ -49,8 +51,9 @@ final class AppServices {
             if !inMemory { UserDefaults.standard.set(true, forKey: "seededBookmarks") }
         }
         downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)
+        playback = PlaybackCoordinator(context: context, diagnostics: diagnostics)
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }
-        if LaunchOptions.diagnosticsEnabled { downloads.diagnostics = diagnostics }
+        downloads.diagnostics = diagnostics
     }
 }
 

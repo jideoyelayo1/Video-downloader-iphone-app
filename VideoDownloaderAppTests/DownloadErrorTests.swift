@@ -10,6 +10,7 @@ final class DownloadErrorTests: XCTestCase {
         XCTAssertEqual(DownloadError.from(statusCode: 410), .expiredLink)
         XCTAssertEqual(DownloadError.from(statusCode: 404), .notFound)
         XCTAssertEqual(DownloadError.from(statusCode: 500), .httpStatus(500))
+        XCTAssertEqual(DownloadError.from(statusCode: 429), .rateLimited)
         XCTAssertEqual(DownloadError.from(statusCode: 304), .httpStatus(304))
     }
 
@@ -37,6 +38,9 @@ final class DownloadErrorTests: XCTestCase {
         let hls500 = NSError(domain: "CoreMediaErrorDomain", code: -16847,
                              userInfo: [NSLocalizedDescriptionKey: "The operation couldn’t be completed. (HTTP 500: Internal Server Error)"])
         XCTAssertTrue(DownloadError.from(hls500).message.contains("Replay the episode"))
+        let hls429 = NSError(domain: "CoreMediaErrorDomain", code: -16845,
+                             userInfo: [NSLocalizedDescriptionKey: "HTTP 429: (unhandled)"])
+        XCTAssertEqual(DownloadError.from(hls429), .rateLimited)
     }
 
     func testStorageCheckUsesSafetyMargin() {

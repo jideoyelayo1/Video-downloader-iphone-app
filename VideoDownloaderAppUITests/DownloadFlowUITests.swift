@@ -20,6 +20,7 @@ final class DownloadFlowUITests: XCTestCase {
     private func launch(at path: String) {
         app.launchArguments = ["-UITestInMemory", "-StartURL", server.url(path).absoluteString]
         app.launch()
+        app.tabBars.buttons["Browse"].tap()
     }
 
     private func replaceText(in field: XCUIElement, with text: String) {
@@ -54,7 +55,7 @@ final class DownloadFlowUITests: XCTestCase {
         let completed = NSPredicate(format: "label BEGINSWITH 'Completed'")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: completed, object: status)], timeout: 20), .completed, status.label)
 
-        app.tabBars.buttons["Library"].tap()
+        app.tabBars.buttons["My Videos"].tap()
         let libraryItem = app.buttons["library.item"].firstMatch
         XCTAssertTrue(libraryItem.waitForExistence(timeout: 5))
         XCTAssertTrue(libraryItem.label.contains("Basic Video Page"), libraryItem.label)
@@ -62,13 +63,11 @@ final class DownloadFlowUITests: XCTestCase {
         // Playback
         libraryItem.tap()
         XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 5) || app.otherElements["Video"].waitForExistence(timeout: 2))
-        let fullScreen = app.buttons["player.fullScreen"]
-        XCTAssertTrue(fullScreen.waitForExistence(timeout: 5))
-        fullScreen.tap()
-        let exitFullScreen = app.buttons["player.fullScreenDone"]
-        XCTAssertTrue(exitFullScreen.waitForExistence(timeout: 5))
-        exitFullScreen.tap()
-        let export = app.buttons["player.export"]
+        let done = app.buttons["player.done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        done.tap()
+        libraryItem.press(forDuration: 1.2)
+        let export = app.buttons["Export"].firstMatch
         XCTAssertTrue(export.waitForExistence(timeout: 5))
         export.tap()
         XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 10) || app.sheets.firstMatch.waitForExistence(timeout: 2),
@@ -79,8 +78,6 @@ final class DownloadFlowUITests: XCTestCase {
         if closeShare.waitForExistence(timeout: 3) { closeShare.tap() } else { app.swipeDown(velocity: .fast) }
         // Give the swipe time to finish; tapping too early can hit "Edit Actions…" inside the sheet.
         if !shareSheet.waitForNonExistence(timeout: 3) { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)).tap() }
-        let done = app.navigationBars.buttons["Done"].firstMatch
-        if done.waitForExistence(timeout: 5) { done.tap() }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: libraryItem)], timeout: 5), .completed)
 
         // Rename
@@ -157,7 +154,7 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Downloads used"].exists)
         XCTAssertTrue(app.staticTexts["Available on iPhone"].exists)
 
-        app.tabBars.buttons["Library"].tap()
+        app.tabBars.buttons["My Videos"].tap()
         let item = app.buttons["library.item"].firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5))
         app.buttons["library.folders"].tap()

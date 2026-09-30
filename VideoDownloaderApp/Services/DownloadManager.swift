@@ -78,6 +78,22 @@ final class DownloadManager: NSObject, ObservableObject {
             startError = error.message
             return nil
         }
+        // A fresh tap on the same source should repair its existing row rather than
+        // create another identical failure in Downloads.
+        let prior = (try? context.fetch(FetchDescriptor<DownloadItem>()))?.first {
+            ($0.status == .failed || $0.status == .cancelled) &&
+            ($0.remoteURL == candidate.url || ($0.sourcePageURL == candidate.sourcePageURL && $0.title == candidate.title))
+        }
+        if let existing = prior {
+            existing.remoteURL = candidate.url
+            existing.sourcePageURL = candidate.sourcePageURL
+            existing.refererURL = candidate.referer
+            existing.kind = candidate.kind
+            existing.preferredBitrate = preferredBitrate
+            existing.requiresReferer = requiresReferer
+            restart(existing)
+            return existing
+        }
         let title = candidate.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let item = DownloadItem(title: title.isEmpty ? "Video" : title, remoteURL: candidate.url, sourcePageURL: candidate.sourcePageURL,
                                 refererURL: candidate.referer, kind: candidate.kind, preferredBitrate: preferredBitrate,
@@ -174,6 +190,8 @@ final class DownloadManager: NSObject, ObservableObject {
         pendingBegins[item.id] = attemptID
         item.status = .downloading
         item.errorMessage = nil
+        diagnostics?.record(event: "download-start", url: item.remoteURL.absoluteString,
+                            note: "kind=\(item.kind.rawValue) attempt=\(attemptID.uuidString)")
         liveProgress[item.id] = item.progress
         liveEstimatedSeconds[item.id] = nil
         progressSamples[item.id] = nil
@@ -248,6 +266,10 @@ final class DownloadManager: NSObject, ObservableObject {
         // Include the default audible rendition in every caption selection.
         let mediaSelections = await HLSMediaSelections.forDownload(asset: asset)
         if !mediaSelections.isEmpty { configuration.primaryContentConfiguration.mediaSelections = mediaSelections }
+        if let captionGroup = try? await asset.loadMediaSelectionGroup(for: .legible) {
+            diagnostics?.record(event: "captions", url: item.remoteURL.absoluteString,
+                                note: "Advertised \(captionGroup.options.count) HLS tracks; requested \(mediaSelections.count) selections")
+        }
         guard attemptIDs[item.id] == attemptID,
               item.modelContext != nil,
               item.status == .downloading,
@@ -341,6 +363,11 @@ final class DownloadManager: NSObject, ObservableObject {
                           current.localFileName == DownloadStorage.managedPath(for: location),
                           self.attemptIDs[id] == attemptID else { return }
                     if playable && !audioMissing {
+                        if let group = try? await savedAsset.loadMediaSelectionGroup(for: .legible) {
+                            let saved = savedAsset.assetCache?.mediaSelectionOptions(in: group).count ?? group.options.count
+                            self.diagnostics?.record(event: "captions", url: current.remoteURL.absoluteString,
+                                                     note: "Offline package has \(saved) of \(group.options.count) advertised tracks")
+                        }
                         self.markCompleted(current, size: DownloadStorage.allocatedSize(of: location))
                     } else {
                         try? FileManager.default.removeItem(at: location)
@@ -384,6 +411,8 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func fail(_ item: DownloadItem, _ error: DownloadError) {
+        diagnostics?.record(event: "download-error", url: item.remoteURL.absoluteString,
+                            note: "\(error.message) item=\(item.id.uuidString)")
         item.status = error == .cancelled ? .cancelled : .failed
         item.errorMessage = error == .cancelled ? nil : error.message
         if let progress = liveProgress.removeValue(forKey: item.id) { item.progress = progress }

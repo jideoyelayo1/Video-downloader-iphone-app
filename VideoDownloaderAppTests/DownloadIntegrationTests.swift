@@ -121,6 +121,16 @@ final class DownloadIntegrationTests: XCTestCase {
         XCTAssertNil(expired.localURL)
     }
 
+    func testNewSourceForSameFailedEpisodeReusesDownloadRow() async throws {
+        let first = try start("/expired/video.mp4")
+        try await waitForFinish(first)
+        let replacement = try start("/missing.mp4")
+        XCTAssertEqual(replacement.id, first.id)
+        try await waitForFinish(replacement)
+        XCTAssertEqual(replacement.remoteURL, server.url("/missing.mp4"))
+        XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<DownloadItem>()), 1)
+    }
+
     func testHTMLErrorPageIsRejected() async throws {
         let item = try start("/html/video.mp4")
         try await waitForFinish(item)

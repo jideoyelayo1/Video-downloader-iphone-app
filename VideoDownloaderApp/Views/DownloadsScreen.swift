@@ -6,33 +6,49 @@ struct DownloadsScreen: View {
     @EnvironmentObject private var downloads: DownloadManager
     @Query(sort: \DownloadItem.createdAt, order: .reverse) private var items: [DownloadItem]
     @State private var searchText = ""
+    @State private var showingDiagnostics = false
 
     private var displayed: [DownloadItem] {
         items.filter { searchText.isEmpty || $0.title.localizedStandardContains(searchText) }
     }
+    private var active: [DownloadItem] { displayed.filter(\.isActive) }
+    private var needsAttention: [DownloadItem] { displayed.filter { $0.status == .failed || $0.status == .cancelled } }
+    private var finished: [DownloadItem] { displayed.filter { $0.status == .completed } }
 
     var body: some View {
         NavigationStack {
             List {
-                Section("Storage") {
-                    LabeledContent("Downloads used", value: usedSpace)
-                    LabeledContent("Available on iPhone", value: availableSpace)
-                }
                 if displayed.isEmpty {
                     ContentUnavailableView(items.isEmpty ? "No downloads" : "No matching downloads", systemImage: "arrow.down.circle",
                                            description: Text(items.isEmpty ? "Videos you download in Browse appear here." : "Try another search."))
                 }
-                ForEach(displayed) { item in
-                    DownloadRow(item: item, progress: downloads.progress(of: item), estimatedSeconds: downloads.estimatedSeconds(of: item),
-                                cancel: { downloads.cancel(item) }, retry: { downloads.retry(item) }, restart: { downloads.restart(item) },
-                                delete: { downloads.delete(item) },
-                                openSource: { openSource(item.sourcePageURL) })
+                if !active.isEmpty { Section("In Progress") { rows(active) } }
+                if !needsAttention.isEmpty { Section("Needs Attention") { rows(needsAttention) } }
+                if !finished.isEmpty { Section("Completed") { rows(finished) } }
+                Section("Storage") {
+                    LabeledContent("Downloads used", value: usedSpace)
+                    LabeledContent("Available on iPhone", value: availableSpace)
                 }
-                .onDelete { offsets in offsets.map { displayed[$0] }.forEach(downloads.delete) }
             }
             .navigationTitle("Downloads")
             .searchable(text: $searchText, prompt: "Search downloads")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingDiagnostics = true } label: { Label("Error log", systemImage: "stethoscope") }
+                        .accessibilityIdentifier("downloads.errorLog")
+                }
+            }
+            .sheet(isPresented: $showingDiagnostics) { DiagnosticsScreen() }
         }
+    }
+
+    @ViewBuilder private func rows(_ group: [DownloadItem]) -> some View {
+        ForEach(group) { item in
+            DownloadRow(item: item, progress: downloads.progress(of: item), estimatedSeconds: downloads.estimatedSeconds(of: item),
+                        cancel: { downloads.cancel(item) }, retry: { downloads.retry(item) }, restart: { downloads.restart(item) },
+                        delete: { downloads.delete(item) }, openSource: { openSource(item.sourcePageURL) })
+        }
+        .onDelete { offsets in offsets.map { group[$0] }.forEach(downloads.delete) }
     }
 
     private var usedSpace: String {
@@ -59,8 +75,11 @@ private struct DownloadRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: item.kind == .hls ? "dot.radiowaves.left.and.right" : "film").foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: item.kind == .hls ? "play.rectangle" : "film")
+                    .font(.title3)
+                    .frame(width: 42, height: 42)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
                 Text(item.title).font(.headline).lineLimit(2)
             }
             HStack {
@@ -68,7 +87,7 @@ private struct DownloadRow: View {
                 Spacer()
                 if item.status == .downloading { Text(progress, format: .percent.precision(.fractionLength(0))).font(.caption.monospacedDigit()) }
             }
-            if item.status != .completed { ProgressView(value: progress).accessibilityLabel("Download progress") }
+            if item.isActive { ProgressView(value: progress).accessibilityLabel("Download progress") }
             if item.requiresReferer && item.isActive {
                 Text("Keep the app open until this stream finishes.")
                     .font(.caption).foregroundStyle(.orange)
@@ -80,18 +99,22 @@ private struct DownloadRow: View {
             if item.status == .downloading, let estimatedSeconds, progress > 0, progress < 1 {
                 Text(estimateLabel(estimatedSeconds)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            if let error = item.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
+            if let error = item.errorMessage {
+                Text(error.contains("CoreMediaErrorDomain") ? "The video server stopped this transfer. Open the page and try again later." : error)
+                    .font(.caption).foregroundStyle(.orange).lineLimit(3)
+            }
             HStack {
                 if item.isActive { Button("Cancel", action: cancel) }
                 if item.status == .failed || item.status == .cancelled {
-                    Button(canResume ? "Resume" : "Retry", action: retry)
-                    if canResume { Button("Start Over", action: restart) }
+                    if !isRateLimited { Button(canResume ? "Resume" : "Retry", action: retry).buttonStyle(.borderedProminent) }
+                    if item.kind == .hls || isRateLimited { Button("Open Page", action: openSource).buttonStyle(.borderedProminent) }
                 }
-                if item.status == .failed && item.kind == .hls { Button("Open Page", action: openSource) }
                 Spacer()
-                Button("Delete", role: .destructive, action: delete)
+                Menu {
+                    if canResume { Button("Start Over", action: restart) }
+                    Button("Delete", role: .destructive, action: delete)
+                } label: { Label("More", systemImage: "ellipsis") }
             }
-            .buttonStyle(.bordered)
         }
         .padding(.vertical, 5)
         .accessibilityElement(children: .contain)
@@ -112,6 +135,7 @@ private struct DownloadRow: View {
     private var canResume: Bool {
         item.kind != .hls && FileManager.default.fileExists(atPath: item.resumeDataURL.path)
     }
+    private var isRateLimited: Bool { item.errorMessage?.contains("HTTP 429") == true }
 
     private func estimateLabel(_ seconds: TimeInterval) -> String {
         let minutes = max(1, Int(ceil(seconds / 60)))

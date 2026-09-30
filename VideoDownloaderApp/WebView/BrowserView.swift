@@ -8,12 +8,13 @@ struct BrowserView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        // On iPhone, WebKit presents the native full-screen player for HTML5 video.
-        configuration.allowsInlineMediaPlayback = false
+        // Keep a site's player controls and external caption overlays with its
+        // video. Forcing native full screen hides JW Player subtitle layers.
+        configuration.allowsInlineMediaPlayback = true
         if LaunchOptions.autoplay { configuration.mediaTypesRequiringUserActionForPlayback = [] }
         let contentController = WKUserContentController()
         contentController.add(WeakScriptMessageHandler(model.discovery), name: MediaDiscovery.messageName)
-        model.discovery.userScripts(diagnosticsEnabled: model.diagnostics != nil, autoplay: LaunchOptions.autoplay)
+        model.discovery.userScripts(diagnosticsEnabled: LaunchOptions.diagnosticsEnabled, autoplay: LaunchOptions.autoplay)
             .forEach(contentController.addUserScript)
         configuration.userContentController = contentController
 

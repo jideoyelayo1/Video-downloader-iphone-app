@@ -7,6 +7,6 @@ final class LaunchTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Browse"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.tabBars.buttons["Downloads"].exists)
-        XCTAssertTrue(app.tabBars.buttons["Library"].exists)
+        XCTAssertTrue(app.tabBars.buttons["My Videos"].exists)
     }
 }
