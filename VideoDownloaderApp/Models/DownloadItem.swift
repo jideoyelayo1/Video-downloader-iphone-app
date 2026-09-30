@@ -153,9 +153,34 @@ final class Bookmark {
     }
 
     static let starters: [(String, URL)] = [
-        ("My***REMOVED*** – Lanterns S1E1", URL(string: "https://my***REMOVED***.lol/watch/tv/95350-free-lanterns-hd/season-1/episode-1/")!),
-        ("***REMOVED*** – Mushoku Tensei III E13", URL(string: "https://www.***REMOVED***.tv/watch/178789/mushoku-tensei-iii-isekai-ittara-honki-dasu?ep=13")!)
+        ("***REMOVED***", URL(string: "https://***REMOVED***tv.to/home")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.to/home")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.to/")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.to/anime")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.ws/")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.live/")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.com/")!)
     ]
+
+    static let oldStarterURLs: Set<String> = [
+        "https://my***REMOVED***.lol/watch/tv/95350-free-lanterns-hd/season-1/episode-1/",
+        "https://www.***REMOVED***.tv/watch/178789/mushoku-tensei-iii-isekai-ittara-honki-dasu?ep=13"
+    ]
+}
+
+@Model
+final class BrowsingHistoryEntry {
+    @Attribute(.unique) var id: UUID
+    var title: String
+    var url: URL
+    var visitedAt: Date
+
+    init(id: UUID = UUID(), title: String, url: URL, visitedAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.url = url
+        self.visitedAt = visitedAt
+    }
 }
 
 /// One-time migration of the pre-SwiftData `downloads.json` queue.

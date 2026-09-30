@@ -45,7 +45,7 @@ struct BrowserView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             model.isLoading = false
-            model.syncState()
+            model.didFinishPage()
             if BrowserSession.userAgent == nil {
                 webView.evaluateJavaScript("navigator.userAgent") { value, _ in
                     Task { @MainActor in BrowserSession.userAgent = value as? String }
@@ -80,6 +80,7 @@ final class BrowserViewModel: ObservableObject {
 
     let discovery = MediaDiscoveryController()
     let diagnostics: DiagnosticsLog?
+    private let history: BrowserHistoryStore?
     private weak var webView: WKWebView?
     private var pendingURL: URL?
     private let validator: CandidateValidator
@@ -89,9 +90,11 @@ final class BrowserViewModel: ObservableObject {
     /// Incremented on every page change so late probe results for the old page are dropped.
     private var generation = 0
 
-    init(initialURL: URL? = LaunchOptions.initialURL, diagnostics: DiagnosticsLog? = nil, validator: CandidateValidator = CandidateValidator(),
+    init(initialURL: URL? = LaunchOptions.initialURL, diagnostics: DiagnosticsLog? = nil, history: BrowserHistoryStore? = nil,
+         validator: CandidateValidator = CandidateValidator(),
          contextProvider: @escaping DownloadManager.ContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }) {
         self.diagnostics = diagnostics
+        self.history = history
         self.validator = validator
         self.contextProvider = contextProvider
         pendingURL = initialURL
@@ -138,6 +141,11 @@ final class BrowserViewModel: ObservableObject {
         pageTitle = webView.title ?? ""
     }
 
+    func didFinishPage() {
+        syncState()
+        if let url { history?.record(url, title: pageTitle) }
+    }
+
     func loadFailed(_ error: Error) {
         isLoading = false
         let nsError = error as NSError
@@ -158,6 +166,7 @@ final class BrowserViewModel: ObservableObject {
         if let newURL, ["http", "https"].contains(newURL.scheme?.lowercased()) {
             url = newURL
             addressText = newURL.absoluteString
+            if !force { history?.record(newURL, title: newURL.host ?? "") }
         }
     }
 

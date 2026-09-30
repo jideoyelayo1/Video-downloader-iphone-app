@@ -5,11 +5,8 @@ struct BrowserScreen: View {
     @ObservedObject var model: BrowserViewModel
     let showDownloads: () -> Void
     @EnvironmentObject private var downloads: DownloadManager
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Bookmark.createdAt) private var bookmarks: [Bookmark]
     @State private var showingCandidates = false
-    @State private var showingBookmarks = false
-    @State private var showingDiagnostics = false
+    @State private var showingCollections = false
 
     var body: some View {
         NavigationStack {
@@ -22,7 +19,10 @@ struct BrowserScreen: View {
             .navigationTitle(model.pageTitle.isEmpty ? "Browse" : model.pageTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { bookmarksMenu }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showingCollections = true } label: { Label("Bookmarks and History", systemImage: "book.closed") }
+                        .accessibilityIdentifier("browser.bookmarks")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingCandidates = true } label: {
                         Label(model.candidates.isEmpty ? "Found videos" : "Found videos (\(model.candidates.count))", systemImage: "film.stack")
@@ -42,8 +42,11 @@ struct BrowserScreen: View {
                 }
                 .presentationDetents([.medium, .large])
             }
-            .sheet(isPresented: $showingBookmarks) { BookmarksSheet() }
-            .sheet(isPresented: $showingDiagnostics) { DiagnosticsScreen() }
+            .sheet(isPresented: $showingCollections) {
+                BrowserCollectionsSheet(currentURL: model.url, currentTitle: model.pageTitle) { url in
+                    model.navigate(to: url.absoluteString)
+                }
+            }
             .alert("Browser error", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
                 Button("OK", role: .cancel) { model.errorMessage = nil }
             } message: { Text(model.errorMessage ?? "") }
@@ -77,26 +80,6 @@ struct BrowserScreen: View {
         .padding(.vertical, 6)
     }
 
-    private var bookmarksMenu: some View {
-        Menu {
-            ForEach(bookmarks) { bookmark in
-                Button(bookmark.title) { model.navigate(to: bookmark.url.absoluteString) }
-            }
-            Divider()
-            Button {
-                guard let url = model.url else { return }
-                modelContext.insert(Bookmark(title: model.pageTitle.isEmpty ? (url.host ?? url.absoluteString) : model.pageTitle, url: url))
-                try? modelContext.save()
-            } label: { Label("Add This Page", systemImage: "plus") }
-            .disabled(model.url == nil)
-            Button { showingBookmarks = true } label: { Label("Edit Bookmarks", systemImage: "pencil") }
-            Divider()
-            Button { showingDiagnostics = true } label: { Label("Diagnostics", systemImage: "stethoscope") }
-        } label: {
-            Label("Bookmarks", systemImage: "book")
-        }
-        .accessibilityIdentifier("browser.bookmarks")
-    }
 }
 
 private struct CandidateSheet: View {
@@ -218,31 +201,167 @@ private struct CandidateRow: View {
     }
 }
 
-private struct BookmarksSheet: View {
+private struct BrowserCollectionsSheet: View {
+    enum Collection: String, CaseIterable { case bookmarks = "Bookmarks", history = "History" }
+
+    let currentURL: URL?
+    let currentTitle: String
+    let navigate: (URL) -> Void
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Bookmark.createdAt) private var bookmarks: [Bookmark]
+    @Query(sort: \BrowsingHistoryEntry.visitedAt, order: .reverse) private var history: [BrowsingHistoryEntry]
+    @State private var collection = Collection.bookmarks
+    @State private var searchText = ""
+    @State private var renaming: Bookmark?
+    @State private var newTitle = ""
+    @State private var showingClearHistory = false
+    @State private var showingDiagnostics = false
+
+    private var visibleBookmarks: [Bookmark] {
+        bookmarks.filter { searchText.isEmpty || $0.title.localizedStandardContains(searchText)
+            || $0.url.absoluteString.localizedStandardContains(searchText) }
+    }
+
+    private var visibleHistory: [BrowsingHistoryEntry] {
+        history.filter { searchText.isEmpty || $0.title.localizedStandardContains(searchText)
+            || $0.url.absoluteString.localizedStandardContains(searchText) }
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                if bookmarks.isEmpty { ContentUnavailableView("No bookmarks", systemImage: "book") }
-                ForEach(bookmarks) { bookmark in
-                    VStack(alignment: .leading) {
-                        Text(bookmark.title)
-                        Text(bookmark.url.absoluteString).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
+            VStack(spacing: 0) {
+                Picker("Collection", selection: $collection) {
+                    ForEach(Collection.allCases, id: \.self) { tab in Text(tab.rawValue).tag(tab) }
                 }
-                .onDelete { offsets in
-                    offsets.map { bookmarks[$0] }.forEach(modelContext.delete)
-                    try? modelContext.save()
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                .accessibilityIdentifier("browser.collectionPicker")
+                List {
+                    if collection == .bookmarks { bookmarksContent }
+                    else { historyContent }
                 }
+                .listStyle(.insetGrouped)
             }
-            .navigationTitle("Bookmarks")
+            .navigationTitle(collection.rawValue)
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: collection == .bookmarks ? "Search bookmarks" : "Search history")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { EditButton() }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showingDiagnostics = true } label: { Label("Diagnostics", systemImage: "stethoscope") }
+                }
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }
+            .sheet(isPresented: $showingDiagnostics) { DiagnosticsScreen() }
+            .alert("Rename bookmark", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField("Name", text: $newTitle)
+                Button("Save") {
+                    let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let renaming, !title.isEmpty { renaming.title = title; try? modelContext.save() }
+                    renaming = nil
+                }
+                Button("Cancel", role: .cancel) { renaming = nil }
+            }
+            .confirmationDialog("Clear all browsing history?", isPresented: $showingClearHistory) {
+                Button("Clear All History", role: .destructive) {
+                    history.forEach(modelContext.delete)
+                    try? modelContext.save()
+                }
+            } message: { Text("This removes every page in History from this device.") }
         }
+    }
+
+    @ViewBuilder private var bookmarksContent: some View {
+        if let currentURL, ["http", "https"].contains(currentURL.scheme?.lowercased() ?? "") {
+            Section {
+                Button {
+                    guard !bookmarks.contains(where: { $0.url == currentURL }) else { return }
+                    let title = currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    modelContext.insert(Bookmark(title: title.isEmpty ? (currentURL.host ?? currentURL.absoluteString) : title, url: currentURL))
+                    try? modelContext.save()
+                } label: {
+                    Label(bookmarks.contains(where: { $0.url == currentURL }) ? "Page Bookmarked" : "Add This Page",
+                          systemImage: bookmarks.contains(where: { $0.url == currentURL }) ? "bookmark.fill" : "bookmark.badge.plus")
+                }
+                .disabled(bookmarks.contains(where: { $0.url == currentURL }))
+                .accessibilityIdentifier("browser.addBookmark")
+            }
+        }
+        Section("Saved Sites") {
+            if visibleBookmarks.isEmpty {
+                ContentUnavailableView(searchText.isEmpty ? "No bookmarks" : "No matching bookmarks", systemImage: "bookmark",
+                                       description: Text(searchText.isEmpty ? "Save a site or page to find it here." : "Try another search."))
+            }
+            ForEach(visibleBookmarks) { bookmark in
+                HStack(spacing: 8) {
+                    Button {
+                        navigate(bookmark.url)
+                        dismiss()
+                    } label: { BrowserCollectionRow(title: bookmark.title, detail: bookmark.url.host ?? "") }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("bookmark.site")
+                    Menu {
+                        Button("Rename", systemImage: "pencil") { newTitle = bookmark.title; renaming = bookmark }
+                        Button("Delete", systemImage: "trash", role: .destructive) { modelContext.delete(bookmark); try? modelContext.save() }
+                    } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 40, minHeight: 44) }
+                        .accessibilityLabel("More options for \(bookmark.title)")
+                }
+                .swipeActions { Button("Delete", role: .destructive) { modelContext.delete(bookmark); try? modelContext.save() } }
+            }
+        }
+    }
+
+    @ViewBuilder private var historyContent: some View {
+        Section {
+            if visibleHistory.isEmpty {
+                ContentUnavailableView(searchText.isEmpty ? "No history yet" : "No matching pages", systemImage: "clock.arrow.circlepath",
+                                       description: Text(searchText.isEmpty ? "Pages you visit in Browse will appear here." : "Try another search."))
+            }
+            ForEach(visibleHistory) { entry in
+                Button {
+                    navigate(entry.url)
+                    dismiss()
+                } label: {
+                    BrowserCollectionRow(title: entry.title,
+                                         detail: "\(entry.url.host ?? "") · \(entry.visitedAt.formatted(date: .abbreviated, time: .shortened))")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("history.page")
+                .swipeActions { Button("Delete", role: .destructive) { modelContext.delete(entry); try? modelContext.save() } }
+            }
+        } header: {
+            HStack {
+                Text("Recently Visited")
+                Spacer()
+                if !history.isEmpty {
+                    Button("Clear All") { showingClearHistory = true }
+                        .font(.caption)
+                        .accessibilityIdentifier("history.clearAll")
+                }
+            }
+        }
+    }
+}
+
+private struct BrowserCollectionRow: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "globe")
+                .font(.headline)
+                .foregroundStyle(.cyan)
+                .frame(width: 38, height: 38)
+                .background(.cyan.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
     }
 }

@@ -103,8 +103,14 @@ final class DownloadFlowUITests: XCTestCase {
         waitForReadyCandidates(1)
 
         app.buttons["browser.bookmarks"].tap()
+        XCTAssertTrue(app.staticTexts["***REMOVED***"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["***REMOVED***"].exists)
+        XCTAssertTrue(app.staticTexts["***REMOVED***"].exists)
+        XCTAssertTrue(app.staticTexts["***REMOVED***"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Lanterns S1E1'")).firstMatch.exists)
         XCTAssertTrue(app.buttons["Add This Page"].waitForExistence(timeout: 5))
         app.buttons["Add This Page"].tap()
+        app.buttons["Done"].tap()
 
         let address = app.textFields["browser.address"]
         app.buttons["Clear address"].tap()
@@ -114,6 +120,18 @@ final class DownloadFlowUITests: XCTestCase {
         button.tap()
         XCTAssertTrue(app.buttons["candidate.download"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons.matching(identifier: "candidate.download").count, 1, "navigating clears the previous page's candidates")
+    }
+
+    func testBrowserHistoryRecordsAndClearsVisitedPage() throws {
+        launch(at: "/page/basic.html")
+        XCTAssertTrue(app.buttons["browser.foundVideos"].waitForExistence(timeout: 10))
+        app.buttons["browser.bookmarks"].tap()
+        app.segmentedControls.buttons["History"].tap()
+        XCTAssertTrue(app.buttons["history.page"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["history.page"].firstMatch.label.contains("Basic Video Page"))
+        app.buttons["history.clearAll"].tap()
+        app.buttons["Clear All History"].tap()
+        XCTAssertTrue(app.staticTexts["No history yet"].waitForExistence(timeout: 5))
     }
 
     func testHLSStreamIsValidatedWithQualityChoices() throws {

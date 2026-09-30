@@ -3,7 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var downloads: DownloadManager
     @EnvironmentObject private var playback: PlaybackCoordinator
-    @StateObject private var browser = BrowserViewModel(diagnostics: AppServices.shared.diagnostics)
+    @StateObject private var browser = BrowserViewModel(diagnostics: AppServices.shared.diagnostics, history: AppServices.shared.history)
     @State private var selection = Tab.library
 
     enum Tab { case browse, downloads, library }

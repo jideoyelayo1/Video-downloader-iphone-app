@@ -34,22 +34,20 @@ final class AppServices {
     let downloads: DownloadManager
     let diagnostics = DiagnosticsLog()
     let playback: PlaybackCoordinator
+    let history: BrowserHistoryStore
 
     private init() {
         let inMemory = LaunchOptions.isRunningUnitTests || LaunchOptions.flag("-UITestInMemory")
         do {
-            container = try ModelContainer(for: DownloadItem.self, Bookmark.self, DownloadFolder.self,
+            container = try ModelContainer(for: DownloadItem.self, Bookmark.self, DownloadFolder.self, BrowsingHistoryEntry.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: inMemory))
         } catch {
             fatalError("Unable to open the download library: \(error)")
         }
         let context = container.mainContext
         if !inMemory { LegacyDownloadImport.run(into: context) }
-        if (try? context.fetchCount(FetchDescriptor<Bookmark>())) == 0, !UserDefaults.standard.bool(forKey: "seededBookmarks") || inMemory {
-            for (title, url) in Bookmark.starters { context.insert(Bookmark(title: title, url: url)) }
-            try? context.save()
-            if !inMemory { UserDefaults.standard.set(true, forKey: "seededBookmarks") }
-        }
+        StarterBookmarks.install(in: context, inMemory: inMemory)
+        history = BrowserHistoryStore(context: context)
         downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)
         playback = PlaybackCoordinator(context: context, diagnostics: diagnostics)
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }

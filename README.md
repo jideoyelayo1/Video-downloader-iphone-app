@@ -2,7 +2,7 @@
 
 A personal iOS 17+ SwiftUI app: an in-app browser that finds the videos a page plays, downloads them in the background, and keeps them in an offline library.
 
-- **Browse** — `WKWebView` browser with bookmarks, back/forward, and a **Found videos** sheet. Each candidate is checked before it can be downloaded and shows *Ready* (with size/duration and HLS quality choices), *Expired*, *Protected (DRM)*, *Live*, or *Unavailable*.
+- **Browse** — `WKWebView` browser with searchable bookmarks and browsing history, back/forward, and a **Found videos** sheet. Each candidate is checked before it can be downloaded and shows *Ready* (with size/duration and HLS quality choices), *Expired*, *Protected (DRM)*, *Live*, or *Unavailable*.
 - **Downloads** — progress, estimated time remaining, space used and available, search, cancel, retry, and a Start Over choice when a direct file has resume data. Ordinary files use a background `URLSession`; HLS streams use `AVAssetDownloadURLSession`. Downloads continue while the app is suspended and are recovered after relaunch.
 - **My Videos** — the opening screen shows Continue Watching, larger thumbnails, search, folders, and offline playback. Rename, delete, and export (share sheet / Save to Files) remain available for ordinary video files. HLS downloads play inside the app only.
 
@@ -20,7 +20,7 @@ With a free account the app must be re-installed from Xcode every 7 days.
 
 ## Using it
 
-1. In **Browse**, open a page (the bookmark menu has the two starter sites) and start the video playing — many players only load their stream after Play.
+1. In **Browse**, tap the book icon for **Bookmarks** and **History**. Starter bookmarks open site homepages, including anime sites and ***REMOVED*** and ***REMOVED*** as ***REMOVED*** alternatives. You can save the current page, rename or delete bookmarks, reopen visited pages, and clear history. Start a video playing — many players only load their stream after Play.
 2. Tap **Found videos**. Wait for *Ready*, then tap **Download** (for HLS choose a quality or *Best quality*). If nothing appears, tap **Refresh** in the sheet.
 3. Watch progress and storage in **Downloads**; search, organize into folders, play, rename, export, or delete in **My Videos**. The folder button creates folders; long-press a video to move it. Tap a Continue Watching card to resume immediately.
 
@@ -42,7 +42,7 @@ HTTP 429 means the video server is limiting requests. Wait before trying again, 
 | Validation | `Services/CandidateValidator.swift` (4 KB range probe for files; manifest, variant, DRM/live, and first-segment checks for HLS), `Services/HLSManifest.swift` |
 | Request context | `Services/BrowserSession.swift`, `Services/RequestContext.swift` — browser cookies are scoped under RFC 6265 domain/path/secure rules for each request (including HLS child hosts), with the browser User-Agent and an origin-only Referer for cross-origin media. Direct downloads inject only cookies eligible for the starting URL into the URL loading system's cookie store. Strict cross-host behavior for background-session redirects remains unverified. |
 | Downloads | `Services/DownloadManager.swift`, `Services/HLSMediaSelections.swift` (audio and captions), `Services/HLSRefererProxy.swift` (Referer-required streams), `Services/DownloadError.swift`, `Services/DownloadResponseValidation.swift`, `Services/Filenames.swift` |
-| Storage | SwiftData models in `Models/DownloadItem.swift` (`DownloadItem`, `Bookmark`); files in Application Support; HLS packages stay where AVFoundation puts them. Old `downloads.json` queues are imported once. |
+| Storage | SwiftData models in `Models/DownloadItem.swift` (`DownloadItem`, `Bookmark`, `BrowsingHistoryEntry`); files in Application Support; HLS packages stay where AVFoundation puts them. Old `downloads.json` queues are imported once. The two episode-specific starter bookmarks are replaced once without changing personal bookmarks. |
 | UI | `Views/`, `WebView/BrowserView.swift` |
 
 **Downloads → Error log** opens the shareable diagnostics log in every build. It records download, validation, playback, caption, and PiP events across launches, keeping the latest 1,000 entries. URLs in the log omit credentials, query values, and fragments. Debug builds additionally record detailed browser requests. The log is written to `Documents/diagnostics.log` in the app container.
