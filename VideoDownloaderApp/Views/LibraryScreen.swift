@@ -42,17 +42,25 @@ struct LibraryScreen: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 14) {
                                 ForEach(continueWatching) { item in
-                                    Button { start(item, at: item.playbackPosition ?? 0) } label: {
-                                        VStack(alignment: .leading, spacing: 7) {
+                                    VStack(alignment: .leading, spacing: 7) {
+                                        Button { start(item, at: item.playbackPosition ?? 0) } label: {
                                             VideoThumbnailView(item: item, width: 174, height: 98)
+                                        }
+                                        .buttonStyle(.plain)
+                                        HStack(alignment: .top, spacing: 4) {
                                             Text(item.title).font(.subheadline.bold()).lineLimit(2)
                                                 .foregroundStyle(.primary)
-                                            Label("Resume", systemImage: "play.fill")
-                                                .font(.caption).foregroundStyle(.tint)
+                                            Spacer(minLength: 0)
+                                            Menu { actions(for: item) } label: {
+                                                Image(systemName: "ellipsis.circle")
+                                                    .accessibilityLabel("More options for \(item.title)")
+                                            }
                                         }
-                                        .frame(width: 174, alignment: .leading)
+                                        Text(downloadDate(for: item)).font(.caption2).foregroundStyle(.secondary)
+                                        Label("Resume", systemImage: "play.fill")
+                                            .font(.caption).foregroundStyle(.tint)
                                     }
-                                    .buttonStyle(.plain)
+                                    .frame(width: 174, alignment: .leading)
                                 }
                             }
                             .padding(.vertical, 4)
@@ -73,15 +81,26 @@ struct LibraryScreen: View {
                 }
                 Section(displayed.isEmpty ? "" : "All Videos") {
                     ForEach(displayed) { item in
-                        Button { open(item) } label: { LibraryRow(item: item) }
-                            .accessibilityIdentifier("library.item")
-                            .contextMenu { actions(for: item) }
-                            .swipeActions(edge: .trailing) {
-                                Button("Delete", role: .destructive) { downloads.delete(item) }
-                                Button("Rename") { beginRename(item) }.tint(.blue)
+                        HStack(spacing: 4) {
+                            Button { open(item) } label: { LibraryRow(item: item) }
+                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityIdentifier("library.item")
+                            Menu { actions(for: item) } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.title3)
+                                    .frame(minWidth: 40, minHeight: 44)
+                                    .accessibilityLabel("More options for \(item.title)")
                             }
+                            .accessibilityIdentifier("library.moreOptions")
+                        }
+                        .contextMenu { actions(for: item) }
+                        .swipeActions(edge: .trailing) {
+                            Button("Delete", role: .destructive) { downloads.delete(item) }
+                            Button("Rename") { beginRename(item) }.tint(.blue)
                         }
                     }
+                }
             }
             .navigationTitle("My Videos")
             .searchable(text: $searchText, prompt: "Search videos")
@@ -137,6 +156,13 @@ struct LibraryScreen: View {
     private func beginRename(_ item: DownloadItem) {
         newTitle = item.title
         renaming = item
+    }
+
+    private func downloadDate(for item: DownloadItem) -> String {
+        if let completedAt = item.completedAt {
+            return "Downloaded \(completedAt.formatted(date: .abbreviated, time: .omitted))"
+        }
+        return "Added \(item.createdAt.formatted(date: .abbreviated, time: .omitted))"
     }
 
     private func open(_ item: DownloadItem) {
@@ -217,10 +243,11 @@ private struct LibraryRow: View {
     private var fileExists: Bool { item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
 
     private var detail: String {
-        guard fileExists else { return "File missing — delete and download again" }
-        var parts: [String] = []
+        let date = item.completedAt.map { "Downloaded \($0.formatted(date: .abbreviated, time: .omitted))" }
+            ?? "Added \(item.createdAt.formatted(date: .abbreviated, time: .omitted))"
+        guard fileExists else { return "\(date) · File missing" }
+        var parts = [date]
         if let size = item.fileSize { parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) }
-        if let date = item.completedAt { parts.append(date.formatted(date: .abbreviated, time: .shortened)) }
         return parts.joined(separator: " · ")
     }
 }

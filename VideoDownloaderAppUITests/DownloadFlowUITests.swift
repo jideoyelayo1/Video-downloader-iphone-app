@@ -59,6 +59,7 @@ final class DownloadFlowUITests: XCTestCase {
         let libraryItem = app.buttons["library.item"].firstMatch
         XCTAssertTrue(libraryItem.waitForExistence(timeout: 5))
         XCTAssertTrue(libraryItem.label.contains("Basic Video Page"), libraryItem.label)
+        XCTAssertTrue(libraryItem.label.contains("Downloaded"), libraryItem.label)
 
         // Playback
         libraryItem.tap()
@@ -81,7 +82,7 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: libraryItem)], timeout: 5), .completed)
 
         // Rename
-        libraryItem.press(forDuration: 1.2)
+        app.buttons["library.moreOptions"].firstMatch.tap()
         app.buttons["Rename"].firstMatch.tap()
         let field = app.alerts.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))

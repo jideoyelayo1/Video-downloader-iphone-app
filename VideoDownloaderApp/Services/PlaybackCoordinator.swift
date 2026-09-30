@@ -76,7 +76,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             player.isMuted = false
             guard loadID == token else { return }
             controller.player = player
-            await loadCaptions(from: asset, token: token)
+            await loadCaptions(from: asset, playerItem: playerItem, token: token)
             guard loadID == token else { return }
             timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 600), queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in self?.savePosition() }
@@ -89,15 +89,36 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
     }
 
-    private func loadCaptions(from asset: AVURLAsset, token: UUID) async {
-        guard let group = try? await asset.loadMediaSelectionGroup(for: .legible), loadID == token else { return }
+    private func loadCaptions(from asset: AVURLAsset, playerItem: AVPlayerItem, token: UUID) async {
+        guard let group = try? await asset.loadMediaSelectionGroup(for: .legible) else {
+            if loadID == token {
+                diagnostics.record(event: "captions", url: asset.url.absoluteString,
+                                   note: "No caption track in saved media; the source site may provide captions separately")
+            }
+            return
+        }
+        guard loadID == token else { return }
         let cached = asset.assetCache?.mediaSelectionOptions(in: group)
         let options = cached ?? group.options
         captionGroup = group
         captionOptions = options
         captionNames = options.map { $0.displayName }
-        if !group.options.isEmpty && options.isEmpty {
-            diagnostics.record(event: "captions", url: asset.url.absoluteString, note: "Tracks advertised but absent from offline package")
+        if let preferred = try? await asset.load(.preferredMediaSelection),
+           let selected = preferred.selectedMediaOption(in: group),
+           let index = options.firstIndex(of: selected) {
+            playerItem.select(selected, in: group)
+            selectedCaption = index
+        } else if let first = options.first {
+            playerItem.select(first, in: group)
+            selectedCaption = 0
+        }
+        if let selectedCaption {
+            diagnostics.record(event: "captions", url: asset.url.absoluteString,
+                               note: "Selected \(options[selectedCaption].displayName) by default")
+        }
+        if options.isEmpty {
+            diagnostics.record(event: "captions", url: asset.url.absoluteString,
+                               note: group.options.isEmpty ? "No caption track in saved media" : "Tracks advertised but absent from offline package")
         }
     }
 
@@ -207,7 +228,8 @@ struct PersistentPlayerScreen: View {
                 Spacer()
                 Menu {
                     if playback.captionNames.isEmpty {
-                        Button("No captions saved with this video") {}.disabled(true)
+                        Button("No caption track in saved video") {}.disabled(true)
+                        Button("Try subtitles in the site's player in Browse") {}.disabled(true)
                     } else {
                         Button("Off") { playback.chooseCaption(nil) }
                         ForEach(Array(playback.captionNames.enumerated()), id: \.offset) { index, name in
