@@ -67,3 +67,59 @@ setTimeout(() => {
   }
   console.log('WebKit discovery JavaScript fixture checks passed');
 }, 150);
+
+// Verbose diagnostics: every resource is reported once by the buffered observer.
+// A tap or Refresh must not re-post the whole buffer, and a playlist seen through
+// both its XHR/fetch response and its resource entry yields one candidate.
+(() => {
+  const posted = [];
+  const docListeners = {};
+  let observerCallback;
+  let fetchResponse;
+  const entries = [
+    { name: 'https://cdn.example/master.m3u8', startTime: 5, initiatorType: 'xmlhttprequest' },
+    { name: 'https://cdn.example/seg-1.png', startTime: 6, initiatorType: 'xmlhttprequest' }
+  ];
+  const win = {
+    webkit: { messageHandlers: { mediaDiscovery: { postMessage: value => posted.push(value) } } },
+    addEventListener: () => {},
+    __vdaDiagnostics: true,
+    fetch: () => Promise.resolve(fetchResponse)
+  };
+  const ctx = {
+    document: {
+      baseURI: 'https://player.example/e/1', title: 'Player', documentElement: {},
+      querySelectorAll: () => [], addEventListener: (name, callback) => { docListeners[name] = callback; }
+    },
+    location: { href: 'https://player.example/e/1' },
+    window: win,
+    history: { pushState: function () {}, replaceState: function () {} },
+    MutationObserver: class { observe() {} },
+    PerformanceObserver: class {
+      constructor(callback) { observerCallback = callback; }
+      observe(options) { if (options.buffered) observerCallback({ getEntries: () => entries.slice() }); }
+    },
+    performance: { getEntriesByType: () => entries.slice(), now: () => 1000 },
+    setTimeout, URL, console
+  };
+  win.top = win;
+  vm.runInNewContext(match[1], ctx);
+  const resourceEvents = () => posted.filter(message => message.event === 'resource').length;
+  const candidates = () => posted.filter(message => !message.event && message.url === entries[0].name).length;
+  if (resourceEvents() !== 2) throw new Error(`expected each buffered resource once, got ${resourceEvents()}`);
+  if (candidates() !== 1) throw new Error(`expected one playlist candidate, got ${candidates()}`);
+
+  docListeners.pointerdown({ isTrusted: true });
+  docListeners.touchstart({ isTrusted: true });
+  if (resourceEvents() !== 2) throw new Error('a tap re-posted the resource buffer');
+
+  fetchResponse = { url: entries[0].name, headers: { get: () => 'application/vnd.apple.mpegurl' } };
+  win.fetch(entries[0].name).then(() => setTimeout(() => {
+    if (!posted.some(message => message.event === 'response' && message.url === entries[0].name)) throw new Error('fetch response was not logged');
+    if (candidates() !== 1) throw new Error('the fetch response duplicated the resource-timing candidate');
+    win.__vdaRescan();
+    if (resourceEvents() !== 2) throw new Error('Refresh re-posted the resource buffer');
+    if (candidates() !== 2) throw new Error('Refresh should report the playlist again');
+    console.log('WebKit discovery diagnostics checks passed');
+  }, 0));
+})();

@@ -65,7 +65,9 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         }
         const kind = classify(absolute, contentType);
         if (!mediaElement && kind === 'unknown') return;
-        const key = absolute + '|' + mediaElement + '|' + (contentType || '');
+        // A playlist is often seen twice (its XHR response and its resource
+        // timing entry); report it again only if it is classified differently.
+        const key = absolute + '|' + mediaElement + '|' + kind;
         if (seen.has(key)) return;
         seen.add(key);
         post({ url: absolute, kind, title: document.title || 'Discovered video', documentURL: location.href,
@@ -97,12 +99,12 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
           pendingMediaNodes.clear();
         }, 100);
       };
+      // Diagnostics come only from the PerformanceObserver below, which is
+      // buffered and so already reports every entry once. Re-posting the whole
+      // buffer here would repeat every request on each tap or Refresh.
       const scanResources = () => {
         try {
           performance.getEntriesByType('resource').forEach(e => {
-            if (window.__vdaDiagnostics && ['xmlhttprequest', 'fetch', 'video', 'audio', 'other'].includes(e.initiatorType)) {
-              post({ event: 'resource', url: e.name, via: e.initiatorType });
-            }
             if (relevantResource(e.name, e.startTime)) send(e.name, null, false, null, 'resource');
           });
         } catch (_) {}
