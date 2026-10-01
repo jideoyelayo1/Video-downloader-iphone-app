@@ -198,6 +198,9 @@ final class DownloadFlowUITests: XCTestCase {
         off.tap()
         XCTAssertEqual(captions.value as? String, "Off")
         app.buttons["player.done"].tap()
+        // Taps during the player's closing animation don't reach the list (notably on iOS 18).
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["player.done"])
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
 
         item.tap()
         XCTAssertTrue(captions.waitForExistence(timeout: 10))
