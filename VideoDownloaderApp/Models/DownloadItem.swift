@@ -20,6 +20,12 @@ enum DownloadStorage {
         return directory
     }()
 
+    static let subtitlesDirectory: URL = {
+        let directory = applicationSupportDirectory.appendingPathComponent("Subtitles", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }()
+
     static func thumbnailURL(for id: UUID) -> URL {
         thumbnailDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("jpg")
     }

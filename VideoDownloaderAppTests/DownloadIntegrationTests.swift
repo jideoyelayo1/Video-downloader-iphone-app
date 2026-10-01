@@ -280,6 +280,19 @@ final class DownloadIntegrationTests: XCTestCase {
         try await waitForFinish(orphan)
         XCTAssertEqual(orphan.status, .completed, orphan.errorMessage ?? "")
     }
+
+    func testSiteSubtitlesAreSavedWithTheDownloadAndDeletedWithIt() async throws {
+        let page = server.url("/page/tracks.html")
+        let tracks = [SubtitleTrack(url: server.url("/subs/en.vtt"), label: "English", language: "en", isDefault: true, referer: page),
+                      SubtitleTrack(url: server.url("/subs/es.vtt"), label: "Español", language: "es", isDefault: false, referer: page)]
+        let item = try XCTUnwrap(manager.start(candidate("/video.mp4"), subtitles: tracks))
+        let id = item.id
+        try await waitUntil { SubtitleStore.saved(for: id).count == 2 }
+        XCTAssertEqual(SubtitleStore.saved(for: id).first?.isDefault, true)
+        try await waitUntil { item.status == .completed }
+        manager.delete(item)
+        XCTAssertTrue(SubtitleStore.saved(for: id).isEmpty)
+    }
 }
 
 /// Probes run before a candidate is offered.

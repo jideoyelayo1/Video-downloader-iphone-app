@@ -67,7 +67,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     @discardableResult
     func start(_ candidate: MediaCandidate, expectedBytes: Int64? = nil, preferredBitrate: Int? = nil,
-               requiresReferer: Bool = false) -> DownloadItem? {
+               requiresReferer: Bool = false, subtitles: [SubtitleTrack] = []) -> DownloadItem? {
         if MediaDiscovery.segmentExtensions.contains(candidate.url.pathExtension.lowercased()) {
             startError = DownloadError.streamSegment.message
             return nil
@@ -91,6 +91,7 @@ final class DownloadManager: NSObject, ObservableObject {
             existing.preferredBitrate = preferredBitrate
             existing.requiresReferer = requiresReferer
             restart(existing)
+            saveSubtitles(subtitles, for: existing)
             return existing
         }
         let title = candidate.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -99,7 +100,21 @@ final class DownloadManager: NSObject, ObservableObject {
                                 requiresReferer: requiresReferer)
         context.insert(item)
         begin(item)
+        saveSubtitles(subtitles, for: item)
         return item
+    }
+
+    /// Site subtitle files aren't part of the stream, so they are fetched now, while their links still work.
+    private func saveSubtitles(_ tracks: [SubtitleTrack], for item: DownloadItem) {
+        guard !tracks.isEmpty else { return }
+        let id = item.id
+        let remote = item.remoteURL.absoluteString
+        let provider = requestContextProvider
+        Task {
+            let saved = await SubtitleStore.save(tracks, for: id) { track in await provider?(track.url, track.referer) }
+            diagnostics?.record(event: "subtitles", url: remote,
+                                note: "Saved \(saved.count) of \(tracks.count) site subtitle tracks: " + saved.map(\.displayName).joined(separator: ", "))
+        }
     }
 
     func cancel(_ item: DownloadItem) {
@@ -154,6 +169,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if let location = hlsLocations.removeValue(forKey: item.id) ?? item.localURL { try? FileManager.default.removeItem(at: location) }
         try? FileManager.default.removeItem(at: item.resumeDataURL)
         try? FileManager.default.removeItem(at: DownloadStorage.thumbnailURL(for: item.id))
+        SubtitleStore.remove(for: item.id)
         ThumbnailCache.shared.evict(item.id)
         releaseCookies(for: item.id)
         clearProgress(for: item.id)

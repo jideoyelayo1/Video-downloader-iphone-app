@@ -50,7 +50,7 @@ struct BrowserScreen: View {
                     candidate.kind = probe?.kind ?? candidate.kind
                     showingCandidates = false
                     if downloads.start(candidate, expectedBytes: probe?.expectedBytes, preferredBitrate: variant?.bandwidth,
-                                       requiresReferer: probe?.requiresReferer ?? false) != nil { showDownloads() }
+                                       requiresReferer: probe?.requiresReferer ?? false, subtitles: model.subtitleTracks) != nil { showDownloads() }
                 }
                 .presentationDetents([.medium, .large])
             }

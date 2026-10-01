@@ -21,6 +21,19 @@ final class BrowserViewModelStateTests: XCTestCase {
         XCTAssertEqual(model.addressText, "https://site.example/watch?ep=3")
     }
 
+    func testSubtitleTracksAreCollectedPerPage() {
+        let model = makeModel()
+        let page = URL(string: "https://www.***REMOVED***.to/watch/abc/frieren?ep=1")!
+        model.pageDidChange(to: page, force: true)
+        let english = SubtitleTrack(url: URL(string: "https://s1.example/en/sub.vtt")!, label: "English", language: "en", isDefault: true, referer: nil)
+        let arabic = SubtitleTrack(url: URL(string: "https://s1.example/ar/sub.vtt")!, label: "Arabic", language: "ar", isDefault: false, referer: nil)
+        model.discovery.onSubtitles?([english])
+        model.discovery.onSubtitles?([english, arabic])
+        XCTAssertEqual(model.subtitleTracks.map(\.label), ["English", "Arabic"])
+        model.pageDidChange(to: URL(string: "https://www.***REMOVED***.to/watch/abc/frieren?ep=2"), force: false)
+        XCTAssertTrue(model.subtitleTracks.isEmpty, "the next episode's tracks replace the previous ones")
+    }
+
     func testRepeatedContentProcessCrashesStopAutomaticReloads() {
         let model = makeModel()
         model.pageDidChange(to: URL(string: "https://site.example/watch?ep=1"), force: true)

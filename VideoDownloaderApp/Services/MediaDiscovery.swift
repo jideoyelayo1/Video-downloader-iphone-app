@@ -5,6 +5,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
     var onCandidate: ((MediaCandidate) -> Void)?
     var onNavigation: ((URL?) -> Void)?
     var onFragment: (() -> Void)?
+    var onSubtitles: (([SubtitleTrack]) -> Void)?
     var diagnostics: DiagnosticsLog?
     weak var webView: WKWebView?
 
@@ -20,6 +21,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       let interactionTime = null;
       let pendingMediaNodes = new Set();
       let mediaScanTimer = null;
+      let reportedTracks = new Set();
       // Network resources include ad clips and tracking previews. A playlist may be
       // prepared before playback, but ordinary file requests must follow a real tap.
       const relevantResource = (url, startedAt) => {
@@ -80,9 +82,32 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         if (type.includes('mpegurl') ||
             (interactionTime !== null && type.startsWith('video/'))) send(url, null, false, contentType, via);
       };
+      // Players such as Plyr show subtitles from <track> files that aren't part of the
+      // stream; report them with their labels so a download can keep them.
+      const reportTracks = video => {
+        if (!video || !video.querySelectorAll) return;
+        const tracks = [];
+        video.querySelectorAll('track').forEach(track => {
+          const kind = (track.getAttribute('kind') || 'subtitles').toLowerCase();
+          if (kind !== 'subtitles' && kind !== 'captions') return;
+          const src = track.getAttribute('src');
+          if (!src || src.startsWith('blob:') || src.startsWith('data:')) return;
+          let url;
+          try { url = new URL(src, document.baseURI).href; } catch (_) { return; }
+          tracks.push({ url, label: track.getAttribute('label') || '', language: track.getAttribute('srclang') || '',
+                        isDefault: track.hasAttribute('default') });
+        });
+        if (!tracks.length) return;
+        const key = tracks.map(t => t.url + '|' + t.label).join('\n');
+        if (reportedTracks.has(key)) return;
+        reportedTracks.add(key);
+        post({ event: 'subtitles', tracks, documentURL: location.href });
+      };
       const inspect = node => {
         if (!node) return;
         const tag = (node.tagName || '').toUpperCase();
+        if (tag === 'TRACK') { reportTracks(node.parentElement); return; }
+        if (tag === 'VIDEO') reportTracks(node);
         const isMedia = tag === 'VIDEO' || tag === 'AUDIO' || tag === 'SOURCE';
         if (isMedia && node.currentSrc) send(node.currentSrc, node.getAttribute('data-quality'), true);
         if (isMedia && node.src) send(node.src, node.getAttribute('data-quality'), true);
@@ -112,6 +137,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       // Rescans this document, then asks child frames (often cross-origin players) to do the same.
       window.__vdaRescan = () => {
         seen = new Set();
+        reportedTracks = new Set();
         document.querySelectorAll('video,audio,source').forEach(inspect);
         scanResources();
         document.querySelectorAll('iframe').forEach(f => { try { f.contentWindow.postMessage({ __vdaRescan: true }, '*'); } catch (_) {} });
@@ -126,12 +152,12 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       new MutationObserver(mutations => mutations.forEach(m => {
         if (m.type === 'attributes') {
           const tag = (m.target.tagName || '').toUpperCase();
-          if (tag === 'VIDEO' || tag === 'AUDIO' || tag === 'SOURCE') inspect(m.target);
+          if (tag === 'VIDEO' || tag === 'AUDIO' || tag === 'SOURCE' || tag === 'TRACK') inspect(m.target);
         } else {
           m.addedNodes.forEach(scheduleMediaScan);
         }
       })).observe(document.documentElement || document, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
-      const notifyNavigation = () => { seen = new Set(); reportedFragment = false; post({ event: 'navigation', url: location.href }); };
+      const notifyNavigation = () => { seen = new Set(); reportedTracks = new Set(); reportedFragment = false; post({ event: 'navigation', url: location.href }); };
       window.addEventListener('popstate', notifyNavigation);
       window.addEventListener('hashchange', notifyNavigation);
       const pushState = history.pushState;
@@ -203,6 +229,16 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         let frameURL = message.frameInfo.request.url
         let rawURL = dictionary["url"] as? String ?? ""
 
+        if dictionary["event"] as? String == "subtitles" {
+            let tracks = SubtitleTrack.tracks(from: dictionary, frameURL: frameURL)
+            diagnostics?.record(event: "subtitles", url: (dictionary["documentURL"] as? String) ?? "", frameURL: frameURL, isMainFrame: isMainFrame,
+                                note: "\(tracks.count) tracks: " + tracks.map(\.displayName).joined(separator: ", "))
+            let documentURL = (dictionary["documentURL"] as? String).flatMap(URL.init(string:))
+            if !tracks.isEmpty, !MediaDiscovery.isStale(documentURL: documentURL, isMainFrame: isMainFrame, currentPageURL: mainURL) {
+                onSubtitles?(tracks)
+            }
+            return
+        }
         if let event = dictionary["event"] as? String {
             diagnostics?.record(event: event, url: rawURL, frameURL: frameURL, isMainFrame: isMainFrame,
                                 contentType: dictionary["contentType"] as? String, note: dictionary["via"] as? String)

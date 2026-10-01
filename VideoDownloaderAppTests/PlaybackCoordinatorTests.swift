@@ -84,4 +84,43 @@ final class PlaybackCoordinatorTests: XCTestCase {
         try await waitUntil("previous controller released") { first == nil }
         coordinator.close()
     }
+
+    /// ***REMOVED***-style subtitles saved beside the video are listed and drawn over it.
+    func testSiteSubtitlesAreListedSelectedByDefaultAndDrawn() async throws {
+        let server = try LocalMediaServer()
+        try server.start()
+        defer { server.stop() }
+        let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log,
+                                              preferences: try XCTUnwrap(UserDefaults(suiteName: "PlaybackCoordinatorTests-site-\(UUID().uuidString)")))
+        let item = makeItem(in: container.mainContext)
+        let page = server.url("/page/tracks.html")
+        await SubtitleStore.save([SubtitleTrack(url: server.url("/subs/es.vtt"), label: "Español", language: "es", isDefault: false, referer: page),
+                                  SubtitleTrack(url: server.url("/subs/en.vtt"), label: "English", language: "en", isDefault: true, referer: page)],
+                                 for: item.id) { _ in nil }
+        defer { SubtitleStore.remove(for: item.id) }
+
+        coordinator.open(item, at: 0)
+        try await waitUntil("player ready") { coordinator.controller.player != nil && !coordinator.isLoading }
+        // The captioned fixture has embedded English tracks; the site files follow them, and the
+        // site's English is told apart from the embedded one.
+        XCTAssertEqual(Array(coordinator.captionNames.suffix(2)), ["Español", "English (site)"])
+        let english = coordinator.captionNames.count - 1
+        coordinator.chooseCaption(english)
+        try await waitUntil("English cue drawn") { coordinator.siteSubtitleText == "Fixture English line" }
+        coordinator.chooseCaption(english - 1)
+        try await waitUntil("Spanish cue drawn") { coordinator.siteSubtitleText == "Línea de prueba & más" }
+        coordinator.chooseCaption(nil)
+        XCTAssertNil(coordinator.siteSubtitleText)
+        coordinator.close()
+    }
+
+    func testViewerLanguageThenSiteDefaultThenFirst() {
+        let saved = { (language: String, isDefault: Bool) in SubtitleStore.Saved(fileName: "x", label: language, language: language, isDefault: isDefault) }
+        // ***REMOVED*** marks its first track (Arabic) as default; an English-speaking viewer gets English.
+        XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", true), saved("en", false)], preferredLanguages: ["en-GB"]), 1)
+        XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", false), saved("en", true)], preferredLanguages: ["ja"]), 1)
+        XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", false), saved("fr", false)], preferredLanguages: ["ja"]), 0)
+        XCTAssertEqual(PlaybackCoordinator.menuNames(embedded: ["English"], site: ["English", "Español"]), ["English", "English (site)", "Español"])
+    }
 }

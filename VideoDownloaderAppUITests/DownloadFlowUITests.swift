@@ -210,6 +210,40 @@ final class DownloadFlowUITests: XCTestCase {
         app.buttons["player.done"].tap()
     }
 
+    /// ***REMOVED***-style subtitles (separate <track> files) are saved with the download and shown over the saved video.
+    func testSiteSubtitlesAreSavedAndShownInTheSavedVideo() throws {
+        launch(at: "/page/tracks.html")
+        waitForReadyCandidates(1).tap()
+        app.buttons["candidate.download"].firstMatch.tap()
+        let status = app.staticTexts.matching(identifier: "download.status").firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        let completed = NSPredicate(format: "label BEGINSWITH 'Completed'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: completed, object: status)], timeout: 20), .completed, status.label)
+
+        app.tabBars.buttons["My Videos"].tap()
+        let item = app.buttons["library.item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+        let subtitle = app.staticTexts["player.subtitle"]
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 10))
+        XCTAssertEqual(subtitle.label, "Fixture English line")
+        let captions = app.buttons["player.captions"]
+        XCTAssertEqual(captions.value as? String, "English")
+
+        captions.tap()
+        XCTAssertTrue(app.buttons["Español"].waitForExistence(timeout: 5))
+        app.buttons["Español"].tap()
+        let spanish = NSPredicate(format: "label == 'Línea de prueba & más'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: spanish, object: subtitle)], timeout: 5), .completed, subtitle.label)
+
+        captions.tap()
+        XCTAssertTrue(app.buttons["Off"].waitForExistence(timeout: 5))
+        app.buttons["Off"].tap()
+        let hidden = NSPredicate(format: "exists == false")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: hidden, object: subtitle)], timeout: 5), .completed)
+        app.buttons["player.done"].tap()
+    }
+
     func testFragmentIsExplainedWithoutDownloadButton() throws {
         launch(at: "/page/fragment.html")
         let button = app.buttons["browser.foundVideos"]

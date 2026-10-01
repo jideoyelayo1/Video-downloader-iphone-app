@@ -191,6 +191,10 @@ final class LocalMediaServer {
         switch request.path {
         case "/video.mp4", "/noext/stream": return mp4
         case "/captions/video.mp4": return .data(fixtures.captionedMP4, "video/mp4")
+        // Site subtitle files, like the per-language WebVTT tracks ***REMOVED***'s Plyr player loads.
+        case "/subs/en.vtt": return .text("WEBVTT\n\nNOTE fixture\n\n1\n00:00.000 --> 00:30.000 line:85%\n<b>Fixture English line</b>\n", "text/vtt")
+        case "/subs/es.vtt": return .text("WEBVTT\n\n00:00.000 --> 00:30.000\nLínea de prueba &amp; más\n", "text/vtt")
+        case "/subs/expired.vtt": return .text("<!doctype html><p>Link expired</p>", "text/html")
         case "/invalid/video.mp4": return .data(Data("not an MP4 movie".utf8), "video/mp4")
         case "/hls/master.m3u8": return .text(masterPlaylist, Self.hlsType)
         case "/hls/referer-master.m3u8":
@@ -347,6 +351,13 @@ final class LocalMediaServer {
         "hls.html": page("HLS Video Page", #"<video id="video" src="/hls/master.m3u8" controls playsinline width="320" height="180"></video>"#),
         "referer-hls.html": page("Referer HLS Page", #"<video id="video" src="/hls/referer-master.m3u8" controls playsinline width="320" height="180"></video>"#),
         "fragment.html": page("Fragment Page", #"<video id="video" src="/hls/seg-57-s1080p-v1-a1.m4s" controls playsinline width="320" height="180"></video>"#),
+        "tracks.html": page("Site Subtitles Page", """
+            <video id="video" src="/video.mp4" controls playsinline width="320" height="180">
+              <track kind="subtitles" src="/subs/en.vtt" srclang="en" label="English" default>
+              <track kind="subtitles" src="/subs/es.vtt" srclang="es" label="Español">
+              <track kind="chapters" src="/subs/chapters.vtt">
+            </video>
+            """),
         "captions.html": page("Captioned Video Page", #"<video id="video" src="/captions/video.mp4" controls playsinline width="320" height="180"></video>"#),
         // Like hls.js players: the page script also loads the separate audio playlist.
         "separate-audio.html": page("Separate Audio Page", """

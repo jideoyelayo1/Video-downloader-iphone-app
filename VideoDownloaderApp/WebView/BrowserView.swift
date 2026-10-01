@@ -62,6 +62,8 @@ final class BrowserViewModel: ObservableObject {
     @Published private(set) var candidates: [MediaCandidate] = []
     @Published private(set) var observedFragments = false
     @Published private(set) var statuses: [UUID: CandidateStatus] = [:]
+    /// Subtitle files the page's players offer; saved with a download from this page.
+    @Published private(set) var subtitleTracks: [SubtitleTrack] = []
     @Published private(set) var isLoading = false
     /// Page load progress, published in coarse steps for the address bar's loading line.
     @Published private(set) var loadProgress = 0.0
@@ -99,6 +101,7 @@ final class BrowserViewModel: ObservableObject {
         discovery.onCandidate = { [weak self] candidate in self?.add(candidate) }
         discovery.onNavigation = { [weak self] newURL in self?.pageDidChange(to: newURL, force: false) }
         discovery.onFragment = { [weak self] in self?.observedFragments = true }
+        discovery.onSubtitles = { [weak self] tracks in self?.addSubtitles(tracks) }
     }
 
     var readyCount: Int { statuses.values.filter(\.isReady).count }
@@ -255,11 +258,18 @@ final class BrowserViewModel: ObservableObject {
         observedFragments = false
         statuses.removeAll()
         variantURLs.removeAll()
+        subtitleTracks.removeAll()
         if let newURL, ["http", "https"].contains(newURL.scheme?.lowercased()) {
             url = newURL
             if !isEditingAddress { addressText = newURL.absoluteString }
             if !force { history?.record(newURL, title: newURL.host ?? "") }
         }
+    }
+
+    func addSubtitles(_ tracks: [SubtitleTrack]) {
+        let known = Set(subtitleTracks.map(\.url))
+        let new = tracks.filter { !known.contains($0.url) }
+        if !new.isEmpty { subtitleTracks.append(contentsOf: new) }
     }
 
     func add(_ candidate: MediaCandidate) {

@@ -123,3 +123,47 @@ setTimeout(() => {
     console.log('WebKit discovery diagnostics checks passed');
   }, 0));
 })();
+
+// Plyr-style <track> elements: subtitles and captions are reported with their labels once;
+// chapters and blob tracks are not.
+(() => {
+  const posted = [];
+  const docListeners = {};
+  const track = (attrs) => ({ tagName: 'TRACK', getAttribute: name => (name in attrs ? attrs[name] : null), hasAttribute: name => name in attrs });
+  const tracks = [
+    track({ kind: 'subtitles', src: '/subs/en.vtt', srclang: 'en', label: 'English', default: '' }),
+    track({ kind: 'captions', src: 'https://cdn.example/es.vtt', srclang: 'es', label: 'Español' }),
+    track({ kind: 'chapters', src: '/subs/chapters.vtt' }),
+    track({ kind: 'subtitles', src: 'blob:https://player.example/1' })
+  ];
+  const video = { nodeType: 1, tagName: 'VIDEO', src: 'blob:https://player.example/v', currentSrc: '', getAttribute: () => null,
+                  querySelectorAll: selector => selector === 'track' ? tracks : [] };
+  const ctx = {
+    document: {
+      baseURI: 'https://player.example/e/1', title: 'Player', documentElement: {},
+      querySelectorAll: selector => (selector.includes('video') ? [video] : []),
+      addEventListener: (name, callback) => { docListeners[name] = callback; }
+    },
+    location: { href: 'https://player.example/e/1' },
+    window: { webkit: { messageHandlers: { mediaDiscovery: { postMessage: value => posted.push(value) } } }, addEventListener: () => {} },
+    history: { pushState: function () {}, replaceState: function () {} },
+    MutationObserver: class { observe() {} },
+    PerformanceObserver: class { observe() {} },
+    performance: { getEntriesByType: () => [], now: () => 1000 },
+    setTimeout, URL, console
+  };
+  ctx.window.top = ctx.window;
+  vm.runInNewContext(match[1], ctx);
+  const events = () => posted.filter(message => message.event === 'subtitles');
+  if (events().length !== 1) throw new Error(`expected one subtitles message, got ${events().length}`);
+  const reported = events()[0].tracks;
+  if (reported.length !== 2) throw new Error(`expected 2 subtitle tracks, got ${reported.length}`);
+  if (reported[0].url !== 'https://player.example/subs/en.vtt' || reported[0].label !== 'English' || !reported[0].isDefault)
+    throw new Error('English track not reported correctly');
+  if (reported[1].language !== 'es' || reported[1].isDefault) throw new Error('Spanish track not reported correctly');
+  docListeners.play({ target: video });
+  if (events().length !== 1) throw new Error('the same tracks were reported again');
+  ctx.window.__vdaRescan();
+  if (events().length !== 2) throw new Error('Refresh should report the tracks again');
+  console.log('WebKit discovery subtitle track checks passed');
+})();

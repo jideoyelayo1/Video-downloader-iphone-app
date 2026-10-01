@@ -22,7 +22,14 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private let preferences: UserDefaults
     private var item: DownloadItem?
     private var captionGroup: AVMediaSelectionGroup?
+    /// Caption tracks inside the saved media. `captionNames` lists these first, then `siteSubtitles`.
     private var captionOptions: [AVMediaSelectionOption] = []
+    /// Subtitle files the site's player offered, saved with the download and drawn by `subtitleOverlay`.
+    private var siteSubtitles: [SubtitleStore.Saved] = []
+    private var siteCues: [Int: [SubtitleCue]] = [:]
+    private var subtitleObserver: Any?
+    private var subtitleOverlay: SubtitleOverlayView?
+    private var videoBoundsObservation: NSKeyValueObservation?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var loadID = UUID()
@@ -109,51 +116,113 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     }
 
     private func loadCaptions(from asset: AVURLAsset, playerItem: AVPlayerItem, token: UUID) async {
-        guard let group = try? await asset.loadMediaSelectionGroup(for: .legible) else {
-            if loadID == token {
-                diagnostics.record(event: "captions", url: asset.url.absoluteString,
-                                   note: "No caption track in saved media; the source site may provide captions separately")
-            }
+        let group = try? await asset.loadMediaSelectionGroup(for: .legible)
+        let preferred = try? await asset.load(.preferredMediaSelection)
+        guard loadID == token else { return }
+        let embedded = group.map { asset.assetCache?.mediaSelectionOptions(in: $0) ?? $0.options } ?? []
+        let site = item.map { SubtitleStore.saved(for: $0.id) } ?? []
+        captionGroup = group
+        captionOptions = embedded
+        siteSubtitles = site
+        siteCues = [:]
+        captionNames = Self.menuNames(embedded: embedded.map(\.displayName), site: site.map(\.displayName))
+        guard !captionNames.isEmpty else {
+            let note = group.map { $0.options.isEmpty ? "No caption track in saved media" : "Tracks advertised but absent from offline package" }
+                ?? "No caption track in saved media; the source site may provide captions separately"
+            diagnostics.record(event: "captions", url: asset.url.absoluteString, note: note)
             return
         }
-        guard loadID == token else { return }
-        let cached = asset.assetCache?.mediaSelectionOptions(in: group)
-        let options = cached ?? group.options
-        captionGroup = group
-        captionOptions = options
-        captionNames = options.map { $0.displayName }
-        var defaultIndex: Int? = options.isEmpty ? nil : 0
-        if let preferred = try? await asset.load(.preferredMediaSelection),
-           let selected = preferred.selectedMediaOption(in: group),
-           let index = options.firstIndex(of: selected) {
-            defaultIndex = index
+        let defaultIndex: Int?
+        if !embedded.isEmpty {
+            defaultIndex = group.flatMap { preferred?.selectedMediaOption(in: $0) }.flatMap { embedded.firstIndex(of: $0) } ?? 0
+        } else {
+            defaultIndex = embedded.count + Self.defaultSiteIndex(site)
         }
         // Respect the viewer's last choice, including Off, instead of turning captions on for every video.
         let stored = preferences.string(forKey: CaptionPreference.defaultsKey)
-        let choice = CaptionPreference.index(for: stored, in: options.map(Self.preferenceOption), defaultIndex: defaultIndex)
-        if let choice {
-            playerItem.select(options[choice], in: group)
-            selectedCaption = choice
-            diagnostics.record(event: "captions", url: asset.url.absoluteString,
-                               note: "Selected \(options[choice].displayName) \(stored == nil ? "by default" : "(remembered)")")
-        } else if !options.isEmpty {
-            if group.allowsEmptySelection { playerItem.select(nil, in: group) }
-            selectedCaption = nil
-            diagnostics.record(event: "captions", url: asset.url.absoluteString, note: "Captions off (remembered)")
-        }
-        if options.isEmpty {
-            diagnostics.record(event: "captions", url: asset.url.absoluteString,
-                               note: group.options.isEmpty ? "No caption track in saved media" : "Tracks advertised but absent from offline package")
-        }
+        let choice = CaptionPreference.index(for: stored, in: preferenceOptions, defaultIndex: defaultIndex)
+        applyCaption(choice, to: playerItem)
+        diagnostics.record(event: "captions", url: asset.url.absoluteString,
+                           note: (choice.map { "Selected \(captionNames[$0])" } ?? "Captions off")
+                               + (stored == nil ? " by default" : " (remembered)") + "; \(embedded.count) in media, \(site.count) from site")
     }
 
     func chooseCaption(_ index: Int?) {
-        guard let group = captionGroup, let playerItem = controller.player?.currentItem else { return }
-        let option = index.flatMap { captionOptions.indices.contains($0) ? captionOptions[$0] : nil }
-        playerItem.select(option, in: group)
+        guard let playerItem = controller.player?.currentItem else { return }
+        applyCaption(index, to: playerItem)
+        let option = index.flatMap { preferenceOptions.indices.contains($0) ? preferenceOptions[$0] : nil }
+        preferences.set(CaptionPreference.storedValue(for: option), forKey: CaptionPreference.defaultsKey)
+        diagnostics.record(event: "captions", url: item?.localURL?.absoluteString ?? "app://player", note: index.map { captionNames[$0] } ?? "Off")
+    }
+
+    /// Selects an embedded track through AVFoundation, or draws a site subtitle file over the video.
+    private func applyCaption(_ index: Int?, to playerItem: AVPlayerItem) {
+        let index = index.flatMap { captionNames.indices.contains($0) ? $0 : nil }
+        if let group = captionGroup {
+            let embedded = index.flatMap { $0 < captionOptions.count ? captionOptions[$0] : nil }
+            if embedded != nil || group.allowsEmptySelection { playerItem.select(embedded, in: group) }
+        }
+        showSiteSubtitle(index.flatMap { $0 >= captionOptions.count ? $0 - captionOptions.count : nil })
         selectedCaption = index
-        preferences.set(CaptionPreference.storedValue(for: option.map(Self.preferenceOption)), forKey: CaptionPreference.defaultsKey)
-        diagnostics.record(event: "captions", url: item?.localURL?.absoluteString ?? "app://player", note: option?.displayName ?? "Off")
+    }
+
+    private func showSiteSubtitle(_ siteIndex: Int?) {
+        if let subtitleObserver, let player = controller.player { player.removeTimeObserver(subtitleObserver) }
+        subtitleObserver = nil
+        guard let siteIndex, siteSubtitles.indices.contains(siteIndex), let item, let player = controller.player else {
+            subtitleOverlay?.text = nil
+            return
+        }
+        let cues = siteCues[siteIndex] ?? {
+            let file = SubtitleStore.fileURL(of: siteSubtitles[siteIndex], for: item.id)
+            let parsed = (try? String(contentsOf: file, encoding: .utf8)).map(SubtitleParser.cues(from:)) ?? []
+            siteCues[siteIndex] = parsed
+            return parsed
+        }()
+        let overlay = installSubtitleOverlay()
+        overlay.text = SubtitleParser.text(at: player.currentTime().seconds, in: cues)
+        subtitleObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 8), queue: .main) { [weak overlay] time in
+            MainActor.assumeIsolated { overlay?.text = SubtitleParser.text(at: time.seconds, in: cues) }
+        }
+    }
+
+    private func installSubtitleOverlay() -> SubtitleOverlayView {
+        if let subtitleOverlay, subtitleOverlay.superview === controller.contentOverlayView { return subtitleOverlay }
+        let overlay = SubtitleOverlayView(frame: controller.contentOverlayView?.bounds ?? .zero)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        controller.contentOverlayView?.addSubview(overlay)
+        overlay.videoFrame = controller.videoBounds
+        videoBoundsObservation = controller.observe(\.videoBounds, options: [.new]) { [weak overlay] controller, _ in
+            let bounds = controller.videoBounds
+            DispatchQueue.main.async { overlay?.videoFrame = bounds }
+        }
+        subtitleOverlay = overlay
+        return overlay
+    }
+
+    /// The site subtitle text currently drawn over the video.
+    var siteSubtitleText: String? { subtitleOverlay?.text }
+
+    /// Embedded and site tracks in one list, for the remembered choice.
+    private var preferenceOptions: [CaptionPreference.Option] {
+        captionOptions.map(Self.preferenceOption)
+            + siteSubtitles.map { CaptionPreference.Option(language: $0.language, name: $0.label.isEmpty ? $0.displayName : $0.label) }
+    }
+
+    /// Menu names, marking site files that share a name with an embedded track.
+    static func menuNames(embedded: [String], site: [String]) -> [String] {
+        let taken = Set(embedded)
+        return embedded + site.map { taken.contains($0) ? "\($0) (site)" : $0 }
+    }
+
+    /// A track in the viewer's language, else the site's default, else the first. Sites mark their
+    /// first track as default regardless of the viewer (***REMOVED*** marks Arabic).
+    static func defaultSiteIndex(_ site: [SubtitleStore.Saved], preferredLanguages: [String] = Locale.preferredLanguages) -> Int {
+        func base(_ tag: String?) -> String? { tag?.split(separator: "-").first.map { $0.lowercased() } }
+        for language in preferredLanguages.compactMap(base) {
+            if let match = site.firstIndex(where: { base($0.language) == language }) { return match }
+        }
+        return site.firstIndex(where: \.isDefault) ?? 0
     }
 
     private static func preferenceOption(_ option: AVMediaSelectionOption) -> CaptionPreference.Option {
@@ -167,6 +236,13 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         savePosition()
         if let timeObserver, let player = controller.player { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
+        if let subtitleObserver, let player = controller.player { player.removeTimeObserver(subtitleObserver) }
+        subtitleObserver = nil
+        videoBoundsObservation = nil
+        subtitleOverlay?.removeFromSuperview()
+        subtitleOverlay = nil
+        siteSubtitles = []
+        siteCues = [:]
         controller.player?.pause()
         controller.player = nil
         item = nil
