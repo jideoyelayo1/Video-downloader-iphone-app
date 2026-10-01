@@ -13,7 +13,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     @Published private(set) var captionNames: [String] = []
     @Published private(set) var selectedCaption: Int? = nil
 
-    let controller = AVPlayerViewController()
+    /// One controller per opened video, kept across its SwiftUI presentations and Picture in Picture.
+    /// Re-hosting a single controller for every video kept each earlier presentation's views alive
+    /// (about 0.75 MB per video opened).
+    private(set) var controller: AVPlayerViewController
     private let context: ModelContext
     private let diagnostics: DiagnosticsLog
     private let preferences: UserDefaults
@@ -21,6 +24,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private var captionGroup: AVMediaSelectionGroup?
     private var captionOptions: [AVMediaSelectionOption] = []
     private var timeObserver: Any?
+    private var endObserver: NSObjectProtocol?
     private var loadID = UUID()
     private var playbackEnded = false
     private(set) var isInPiP = false
@@ -29,20 +33,32 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         self.context = context
         self.diagnostics = diagnostics
         self.preferences = preferences
+        controller = Self.makeController()
         super.init()
         controller.delegate = self
+        // AVFoundation may post this off the main thread; the handler writes main-context SwiftData state.
+        endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: nil,
+                                                             queue: .main) { [weak self] notification in
+            MainActor.assumeIsolated { self?.didFinishPlayback(notification) }
+        }
+    }
+
+    private static func makeController() -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
         controller.allowsPictureInPicturePlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.showsPlaybackControls = true
         controller.view.backgroundColor = .black
         controller.entersFullScreenWhenPlaybackBegins = true
-        NotificationCenter.default.addObserver(self, selector: #selector(didFinishPlayback(_:)),
-                                               name: AVPlayerItem.didPlayToEndTimeNotification, object: nil)
+        return controller
     }
 
     func open(_ newItem: DownloadItem, at position: Double) {
         // The next video activates the session again right away.
         close(releasingAudioSession: false)
+        controller.delegate = nil
+        controller = Self.makeController()
+        controller.delegate = self
         let token = UUID()
         loadID = token
         item = newItem
@@ -186,7 +202,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         try? context.save()
     }
 
-    @objc private func didFinishPlayback(_ notification: Notification) {
+    private func didFinishPlayback(_ notification: Notification) {
         guard let current = controller.player?.currentItem, notification.object as? AVPlayerItem === current else { return }
         playbackEnded = true
         item?.playbackPosition = 0
@@ -233,6 +249,8 @@ struct PersistentPlayerScreen: View {
             Color.black.ignoresSafeArea()
             if playback.controller.player != nil {
                 PlayerControllerView(controller: playback.controller)
+                    // A new video brings a new controller; never keep hosting the previous one.
+                    .id(ObjectIdentifier(playback.controller))
                     .ignoresSafeArea()
                     .accessibilityIdentifier("player.video")
             } else if playback.isLoading {
