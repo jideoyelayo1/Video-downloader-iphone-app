@@ -18,9 +18,14 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       let seen = new Set();
       let reportedFragment = false;
       let interactionTime = null;
+      let pendingMediaNodes = new Set();
+      let mediaScanTimer = null;
       // Network resources include ad clips and tracking previews. A playlist may be
       // prepared before playback, but ordinary file requests must follow a real tap.
       const relevantResource = (url, startedAt) => {
+        // Resource timing also contains images, scripts and ad requests. Avoid
+        // parsing each of those URLs on busy pages.
+        if (!/\.(m3u8|mp4|m4v|mov|webm|mkv|m4s|ts)(?:[?#]|$)/i.test(url)) return false;
         let path;
         try { path = new URL(url, document.baseURI).pathname.toLowerCase(); } catch (_) { return false; }
         if (path.endsWith('.m3u8')) return true;
@@ -28,7 +33,11 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       };
       const activate = event => {
         if (event && event.isTrusted === false) return;
-        if (interactionTime === null) interactionTime = performance.now();
+        if (interactionTime !== null) return;
+        interactionTime = performance.now();
+        // One catch-up scan covers resources loaded before the first tap. New
+        // requests are handled by PerformanceObserver without rescanning on
+        // every subsequent interaction.
         scanResources();
       };
       const classify = (absolute, contentType) => {
@@ -78,6 +87,16 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         if (tag === 'SOURCE' && node.src) send(node.src, node.getAttribute('size') || node.getAttribute('label'), true, node.getAttribute('type'));
         if (node.querySelectorAll) node.querySelectorAll('video,audio,source').forEach(inspect);
       };
+      const scheduleMediaScan = node => {
+        if (!node || node.nodeType !== 1) return;
+        pendingMediaNodes.add(node);
+        if (mediaScanTimer !== null) return;
+        mediaScanTimer = setTimeout(() => {
+          mediaScanTimer = null;
+          pendingMediaNodes.forEach(inspect);
+          pendingMediaNodes.clear();
+        }, 100);
+      };
       const scanResources = () => {
         try {
           performance.getEntriesByType('resource').forEach(e => {
@@ -103,8 +122,12 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       document.addEventListener('touchstart', activate, true);
       document.addEventListener('keydown', activate, true);
       new MutationObserver(mutations => mutations.forEach(m => {
-        if (m.type === 'attributes') inspect(m.target);
-        m.addedNodes.forEach(inspect);
+        if (m.type === 'attributes') {
+          const tag = (m.target.tagName || '').toUpperCase();
+          if (tag === 'VIDEO' || tag === 'AUDIO' || tag === 'SOURCE') inspect(m.target);
+        } else {
+          m.addedNodes.forEach(scheduleMediaScan);
+        }
       })).observe(document.documentElement || document, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
       const notifyNavigation = () => { seen = new Set(); reportedFragment = false; post({ event: 'navigation', url: location.href }); };
       window.addEventListener('popstate', notifyNavigation);

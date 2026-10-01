@@ -84,7 +84,7 @@ enum LaunchOptions {
 
     static var diagnosticsEnabled: Bool {
         #if DEBUG
-        return true
+        return flag("-VerboseBrowserDiagnostics")
         #else
         return false
         #endif

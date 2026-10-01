@@ -45,7 +45,7 @@ HTTP 429 means the video server is limiting requests. Wait before trying again, 
 | Storage | SwiftData models in `Models/DownloadItem.swift` (`DownloadItem`, `Bookmark`, `BrowsingHistoryEntry`); files in Application Support; HLS packages stay where AVFoundation puts them. Old `downloads.json` queues are imported once. The two episode-specific starter bookmarks are replaced once without changing personal bookmarks. |
 | UI | `Views/`, `WebView/BrowserView.swift` |
 
-**Downloads → Error log** opens the shareable diagnostics log in every build. It records download, validation, playback, caption, and PiP events across launches, keeping the latest 1,000 entries. URLs in the log omit credentials, query values, and fragments. Debug builds additionally record detailed browser requests. The log is written to `Documents/diagnostics.log` in the app container.
+**Downloads → Error log** opens the shareable diagnostics log in every build. It records download, validation, playback, caption, and PiP events across launches, keeping the latest 1,000 entries. URLs in the log omit credentials, query values, and fragments. Detailed browser requests can be recorded in Debug builds with `-VerboseBrowserDiagnostics`; this is off by default to keep browsing responsive. The log is written to `Documents/diagnostics.log` in the app container.
 
 `Info.plist` allows plain-HTTP loads because this is a general browser whose sites and media hosts are chosen by the user.
 
@@ -67,4 +67,4 @@ Don't pass `CODE_SIGNING_ALLOWED=NO` when running tests: background `URLSession`
 
 The simulator can't download HLS for offline use (an Apple limitation), so HLS downloads, background transfers with the app suspended, and airplane-mode playback have to be checked on a physical iPhone. See `TEST_REPORT.md`.
 
-Launch arguments used by tests and diagnostics: `-StartURL <url>`, `-NoInitialLoad`, `-UITestInMemory` (in-memory store), and `-DiagnosticsAutoplay` (Debug only; muted autoplay in every frame).
+Launch arguments used by tests and diagnostics: `-StartURL <url>`, `-NoInitialLoad`, `-UITestInMemory` (in-memory store), `-DiagnosticsAutoplay` (Debug only; muted autoplay in every frame), and `-VerboseBrowserDiagnostics` (Debug only; detailed network events).

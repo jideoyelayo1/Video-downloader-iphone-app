@@ -26,6 +26,7 @@ final class DiagnosticsLog: ObservableObject {
 
     static let maxEntries = 1000
     @Published private(set) var entries: [Entry] = []
+    private var entriesSinceCompaction = 0
     /// Mirror of the log inside the app container, readable with `xcrun simctl get_app_container`.
     let fileURL: URL
 
@@ -52,12 +53,21 @@ final class DiagnosticsLog: ObservableObject {
         entries.append(entry)
         if entries.count > Self.maxEntries {
             entries.removeFirst(entries.count - Self.maxEntries)
+            entriesSinceCompaction += 1
+        }
+        // Compaction is a full-file write. Batch it so a burst of browser
+        // events cannot rewrite the entire log once per event.
+        if entriesSinceCompaction >= 100 {
             persist()
-        } else { append(entry.line + "\n") }
+            entriesSinceCompaction = 0
+        } else {
+            append(entry.line + "\n")
+        }
     }
 
     func clear() {
         entries.removeAll()
+        entriesSinceCompaction = 0
         try? FileManager.default.removeItem(at: fileURL)
     }
 

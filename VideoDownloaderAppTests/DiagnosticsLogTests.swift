@@ -21,4 +21,19 @@ final class DiagnosticsLogTests: XCTestCase {
         second.clear()
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
     }
+
+    func testFullLogCompactsInBatchesAndReloadsLatestEntries() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let log = DiagnosticsLog(fileURL: file)
+        for index in 0..<1_150 {
+            log.record(event: "test-\(index)", url: "https://example.com/video.mp4")
+        }
+        XCTAssertEqual(log.entries.count, DiagnosticsLog.maxEntries)
+        let persistedLines = try String(contentsOf: file, encoding: .utf8).split(separator: "\n")
+        XCTAssertLessThan(persistedLines.count, DiagnosticsLog.maxEntries + 100)
+        let reloaded = DiagnosticsLog(fileURL: file)
+        XCTAssertTrue(reloaded.text.contains("test-1149"))
+        XCTAssertFalse(reloaded.text.contains("test-0]"))
+    }
 }
