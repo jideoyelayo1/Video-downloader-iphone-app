@@ -109,4 +109,19 @@ final class HLSRefererProxyTests: XCTestCase {
         XCTAssertFalse(first.isEmpty)
         XCTAssertEqual(first, second, "the same remote URL keeps the same relay route")
     }
+
+    func testStoppedRelayIsReleased() async throws {
+        weak var weakProxy: HLSRefererProxy?
+        do {
+            let context = RequestContext(cookies: [], userAgent: "RelayFixture/1", referer: server.url("/page/basic.html"))
+            let proxy = try HLSRefererProxy(context: context)
+            let local = try proxy.start(for: server.url("/hls/separate-audio-master.m3u8"))
+            _ = try await URLSession.shared.data(from: local)
+            proxy.stop()
+            weakProxy = proxy
+        }
+        let deadline = Date().addingTimeInterval(5)
+        while weakProxy != nil && Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertNil(weakProxy, "a stopped relay must not be kept alive by its listener or connections")
+    }
 }

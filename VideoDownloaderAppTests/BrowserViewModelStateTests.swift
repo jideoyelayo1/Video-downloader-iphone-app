@@ -101,4 +101,24 @@ final class BrowserViewModelStateTests: XCTestCase {
         model.add(MediaCandidate(url: server.url("/hls/audio-only.m3u8"), sourcePageURL: page, kind: .hls))
         XCTAssertEqual(model.candidates.count, 1)
     }
+
+    /// KVO closures, the script message handler and the web view must not keep the model alive.
+    func testModelAndWebViewAreReleased() async throws {
+        weak var weakModel: BrowserViewModel?
+        weak var weakWebView: WKWebView?
+        weak var weakDiscovery: MediaDiscoveryController?
+        do {
+            let model = makeModel()
+            let webView = model.makeWebView()
+            let coordinator = BrowserView.Coordinator(model: model)
+            webView.navigationDelegate = coordinator
+            webView.loadHTMLString("<title>Release</title><p>x</p>", baseURL: URL(string: "https://release.example/"))
+            try await waitUntil("page loaded") { model.pageTitle == "Release" }
+            weakModel = model
+            weakWebView = webView
+            weakDiscovery = model.discovery
+            webView.navigationDelegate = nil
+        }
+        try await waitUntil("model, web view and discovery released") { weakModel == nil && weakWebView == nil && weakDiscovery == nil }
+    }
 }
