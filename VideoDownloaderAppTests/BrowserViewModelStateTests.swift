@@ -82,4 +82,23 @@ final class BrowserViewModelStateTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(50))
         }
     }
+
+    /// A page's player fetches the master and its separate audio playlist; only the master is a complete video.
+    func testAudioRenditionIsHiddenBehindItsMasterPlaylist() async throws {
+        let server = try LocalMediaServer()
+        try server.start()
+        defer { server.stop() }
+        let model = makeModel()
+        let page = server.url("/page/separate-audio.html")
+        model.pageDidChange(to: page, force: true)
+        model.add(MediaCandidate(url: server.url("/hls/audio-only.m3u8"), sourcePageURL: page, kind: .hls))
+        model.add(MediaCandidate(url: server.url("/hls/separate-audio-master.m3u8"), sourcePageURL: page, kind: .hls))
+        try await waitUntil("master validated, statuses=\(model.statuses.values)") {
+            model.candidates.count == 1 && model.readyCount == 1
+        }
+        XCTAssertEqual(model.candidates.first?.url.lastPathComponent, "separate-audio-master.m3u8")
+        // Reported again later (e.g. after Refresh), the rendition stays hidden.
+        model.add(MediaCandidate(url: server.url("/hls/audio-only.m3u8"), sourcePageURL: page, kind: .hls))
+        XCTAssertEqual(model.candidates.count, 1)
+    }
 }

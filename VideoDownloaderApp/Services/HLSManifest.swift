@@ -59,6 +59,18 @@ enum HLSManifest: Equatable {
         return .media(isFinite: isFinite, isEncryptedWithDRM: isDRM, segmentCount: segments, totalDuration: duration)
     }
 
+    /// Playlists a master references besides its variants: separate audio, subtitle and
+    /// I-frame renditions. A player fetches them alongside the master, but none is a
+    /// complete video on its own.
+    static func renditionURLs(in text: String, baseURL: URL) -> [URL] {
+        text.components(separatedBy: .newlines).compactMap { raw in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("#EXT-X-MEDIA:") || line.hasPrefix("#EXT-X-I-FRAME-STREAM-INF:"),
+                  let uri = attributes(of: line)["URI"], !uri.isEmpty else { return nil }
+            return URL(string: uri, relativeTo: baseURL)?.absoluteURL
+        }
+    }
+
     private static func isDRMKey(_ attrs: [String: String]) -> Bool {
         let method = attrs["METHOD"]?.uppercased() ?? ""
         if method == "SAMPLE-AES" || method == "SAMPLE-AES-CTR" { return true }

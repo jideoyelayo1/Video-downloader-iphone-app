@@ -165,6 +165,14 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["180p"].exists)
     }
 
+    func testSeparateAudioPlaylistIsNotOfferedAsAVideo() throws {
+        launch(at: "/page/separate-audio.html")
+        waitForReadyCandidates(1).tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Master playlist'")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.buttons.matching(identifier: "candidate.download").count, 1)
+        XCTAssertFalse(app.otherElements["candidate.audio-only.m3u8"].exists)
+    }
+
     func testFragmentIsExplainedWithoutDownloadButton() throws {
         launch(at: "/page/fragment.html")
         let button = app.buttons["browser.foundVideos"]

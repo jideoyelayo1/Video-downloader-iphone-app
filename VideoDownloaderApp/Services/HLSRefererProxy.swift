@@ -13,6 +13,9 @@ final class HLSRefererProxy {
     private let queue = DispatchQueue(label: "HLSRefererProxy")
     private let lock = NSLock()
     private var routes: [UUID: URL] = [:]
+    /// AVFoundation fetches each playlist more than once (HEAD, GET, each rendition).
+    /// Reusing one route per URL keeps the table bounded and the rewritten bodies identical.
+    private var routeIDs: [URL: UUID] = [:]
     private let context: RequestContext
     private let session: URLSession
     private var port: UInt16?
@@ -57,8 +60,9 @@ final class HLSRefererProxy {
     }
 
     private func localURL(for remote: URL) -> URL {
-        let id = UUID()
         lock.lock()
+        let id = routeIDs[remote] ?? UUID()
+        routeIDs[remote] = id
         routes[id] = remote
         lock.unlock()
         let suffix = remote.pathExtension.lowercased() == "m3u8" ? "m3u8" : "bin"

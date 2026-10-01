@@ -113,4 +113,23 @@ final class HLSManifestTests: XCTestCase {
         XCTAssertEqual(attrs["RESOLUTION"], "2x3")
         XCTAssertEqual(attrs["NAME"], "x=y")
     }
+
+    func testRenditionURLsIncludeAudioSubtitleAndIFramePlaylists() {
+        let master = """
+        #EXTM3U
+        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",URI="audio/english.m3u8"
+        #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English, SDH",URI="https://subs.example/en.m3u8"
+        #EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS,GROUP-ID="cc",NAME="CC",INSTREAM-ID="CC1"
+        #EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=90000,URI="../trick/iframes.m3u8"
+        #EXT-X-STREAM-INF:BANDWIDTH=900000,AUDIO="audio",SUBTITLES="subs"
+        video.m3u8
+        """
+        let base = URL(string: "https://cdn.example/_v7/abc/master.m3u8")!
+        XCTAssertEqual(HLSManifest.renditionURLs(in: master, baseURL: base).map(\.absoluteString), [
+            "https://cdn.example/_v7/abc/audio/english.m3u8",
+            "https://subs.example/en.m3u8",
+            "https://cdn.example/_v7/trick/iframes.m3u8"
+        ])
+        XCTAssertTrue(HLSManifest.renditionURLs(in: "#EXTM3U\n#EXTINF:4,\nseg.ts\n", baseURL: base).isEmpty)
+    }
 }

@@ -342,6 +342,11 @@ final class LocalMediaServer {
         "hls.html": page("HLS Video Page", #"<video id="video" src="/hls/master.m3u8" controls playsinline width="320" height="180"></video>"#),
         "referer-hls.html": page("Referer HLS Page", #"<video id="video" src="/hls/referer-master.m3u8" controls playsinline width="320" height="180"></video>"#),
         "fragment.html": page("Fragment Page", #"<video id="video" src="/hls/seg-57-s1080p-v1-a1.m4s" controls playsinline width="320" height="180"></video>"#),
+        // Like hls.js players: the page script also loads the separate audio playlist.
+        "separate-audio.html": page("Separate Audio Page", """
+            <video id="video" src="/hls/separate-audio-master.m3u8" controls playsinline width="320" height="180"></video>
+            <script>fetch('/hls/audio-only.m3u8');</script>
+            """),
         // Navigates like a client-side router that bypasses the page's own `history.pushState`.
         "spa.html": page("SPA Episode 1", """
             <p><a id="next" href="#" style="font-size: 32px" onclick="History.prototype.pushState.call(history, null, '', '/page/spa.html?ep=2'); document.title = 'SPA Episode 2'; return false;">Next episode</a></p>

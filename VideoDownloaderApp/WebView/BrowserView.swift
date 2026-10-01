@@ -81,7 +81,7 @@ final class BrowserViewModel: ObservableObject {
     private var lastAutomaticReload: Date?
     private let validator: CandidateValidator
     private let contextProvider: DownloadManager.ContextProvider
-    /// Variant playlists already represented by a master playlist in the list.
+    /// Variant and rendition playlists already represented by a master playlist in the list.
     private var variantURLs: Set<URL> = []
     /// Incremented on every page change so late probe results for the old page are dropped.
     private var generation = 0
@@ -281,15 +281,17 @@ final class BrowserViewModel: ObservableObject {
         switch status {
         case .ready(let probe):
             if let index = candidates.firstIndex(where: { $0.id == candidate.id }) { candidates[index].kind = probe.kind }
-            if !probe.variants.isEmpty {
-                let variants = Set(probe.variants.map { MediaDiscovery.normalizedURL($0.url) })
-                variantURLs.formUnion(variants)
-                let hidden = candidates.filter { $0.id != candidate.id && variants.contains(MediaDiscovery.normalizedURL($0.url)) }
+            // A master stands in for its variants and its separate audio and subtitle
+            // playlists, which would otherwise be offered as (silent or audio-only) videos.
+            let covered = Set((probe.variants.map(\.url) + probe.renditions).map(MediaDiscovery.normalizedURL))
+            if !covered.isEmpty {
+                variantURLs.formUnion(covered)
+                let hidden = candidates.filter { $0.id != candidate.id && covered.contains(MediaDiscovery.normalizedURL($0.url)) }
                 candidates.removeAll { hidden.map(\.id).contains($0.id) }
                 hidden.forEach { statuses[$0.id] = nil }
             }
             diagnostics?.record(event: "probe", url: candidate.url.absoluteString,
-                                note: "ready \(probe.kind.rawValue), \(probe.variants.count) variants, bytes=\(probe.expectedBytes.map(String.init) ?? "?")")
+                                note: "ready \(probe.kind.rawValue), \(probe.variants.count) variants, \(probe.renditions.count) renditions, bytes=\(probe.expectedBytes.map(String.init) ?? "?")")
         case .unavailable(let error):
             diagnostics?.record(event: "probe", url: candidate.url.absoluteString, note: "unavailable: \(error.message)")
         case .checking:

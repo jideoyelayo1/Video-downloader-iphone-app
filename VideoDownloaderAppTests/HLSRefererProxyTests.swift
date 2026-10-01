@@ -98,4 +98,15 @@ final class HLSRefererProxyTests: XCTestCase {
         XCTAssertEqual(audioData, server.fixtures.hlsAudioOnly)
         XCTAssertEqual(server.requests(to: "/hls/audio-only.ts").last?.header("referer"), context.referer?.absoluteString)
     }
+
+    func testRepeatedPlaylistFetchesReuseRoutes() async throws {
+        let context = RequestContext(cookies: [], userAgent: "RelayFixture/1", referer: server.url("/page/basic.html"))
+        let proxy = try HLSRefererProxy(context: context)
+        defer { proxy.stop() }
+        let localMaster = try proxy.start(for: server.url("/hls/separate-audio-master.m3u8"))
+        let (first, _) = try await URLSession.shared.data(from: localMaster)
+        let (second, _) = try await URLSession.shared.data(from: localMaster)
+        XCTAssertFalse(first.isEmpty)
+        XCTAssertEqual(first, second, "the same remote URL keeps the same relay route")
+    }
 }

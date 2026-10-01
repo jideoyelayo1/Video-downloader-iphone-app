@@ -5,6 +5,8 @@ struct ProbeResult: Equatable {
     var expectedBytes: Int64?
     /// Master-playlist variants, highest bandwidth first; empty for files and single-rendition streams.
     var variants: [HLSVariant] = []
+    /// Audio, subtitle and I-frame playlists the master references; never offered on their own.
+    var renditions: [URL] = []
     var duration: Double?
     /// The origin rejects requests unless they include the player frame's Referer.
     var requiresReferer = false
@@ -114,7 +116,9 @@ struct CandidateValidator {
             if !isFinite { return .unavailable(.liveStream) }
             try await checkFirstSegment(of: mediaText, baseURL: mediaURL, context: requestContext, fullContext: fullContext)
             let bytes = best.bandwidth.map { Int64(Double($0) / 8 * duration) }
-            return .ready(ProbeResult(kind: .hls, expectedBytes: bytes, variants: variants, duration: duration, requiresReferer: requiresReferer))
+            return .ready(ProbeResult(kind: .hls, expectedBytes: bytes, variants: variants,
+                                      renditions: HLSManifest.renditionURLs(in: text, baseURL: finalURL),
+                                      duration: duration, requiresReferer: requiresReferer))
         case .media(let isFinite, let drm, _, let duration):
             if drm { return .unavailable(.protectedStream) }
             if !isFinite { return .unavailable(.liveStream) }
