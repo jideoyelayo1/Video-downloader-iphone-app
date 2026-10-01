@@ -37,9 +37,12 @@ struct BrowserScreen: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingCandidates = true } label: {
-                        Label(model.candidates.isEmpty ? "Found videos" : "Found videos (\(model.candidates.count))", systemImage: "film.stack")
-                            .labelStyle(.titleAndIcon)
+                        HStack(spacing: 5) {
+                            Image(systemName: "film.stack")
+                            FoundVideosCount(total: model.candidates.count, ready: model.readyCount)
+                        }
                     }
+                    .accessibilityLabel(model.candidates.isEmpty ? "Found videos" : "Found videos (\(model.candidates.count))")
                     .accessibilityIdentifier("browser.foundVideos")
                     .accessibilityValue("\(model.readyCount) ready")
                 }
@@ -96,20 +99,63 @@ struct BrowserScreen: View {
 
 }
 
+/// How many videos the page offers, beside the toolbar icon, so results show without opening the sheet.
+/// Green once one is ready to save.
+private struct FoundVideosCount: View {
+    let total: Int
+    let ready: Int
+
+    var body: some View {
+        if total > 0 {
+            Text("\(ready > 0 ? ready : total)")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(ready > 0 ? Color.green : Color.secondary)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
 private struct CandidateSheet: View {
     @ObservedObject var model: BrowserViewModel
     let download: (MediaCandidate, ProbeResult?, HLSVariant?) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    private var sorted: [MediaCandidate] {
-        func rank(_ candidate: MediaCandidate) -> Int {
-            switch model.statuses[candidate.id] {
-            case .ready(let probe)?: return probe.kind == .hls && !probe.variants.isEmpty ? 0 : 1
-            case .checking?, nil: return 2
-            case .unavailable?: return 3
+    private enum Group: Int, CaseIterable {
+        case ready, checking, unavailable
+        var title: String {
+            switch self {
+            case .ready: return "Ready to Save"
+            case .checking: return "Checking"
+            case .unavailable: return "Can't Be Saved"
             }
         }
-        return model.candidates.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+    }
+
+    private func group(of candidate: MediaCandidate) -> Group {
+        switch model.statuses[candidate.id] {
+        case .ready?: return .ready
+        case .checking?, nil: return .checking
+        case .unavailable?: return .unavailable
+        }
+    }
+
+    /// Master playlists first: they carry every quality plus separate audio and captions.
+    private func candidates(in group: Group) -> [MediaCandidate] {
+        let members = model.candidates.enumerated().filter { self.group(of: $0.element) == group }
+        return members.sorted { a, b in
+            let rank = { (candidate: MediaCandidate) -> Int in
+                if case .ready(let probe)? = model.statuses[candidate.id], probe.kind == .hls, !probe.variants.isEmpty { return 0 }
+                return 1
+            }
+            return (rank(a.element), a.offset) < (rank(b.element), b.offset)
+        }.map(\.element)
+    }
+
+    private var masterAvailable: Bool {
+        model.statuses.values.contains {
+            if case .ready(let probe) = $0 { return probe.kind == .hls && !probe.variants.isEmpty }
+            return false
+        }
     }
 
     var body: some View {
@@ -123,13 +169,40 @@ private struct CandidateSheet: View {
                         ContentUnavailableView("No videos found yet", systemImage: "film.stack",
                                                description: Text("Complete any site verification, start the video on the page, then tap Refresh. Some protected streams cannot be saved."))
                     }
+                } else {
+                    Section {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(model.pageTitle.isEmpty ? "This page" : model.pageTitle).font(.subheadline.weight(.semibold)).lineLimit(2)
+                            Text("Downloads are named after this page.").font(.caption).foregroundStyle(.secondary)
+                        }
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 0, trailing: 4))
+                    }
                 }
-                ForEach(sorted) { candidate in
-                    CandidateRow(candidate: candidate, status: model.statuses[candidate.id] ?? .checking,
-                                 masterAvailable: model.statuses.values.contains(where: {
-                        if case .ready(let probe) = $0 { return probe.kind == .hls && !probe.variants.isEmpty }
-                        return false
-                    }), download: download)
+                ForEach(Group.allCases, id: \.self) { group in
+                    let members = candidates(in: group)
+                    if !members.isEmpty {
+                        Section(group.title) {
+                            ForEach(members) { candidate in
+                                CandidateRow(candidate: candidate, status: model.statuses[candidate.id] ?? .checking,
+                                             masterAvailable: masterAvailable, download: download)
+                            }
+                        }
+                    }
+                }
+                if !model.subtitleTracks.isEmpty && !model.candidates.isEmpty {
+                    Section {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(model.subtitleTracks.count == 1 ? "1 subtitle language" : "\(model.subtitleTracks.count) subtitle languages")
+                                    .font(.subheadline.weight(.semibold))
+                                Text(Self.summary(model.subtitleTracks.map(\.displayName))).font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: "captions.bubble").foregroundStyle(.tint) }
+                        .accessibilityIdentifier("candidate.subtitles")
+                    } footer: {
+                        Text("Saved with your download. Choose them from Captions when you play it in My Videos.")
+                    }
                 }
             }
             .navigationTitle("Found videos")
@@ -142,6 +215,11 @@ private struct CandidateSheet: View {
             }
         }
     }
+
+    static func summary(_ names: [String], shown: Int = 3) -> String {
+        let listed = names.prefix(shown).joined(separator: ", ")
+        return names.count > shown ? "\(listed) and \(names.count - shown) more" : listed
+    }
 }
 
 private struct CandidateRow: View {
@@ -150,35 +228,79 @@ private struct CandidateRow: View {
     let masterAvailable: Bool
     let download: (MediaCandidate, ProbeResult?, HLSVariant?) -> Void
 
+    private var probe: ProbeResult? {
+        if case .ready(let probe) = status { return probe }
+        return nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(candidate.title).font(.headline).lineLimit(2)
-            Text(([kindLabel, candidate.quality, candidate.url.host].compactMap { $0 }).joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary)
-            Text(candidate.url.absoluteString).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
-            statusView
-            if masterAvailable, case .ready(let probe) = status, probe.kind == .hls, probe.variants.isEmpty {
-                Text("Choose the master playlist above when available; this single playlist may omit separate audio or captions.")
-                    .font(.caption).foregroundStyle(.orange)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundStyle(probe != nil ? Color.accentColor : Color.secondary)
+                .frame(width: 40, height: 40)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(headline).font(.headline).lineLimit(2)
+                Text(details).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                statusView
+                if masterAvailable, let probe, probe.kind == .hls, probe.variants.isEmpty {
+                    Text("The master playlist above also includes every quality, audio and caption track.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                if probe != nil { downloadControl.padding(.top, 4) }
             }
-            downloadControl
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 4)
+        .contextMenu {
+            Button("Copy Link", systemImage: "link") { UIPasteboard.general.url = candidate.url }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("candidate.\(candidate.url.lastPathComponent)")
     }
 
-    private var kindLabel: String {
-        if case .ready(let probe) = status { return probe.kind.label }
-        return candidate.kind.label
+    private var symbol: String {
+        switch probe?.kind ?? candidate.kind {
+        case .hls: return probe?.variants.isEmpty == false ? "play.rectangle.on.rectangle" : "play.rectangle"
+        case .video: return "film"
+        case .unknown: return "questionmark.video"
+        }
+    }
+
+    private var headline: String {
+        guard let probe else { return candidate.kind == .hls ? "Stream" : "Video" }
+        if probe.kind == .hls {
+            if let best = probe.variants.first { return "Master playlist · up to \(best.qualityLabel)" }
+            return "Single-quality stream"
+        }
+        return ["Video file", candidate.quality].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var details: String {
+        // The headline already says "Video file"; streams keep their kind here.
+        var parts: [String] = (probe?.kind ?? candidate.kind) == .video ? [] : [probe?.kind.label ?? candidate.kind.label]
+        if let probe {
+            if let bytes = probe.expectedBytes { parts.append((probe.kind == .hls ? "about " : "") + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) }
+            if let duration = probe.duration, duration > 0 {
+                parts.append(Duration.seconds(duration).formatted(.time(pattern: duration >= 3600 ? .hourMinuteSecond : .minuteSecond)))
+            }
+        }
+        if let host = candidate.url.host { parts.append(host) }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder private var statusView: some View {
         switch status {
         case .checking:
-            Label("Checking…", systemImage: "hourglass").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("Checking…")
+            }
+            .font(.caption).foregroundStyle(.secondary)
         case .ready(let probe):
-            Label(readyDetail(probe), systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+            Label(probe.requiresReferer ? "Ready · keep app open" : "Ready", systemImage: "checkmark.circle.fill")
+                .font(.caption).foregroundStyle(.green)
         case .unavailable(let error):
             Label(error.message, systemImage: error == .protectedStream ? "lock.fill" : "exclamationmark.triangle.fill")
                 .font(.caption).foregroundStyle(.orange)
@@ -186,32 +308,25 @@ private struct CandidateRow: View {
     }
 
     @ViewBuilder private var downloadControl: some View {
-        if case .ready(let probe) = status, probe.variants.count > 1 {
+        if let probe, probe.variants.count > 1 {
             Menu {
                 Button("Best quality") { download(candidate, probe, nil) }
                 // Variants can share a playlist URL (e.g. across audio groups), so rows are keyed by position.
                 ForEach(Array(probe.variants.enumerated()), id: \.offset) { _, variant in
                     Button(variant.qualityLabel) { download(candidate, probe, variant) }
                 }
-            } label: { Label("Download", systemImage: "arrow.down.circle") }
+            } label: { Label("Download", systemImage: "arrow.down") }
             .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
             .accessibilityIdentifier("candidate.download")
-        } else {
-            Button {
-                if case .ready(let probe) = status { download(candidate, probe, nil) }
-            } label: { Label("Download", systemImage: "arrow.down.circle") }
-            .buttonStyle(.borderedProminent)
-            .disabled(!status.isReady)
-            .accessibilityIdentifier("candidate.download")
+        } else if let probe {
+            Button { download(candidate, probe, nil) } label: { Label("Download", systemImage: "arrow.down") }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                .accessibilityIdentifier("candidate.download")
         }
-    }
-
-    private func readyDetail(_ probe: ProbeResult) -> String {
-        var parts = [probe.requiresReferer ? "Ready · keep app open" : "Ready"]
-        if probe.kind == .hls && !probe.variants.isEmpty { parts.append("Master playlist") }
-        if let bytes = probe.expectedBytes { parts.append((probe.kind == .hls ? "about " : "") + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) }
-        if let duration = probe.duration, duration > 0 { parts.append(Duration.seconds(duration).formatted(.time(pattern: duration >= 3600 ? .hourMinuteSecond : .minuteSecond))) }
-        return parts.joined(separator: " · ")
     }
 }
 
