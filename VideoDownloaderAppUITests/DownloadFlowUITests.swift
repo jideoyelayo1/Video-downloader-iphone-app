@@ -73,13 +73,20 @@ final class DownloadFlowUITests: XCTestCase {
         wait(for: app.otherElements["player.video"], "exists == false", timeout: 5, "the player should close")
     }
 
+    /// AVKit's Off item: identified on iOS 26 (beside On (Language)), labelled on iOS 18
+    /// (beside Auto (Recommended) and the languages).
+    private var subtitlesOffItem: XCUIElement {
+        let identified = app.buttons["AVSubtitlesOffAction"]
+        return identified.exists ? identified : app.buttons.matching(NSPredicate(format: "label == 'Off'")).firstMatch
+    }
+
     private func openSubtitlesMenu() {
         revealPlayerControls()
         app.buttons["More Controls"].tap()
         let subtitles = app.buttons["Subtitles"]
         XCTAssertTrue(subtitles.waitForExistence(timeout: 5))
         subtitles.tap()
-        XCTAssertTrue(app.buttons["AVSubtitlesOffAction"].waitForExistence(timeout: 5))
+        XCTAssertTrue(subtitlesOffItem.waitForExistence(timeout: 5))
     }
 
     func testBrowseDetectDownloadPlayExportRenameDelete() throws {
@@ -228,15 +235,15 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
         openSubtitlesMenu()
         // The first playback turns captions on.
-        XCTAssertTrue(app.buttons["AVSubtitlesOnAction"].isSelected)
-        app.buttons["AVSubtitlesOffAction"].tap()
+        XCTAssertFalse(subtitlesOffItem.isSelected)
+        subtitlesOffItem.tap()
         closePlayer()
 
         item.tap()
         XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
         openSubtitlesMenu()
-        XCTAssertTrue(app.buttons["AVSubtitlesOffAction"].isSelected, "captions turned off should stay off")
-        app.buttons["AVSubtitlesOffAction"].tap()
+        XCTAssertTrue(subtitlesOffItem.isSelected, "captions turned off should stay off")
+        subtitlesOffItem.tap()
         closePlayer()
     }
 
@@ -296,7 +303,8 @@ final class DownloadFlowUITests: XCTestCase {
         closePlayer()
 
         // Watched past 10 s: the video is offered under Continue Watching and resumes where it stopped.
-        XCTAssertTrue(app.staticTexts["Continue Watching"].waitForExistence(timeout: 5))
+        // iOS 18 shows list headers in capitals.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'Continue Watching'")).firstMatch.waitForExistence(timeout: 5))
         wait(for: item, "label CONTAINS 'Continue watching'", timeout: 5, item.label)
         item.tap()
         XCTAssertTrue(app.buttons["Resume"].waitForExistence(timeout: 5))

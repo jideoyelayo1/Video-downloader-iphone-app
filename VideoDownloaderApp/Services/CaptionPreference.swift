@@ -3,7 +3,11 @@ import Foundation
 /// The viewer's last caption choice, applied to every saved video.
 enum CaptionPreference {
     static let defaultsKey = "captionPreference"
+    /// No captions at all (AVKit's Off on iOS 18).
     static let off = "off"
+    /// Only forced subtitles, for foreign-language lines and signs (AVKit's Off on iOS 26, and
+    /// Auto (Recommended) on iOS 18).
+    static let forcedOnly = "forced"
 
     struct Option: Equatable {
         /// BCP 47 tag such as `en` or `en-US`, when the track declares one.
@@ -17,7 +21,7 @@ enum CaptionPreference {
     ///   - defaultIndex: what to show when there is no usable preference.
     static func index(for stored: String?, in options: [Option], defaultIndex: Int?) -> Int? {
         guard let stored else { return defaultIndex }
-        if stored == off { return nil }
+        if stored == off || stored == forcedOnly { return nil }
         if let exact = options.firstIndex(where: { $0.language == stored || $0.name == stored }) { return exact }
         // "en" chosen on one video should still match "en-US" on another.
         let base = stored.split(separator: "-").first.map(String.init)?.lowercased()

@@ -150,16 +150,18 @@ final class PlaybackCoordinatorTests: XCTestCase {
         // Captions start on with full subtitles, not the forced-only track the system prefers.
         XCTAssertEqual(coordinator.captionNames, ["English"])
         XCTAssertEqual(coordinator.selectedCaption, 0)
-        try await Task.sleep(for: .milliseconds(300))
+        // Changes just after opening are AVKit's automatic ones, which the app reverts; a viewer's
+        // tap in the menu comes later.
+        try await Task.sleep(for: .seconds(2))
         XCTAssertNil(preferences.string(forKey: CaptionPreference.defaultsKey), "the app's own default isn't a viewer choice")
 
         let playerItem = try XCTUnwrap(coordinator.controller.player?.currentItem)
         let loadedGroup = try await playerItem.asset.loadMediaSelectionGroup(for: .legible)
         let group = try XCTUnwrap(loadedGroup)
-        // AVKit's Subtitles > Off selects the forced-only track.
+        // AVKit's Subtitles > Off selects the forced-only track on iOS 26.
         let forced = try XCTUnwrap(group.options.first(where: PlaybackCoordinator.isForcedOnly))
         playerItem.select(forced, in: group)
-        try await waitUntil("Off remembered") { preferences.string(forKey: CaptionPreference.defaultsKey) == CaptionPreference.off }
+        try await waitUntil("Off remembered") { preferences.string(forKey: CaptionPreference.defaultsKey) == CaptionPreference.forcedOnly }
         XCTAssertNil(coordinator.selectedCaption)
         coordinator.close()
 
@@ -169,6 +171,56 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.selectedCaption)
         let reopened = try XCTUnwrap(coordinator.controller.player?.currentItem)
         XCTAssertTrue(reopened.currentMediaSelection.selectedMediaOption(in: group).map(PlaybackCoordinator.isForcedOnly) ?? true)
+        coordinator.close()
+    }
+
+    /// AVKit changes the selection right after it takes over a new player; the app keeps its own.
+    func testAutomaticSelectionJustAfterOpeningIsReverted() async throws {
+        let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let suite = "PlaybackCoordinatorTests-auto-\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set(CaptionPreference.off, forKey: CaptionPreference.defaultsKey)
+        let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log, preferences: preferences, presentsPlayer: false)
+        let item = makeItem(in: container.mainContext)
+        coordinator.open(item, at: 0)
+        try await waitUntil("player ready") { coordinator.controller.player != nil && !coordinator.isLoading }
+        XCTAssertNil(coordinator.selectedCaption)
+        let playerItem = try XCTUnwrap(coordinator.controller.player?.currentItem)
+        let loadedGroup = try await playerItem.asset.loadMediaSelectionGroup(for: .legible)
+        let group = try XCTUnwrap(loadedGroup)
+        let english = try XCTUnwrap(group.options.first { !PlaybackCoordinator.isForcedOnly($0) })
+        playerItem.select(english, in: group)  // what AVKit does on its own at this point
+        try await waitUntil("Off restored") {
+            playerItem.currentMediaSelection.selectedMediaOption(in: group).map(PlaybackCoordinator.isForcedOnly) ?? true
+        }
+        XCTAssertNil(coordinator.selectedCaption)
+        XCTAssertEqual(preferences.string(forKey: CaptionPreference.defaultsKey), CaptionPreference.off)
+        coordinator.close()
+    }
+
+    /// On iOS 18 AVKit's Off selects no track at all; that is remembered as such.
+    func testOffWithoutForcedTrackIsRememberedSeparately() async throws {
+        let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let suite = "PlaybackCoordinatorTests-none-\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log, preferences: preferences, presentsPlayer: false)
+        let item = makeItem(in: container.mainContext)
+        coordinator.open(item, at: 0)
+        try await waitUntil("player ready") { coordinator.controller.player != nil && !coordinator.isLoading }
+        try await Task.sleep(for: .seconds(2))
+        let playerItem = try XCTUnwrap(coordinator.controller.player?.currentItem)
+        let loadedGroup = try await playerItem.asset.loadMediaSelectionGroup(for: .legible)
+        let group = try XCTUnwrap(loadedGroup)
+        playerItem.select(nil, in: group)
+        try await waitUntil("Off remembered") { preferences.string(forKey: CaptionPreference.defaultsKey) == CaptionPreference.off }
+        coordinator.close()
+
+        coordinator.open(item, at: 0)
+        try await waitUntil("player ready again") { coordinator.controller.player != nil && !coordinator.isLoading }
+        let reopened = try XCTUnwrap(coordinator.controller.player?.currentItem)
+        XCTAssertNil(reopened.currentMediaSelection.selectedMediaOption(in: group), "no track at all, as the viewer left it")
         coordinator.close()
     }
 }

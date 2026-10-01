@@ -15,6 +15,7 @@ final class CaptionPreferenceTests: XCTestCase {
 
     func testOffIsRemembered() {
         XCTAssertNil(CaptionPreference.index(for: CaptionPreference.off, in: options, defaultIndex: 0))
+        XCTAssertNil(CaptionPreference.index(for: CaptionPreference.forcedOnly, in: options, defaultIndex: 0))
         XCTAssertEqual(CaptionPreference.storedValue(for: nil), CaptionPreference.off)
     }
 

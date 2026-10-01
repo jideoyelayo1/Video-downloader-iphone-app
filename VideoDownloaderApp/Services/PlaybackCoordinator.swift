@@ -29,6 +29,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// selects one as "Off".
     private var captionOptions: [AVMediaSelectionOption] = []
     private var forcedCaptionOption: AVMediaSelectionOption?
+    /// Whether "no captions" keeps the forced-only track, as the viewer last left it.
+    private var offKeepsForced = true
     /// Subtitle files the site's player offered, saved with the download and drawn by `subtitleOverlay`.
     private var siteSubtitles: [SubtitleStore.Saved] = []
     private var siteCues: [Int: [SubtitleCue]] = [:]
@@ -122,14 +124,17 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             }
             let player = AVPlayer(playerItem: playerItem)
             player.isMuted = false
-            // Selections then change only when the app or the viewer chooses, so a change seen in
-            // AVKit's subtitle menu can be remembered as the viewer's.
-            player.appliesMediaSelectionCriteriaAutomatically = false
+            if #available(iOS 26.0, *) {
+                // iOS 26 keeps re-applying the system's subtitle preference over the viewer's
+                // remembered choice; its AVKit Off works without automatic criteria. iOS 18's
+                // AVKit needs them for its own Off, so they stay on there.
+                player.appliesMediaSelectionCriteriaAutomatically = false
+            }
             guard loadID == token else { return }
             controller.player = player
             await loadCaptions(from: asset, playerItem: playerItem, token: token)
             guard loadID == token else { return }
-            automaticSelectionWindowEnd = Date().addingTimeInterval(1.5)
+            automaticSelectionWindowEnd = Date().addingTimeInterval(2)
             automaticSelectionReverts = 0
             observeSelection(of: playerItem)
             installSubtitlesButton(for: player)
@@ -177,6 +182,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
         // Respect the viewer's last choice, including Off, instead of turning captions on for every video.
         let stored = preferences.string(forKey: CaptionPreference.defaultsKey)
+        offKeepsForced = stored != CaptionPreference.off
         let choice = CaptionPreference.index(for: stored, in: preferenceOptions, defaultIndex: defaultIndex)
         applyCaption(choice, to: playerItem)
         diagnostics.record(event: "captions", url: asset.url.absoluteString,
@@ -199,7 +205,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         defer { applyingCaption = false; refreshSubtitlesMenu() }
         if let group = captionGroup {
             // Off (or a site subtitle) selects the forced-only track, as AVKit's own Off does.
-            let embedded = index.flatMap { $0 < captionOptions.count ? captionOptions[$0] : nil } ?? forcedCaptionOption
+            let embedded = index.flatMap { $0 < captionOptions.count ? captionOptions[$0] : nil } ?? (offKeepsForced ? forcedCaptionOption : nil)
             if embedded != nil || group.allowsEmptySelection { playerItem.select(embedded, in: group) }
         }
         showSiteSubtitle(index.flatMap { $0 >= captionOptions.count ? $0 - captionOptions.count : nil })
@@ -257,14 +263,19 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private func playerMenuChangedSelection() {
         guard !applyingCaption, let group = captionGroup, let playerItem = controller.player?.currentItem else { return }
         let selected = playerItem.currentMediaSelection.selectedMediaOption(in: group)
-        // A forced-only track is AVKit's Off.
+        // A forced-only track counts as captions off (it is AVKit's Off on iOS 26).
         let index = selected.flatMap { captionOptions.firstIndex(of: $0) }
+        let forcedSelected = selected.map(Self.isForcedOnly) ?? false
         let showingSite = selectedCaption.map { $0 >= captionOptions.count } ?? false
         // The notification also arrives, later, for the app's own selections: only a selection
         // that differs from the app's state is the viewer's. With a site subtitle showing, the
         // embedded selection is off.
-        if showingSite ? index == nil : index == selectedCaption { return }
-        if Date() < automaticSelectionWindowEnd && automaticSelectionReverts < 3 {
+        let unchanged = index == nil
+            ? (showingSite || selectedCaption == nil) && (forcedCaptionOption == nil || forcedSelected == offKeepsForced)
+            : !showingSite && index == selectedCaption
+        if unchanged { return }
+        // AVKit re-applied its choice up to three times in a row on iOS 18.
+        if Date() < automaticSelectionWindowEnd && automaticSelectionReverts < 6 {
             automaticSelectionReverts += 1
             applyCaption(selectedCaption, to: playerItem)
             diagnostics.record(event: "captions", url: item?.localURL?.absoluteString ?? "app://player",
@@ -273,11 +284,13 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
         if index != nil { showSiteSubtitle(nil) }
         selectedCaption = index
+        if index == nil { offKeepsForced = forcedSelected }
         refreshSubtitlesMenu()
-        let option = index.map { preferenceOptions[$0] }
-        preferences.set(CaptionPreference.storedValue(for: option), forKey: CaptionPreference.defaultsKey)
+        let stored = index.map { CaptionPreference.storedValue(for: preferenceOptions[$0]) }
+            ?? (forcedSelected ? CaptionPreference.forcedOnly : CaptionPreference.off)
+        preferences.set(stored, forKey: CaptionPreference.defaultsKey)
         diagnostics.record(event: "captions", url: item?.localURL?.absoluteString ?? "app://player",
-                           note: (index.map { captionNames[$0] } ?? "Off") + " (player menu)")
+                           note: (index.map { captionNames[$0] } ?? (forcedSelected ? "Forced subtitles only" : "Off")) + " (player menu)")
     }
 
     /// AVKit can't list subtitle files that aren't part of the media, so videos saved with site
