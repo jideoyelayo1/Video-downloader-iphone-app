@@ -44,6 +44,22 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(item.isStreamFragment)
     }
 
+    func testDownloadedTextShowsTheDateAndTime() {
+        let added = Date(timeIntervalSince1970: 1_600_000_000)
+        let item = DownloadItem(title: "Episode", remoteURL: URL(string: "https://cdn.example/a.mp4")!,
+                                sourcePageURL: URL(string: "https://site.example/watch")!, kind: .video, createdAt: added)
+        let addedTime = DateFormatter.localizedString(from: added, dateStyle: .none, timeStyle: .short)
+        XCTAssertTrue(item.downloadedText.hasPrefix("Added "), item.downloadedText)
+        XCTAssertTrue(item.downloadedText.contains("2020") && item.downloadedText.contains(addedTime), item.downloadedText)
+        XCTAssertNil(item.completedTimeText)
+
+        let finished = Date()
+        item.completedAt = finished
+        let finishedTime = DateFormatter.localizedString(from: finished, dateStyle: .none, timeStyle: .short)
+        XCTAssertEqual(item.downloadedText, "Downloaded today at \(finishedTime)")
+        XCTAssertEqual(item.completedTimeText, "today at \(finishedTime)")
+    }
+
     func testFolderAndPlaybackPositionPersist() throws {
         let container = try makeContainer()
         let context = container.mainContext

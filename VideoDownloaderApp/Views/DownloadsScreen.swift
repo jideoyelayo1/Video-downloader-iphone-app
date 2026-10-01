@@ -151,7 +151,10 @@ private struct DownloadRow: View {
         switch item.status {
         case .queued: return "Waiting"
         case .downloading: return "Downloading"
-        case .completed: return "Completed" + (item.fileSize.map { " · " + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "")
+        case .completed:
+            var parts = ["Completed" + (item.completedTimeText.map { " \($0)" } ?? "")]
+            if let size = item.fileSize { parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) }
+            return parts.joined(separator: " · ")
         case .failed: return "Failed"
         case .cancelled: return "Cancelled"
         }

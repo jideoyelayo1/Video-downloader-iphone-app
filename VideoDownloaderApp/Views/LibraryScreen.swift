@@ -59,7 +59,7 @@ struct LibraryScreen: View {
                                                     .accessibilityLabel("More options for \(item.title)")
                                             }
                                         }
-                                        Text(downloadDate(for: item)).font(.caption2).foregroundStyle(.secondary)
+                                        Text(item.downloadedText).font(.caption2).foregroundStyle(.secondary)
                                         Label("Resume", systemImage: "play.fill")
                                             .font(.caption).foregroundStyle(.tint)
                                     }
@@ -161,13 +161,6 @@ struct LibraryScreen: View {
         renaming = item
     }
 
-    private func downloadDate(for item: DownloadItem) -> String {
-        if let completedAt = item.completedAt {
-            return "Downloaded \(completedAt.formatted(date: .abbreviated, time: .omitted))"
-        }
-        return "Added \(item.createdAt.formatted(date: .abbreviated, time: .omitted))"
-    }
-
     private func open(_ item: DownloadItem) {
         if (item.playbackPosition ?? 0) > 10 { pendingPlayback = item }
         else { start(item, at: 0) }
@@ -225,7 +218,13 @@ private struct LibraryRow: View {
             VideoThumbnailView(item: item, width: 112, height: 72)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
-                Text(detail(fileExists: fileExists)).font(.caption).foregroundStyle(fileExists ? Color.secondary : Color.red)
+                // Date and size on their own lines: together they always wrap mid-way at this width.
+                Text(item.downloadedText).font(.caption).foregroundStyle(.secondary)
+                if !fileExists {
+                    Text("File missing").font(.caption).foregroundStyle(.red)
+                } else if let size = item.fileSize {
+                    Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)).font(.caption).foregroundStyle(.secondary)
+                }
                 if (item.playbackPosition ?? 0) > 10 {
                     Label("Continue watching", systemImage: "play.circle.fill")
                         .font(.caption2).foregroundStyle(.tint)
@@ -244,15 +243,6 @@ private struct LibraryRow: View {
     }
 
     private var fileExists: Bool { item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
-
-    private func detail(fileExists: Bool) -> String {
-        let date = item.completedAt.map { "Downloaded \($0.formatted(date: .abbreviated, time: .omitted))" }
-            ?? "Added \(item.createdAt.formatted(date: .abbreviated, time: .omitted))"
-        guard fileExists else { return "\(date) · File missing" }
-        var parts = [date]
-        if let size = item.fileSize { parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) }
-        return parts.joined(separator: " · ")
-    }
 }
 
 private struct VideoThumbnailView: View {

@@ -103,12 +103,13 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(status.waitForExistence(timeout: 5))
         let completed = NSPredicate(format: "label BEGINSWITH 'Completed'")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: completed, object: status)], timeout: 20), .completed, status.label)
+        XCTAssertTrue(status.label.hasPrefix("Completed today at "), status.label)
 
         app.tabBars.buttons["My Videos"].tap()
         let libraryItem = app.buttons["library.item"].firstMatch
         XCTAssertTrue(libraryItem.waitForExistence(timeout: 5))
         XCTAssertTrue(libraryItem.label.contains("Basic Video Page"), libraryItem.label)
-        XCTAssertTrue(libraryItem.label.contains("Downloaded"), libraryItem.label)
+        XCTAssertTrue(libraryItem.label.contains("Downloaded today at "), libraryItem.label)
 
         // Playback
         libraryItem.tap()

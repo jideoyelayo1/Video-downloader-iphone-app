@@ -131,6 +131,26 @@ final class DownloadItem {
         get { requiresRefererRaw == true }
         set { requiresRefererRaw = newValue }
     }
+
+    /// When the download finished, such as "today at 21:40" or "26 Sep 2026 at 09:05", in the
+    /// viewer's language and clock style. Downloads saved before this was recorded fall back to
+    /// when they were added.
+    var downloadedText: String {
+        if let completedAt { return "Downloaded \(Self.dateTimeFormatter.string(from: completedAt))" }
+        return "Added \(Self.dateTimeFormatter.string(from: createdAt))"
+    }
+
+    /// The finish time on its own, for text that already says the download completed.
+    var completedTimeText: String? { completedAt.map(Self.dateTimeFormatter.string(from:)) }
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.doesRelativeDateFormatting = true
+        formatter.formattingContext = .middleOfSentence
+        return formatter
+    }()
 }
 
 @Model
