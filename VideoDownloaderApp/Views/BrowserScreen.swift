@@ -7,12 +7,24 @@ struct BrowserScreen: View {
     @EnvironmentObject private var downloads: DownloadManager
     @State private var showingCandidates = false
     @State private var showingCollections = false
+    @FocusState private var addressFocused: Bool
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 addressBar
-                if model.isLoading { ProgressView().progressViewStyle(.linear).accessibilityLabel("Loading page") }
+                    // Drawn over the bar's bottom edge so the page doesn't shift on every load.
+                    .overlay(alignment: .bottom) {
+                        if model.isLoading {
+                            ProgressView(value: max(model.loadProgress, 0.05))
+                                .progressViewStyle(.linear)
+                                .tint(.cyan)
+                                .allowsHitTesting(false)
+                                .accessibilityLabel("Loading page")
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.2), value: model.isLoading)
                 BrowserView(model: model)
                     .ignoresSafeArea(edges: .bottom)
             }
@@ -65,6 +77,8 @@ struct BrowserScreen: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.go)
+                .focused($addressFocused)
+                .onChange(of: addressFocused) { _, focused in model.isEditingAddress = focused }
                 .onSubmit { model.navigate(to: model.addressText) }
                 .accessibilityIdentifier("browser.address")
                 .overlay(alignment: .trailing) {

@@ -134,6 +134,25 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["No history yet"].waitForExistence(timeout: 5))
     }
 
+    func testSamePageNavigationUpdatesAddressTitleAndBack() throws {
+        launch(at: "/page/spa.html")
+        let address = app.textFields["browser.address"]
+        let back = app.buttons["Back"]
+        let link = app.webViews.links["Next episode"]
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        XCTAssertFalse(back.isEnabled)
+        link.tap()
+        let moved = NSPredicate(format: "value ENDSWITH '/page/spa.html?ep=2'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: moved, object: address)], timeout: 10), .completed,
+                       String(describing: address.value))
+        XCTAssertTrue(app.navigationBars["SPA Episode 2"].waitForExistence(timeout: 5))
+        XCTAssertTrue(back.isEnabled)
+        back.tap()
+        let returned = NSPredicate(format: "value ENDSWITH '/page/spa.html'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: returned, object: address)], timeout: 10), .completed,
+                       String(describing: address.value))
+    }
+
     func testHLSStreamIsValidatedWithQualityChoices() throws {
         launch(at: "/page/hls.html")
         waitForReadyCandidates(1).tap()

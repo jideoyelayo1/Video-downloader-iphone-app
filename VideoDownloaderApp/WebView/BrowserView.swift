@@ -7,44 +7,32 @@ struct BrowserView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
     func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        // Keep a site's player controls and external caption overlays with its
-        // video. Forcing native full screen hides JW Player subtitle layers.
-        configuration.allowsInlineMediaPlayback = true
-        if LaunchOptions.autoplay { configuration.mediaTypesRequiringUserActionForPlayback = [] }
-        let contentController = WKUserContentController()
-        contentController.add(WeakScriptMessageHandler(model.discovery), name: MediaDiscovery.messageName)
-        model.discovery.userScripts(diagnosticsEnabled: LaunchOptions.diagnosticsEnabled, autoplay: LaunchOptions.autoplay)
-            .forEach(contentController.addUserScript)
-        configuration.userContentController = contentController
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.allowsBackForwardNavigationGestures = true
-        webView.accessibilityIdentifier = "browser.webView"
-        #if DEBUG
-        if #available(iOS 16.4, *) { webView.isInspectable = true }
-        #endif
+        // The model owns the web view, so a SwiftUI re-creation reattaches the same
+        // page instead of starting a second, blank WebKit process.
+        let webView = model.makeWebView()
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
-        model.attach(webView)
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+    }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         let model: BrowserViewModel
         init(model: BrowserViewModel) { self.model = model }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            model.isLoading = true
             model.pageDidChange(to: webView.url, force: true)
         }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { model.syncState() }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            model.isLoading = false
             model.didFinishPage()
             if BrowserSession.userAgent == nil {
                 webView.evaluateJavaScript("navigator.userAgent") { value, _ in
@@ -55,6 +43,8 @@ struct BrowserView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { model.loadFailed(error) }
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { model.loadFailed(error) }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { model.webContentProcessDidTerminate() }
 
         /// Opens `target="_blank"` links the user tapped in the same view; script-opened popups (usually ads) are dropped.
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction,
@@ -72,17 +62,23 @@ final class BrowserViewModel: ObservableObject {
     @Published private(set) var candidates: [MediaCandidate] = []
     @Published private(set) var observedFragments = false
     @Published private(set) var statuses: [UUID: CandidateStatus] = [:]
-    @Published var isLoading = false
+    @Published private(set) var isLoading = false
+    /// Page load progress, published in coarse steps for the address bar's loading line.
+    @Published private(set) var loadProgress = 0.0
     @Published var errorMessage: String?
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published private(set) var pageTitle = ""
+    /// While the user types an address, page URL updates must not replace their text.
+    var isEditingAddress = false
 
     let discovery = MediaDiscoveryController()
     let diagnostics: DiagnosticsLog?
     private let history: BrowserHistoryStore?
-    private weak var webView: WKWebView?
+    private(set) var webView: WKWebView?
+    private var observations: [NSKeyValueObservation] = []
     private var pendingURL: URL?
+    private var lastAutomaticReload: Date?
     private let validator: CandidateValidator
     private let contextProvider: DownloadManager.ContextProvider
     /// Variant playlists already represented by a master playlist in the list.
@@ -107,13 +103,87 @@ final class BrowserViewModel: ObservableObject {
 
     var readyCount: Int { statuses.values.filter(\.isReady).count }
 
+    /// Returns the browser's single web view, creating and loading it on first use.
+    func makeWebView() -> WKWebView {
+        if let webView { return webView }
+        let configuration = WKWebViewConfiguration()
+        // Keep a site's player controls and external caption overlays with its
+        // video. Forcing native full screen hides JW Player subtitle layers.
+        configuration.allowsInlineMediaPlayback = true
+        if LaunchOptions.autoplay { configuration.mediaTypesRequiringUserActionForPlayback = [] }
+        let contentController = WKUserContentController()
+        contentController.add(WeakScriptMessageHandler(discovery), name: MediaDiscovery.messageName)
+        discovery.userScripts(diagnosticsEnabled: LaunchOptions.diagnosticsEnabled, autoplay: LaunchOptions.autoplay)
+            .forEach(contentController.addUserScript)
+        configuration.userContentController = contentController
+
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.allowsBackForwardNavigationGestures = true
+        webView.accessibilityIdentifier = "browser.webView"
+        #if DEBUG
+        if #available(iOS 16.4, *) { webView.isInspectable = true }
+        #endif
+        attach(webView)
+        return webView
+    }
+
     func attach(_ webView: WKWebView) {
         self.webView = webView
         discovery.webView = webView
+        observe(webView)
         if let pendingURL {
             self.pendingURL = nil
             webView.load(URLRequest(url: pendingURL))
         }
+    }
+
+    /// Navigation callbacks miss same-document changes (pushState) that some routers make
+    /// without going through the page's `history.pushState`, so the web view's own state is watched.
+    private func observe(_ webView: WKWebView) {
+        func watch<Value>(_ keyPath: KeyPath<WKWebView, Value>, _ update: @escaping @MainActor (BrowserViewModel, WKWebView) -> Void) -> NSKeyValueObservation {
+            webView.observe(keyPath, options: [.new]) { [weak self] webView, _ in
+                let apply = {
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        update(self, webView)
+                    }
+                }
+                // WebKit reports these on the main thread; never assume isolation anywhere else.
+                if Thread.isMainThread { apply() } else { DispatchQueue.main.async(execute: apply) }
+            }
+        }
+        observations = [
+            watch(\.url) { model, webView in model.webViewURLChanged(webView) },
+            watch(\.title) { model, webView in model.webViewTitleChanged(webView) },
+            watch(\.canGoBack) { model, webView in model.canGoBack = webView.canGoBack },
+            watch(\.canGoForward) { model, webView in model.canGoForward = webView.canGoForward },
+            watch(\.isLoading) { model, webView in
+                model.isLoading = webView.isLoading
+                if !webView.isLoading { model.loadProgress = 0 }
+            },
+            watch(\.estimatedProgress) { model, webView in
+                let value = webView.estimatedProgress
+                // Progress arrives in many tiny steps; the loading line only needs a few.
+                if value >= 1 || value < model.loadProgress || value - model.loadProgress >= 0.05 { model.loadProgress = value }
+            }
+        ]
+    }
+
+    private func webViewURLChanged(_ webView: WKWebView) {
+        guard let newURL = webView.url, ["http", "https"].contains(newURL.scheme?.lowercased()) else { return }
+        // A full navigation is handled by the navigation delegate once it commits or finishes.
+        guard !webView.isLoading else { return }
+        pageDidChange(to: newURL, force: false)
+        if url != newURL {
+            url = newURL
+            if !isEditingAddress { addressText = newURL.absoluteString }
+        }
+    }
+
+    private func webViewTitleChanged(_ webView: WKWebView) {
+        pageTitle = webView.title ?? ""
+        guard !webView.isLoading, let url, !pageTitle.isEmpty else { return }
+        history?.updateTitle(for: url, title: pageTitle)
     }
 
     func navigate(to text: String) {
@@ -133,9 +203,18 @@ final class BrowserViewModel: ObservableObject {
     func reload() { webView?.reload() }
     func rescan() { discovery.rescan() }
 
+    /// Stops the page's audio and video, e.g. when the user leaves Browse or plays a saved video.
+    func pauseMedia() {
+        // The Objective-C completion-handler form; Swift-refined WebKit overlays crash at launch on iOS 18.
+        webView?.pauseAllMediaPlayback(completionHandler: nil)
+    }
+
     func syncState() {
         guard let webView else { return }
-        if let current = webView.url { url = current; addressText = current.absoluteString }
+        if let current = webView.url {
+            url = current
+            if !isEditingAddress { addressText = current.absoluteString }
+        }
         canGoBack = webView.canGoBack
         canGoForward = webView.canGoForward
         pageTitle = webView.title ?? ""
@@ -147,11 +226,24 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func loadFailed(_ error: Error) {
-        isLoading = false
         let nsError = error as NSError
         // Cancelled loads (-999) and interrupted frame loads (102) are normal during redirects and downloads.
         if (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) || (nsError.domain == "WebKitErrorDomain" && nsError.code == 102) { return }
         errorMessage = error.localizedDescription
+    }
+
+    /// WebKit ends a page's content process when it uses too much memory, leaving a blank view.
+    /// Reload once automatically; a page that keeps crashing waits for the user.
+    func webContentProcessDidTerminate(now: Date = Date()) {
+        diagnostics?.record(event: "webcontent-terminated", url: url?.absoluteString ?? "about:blank")
+        pageDidChange(to: url, force: true)
+        if let last = lastAutomaticReload, now.timeIntervalSince(last) < 30 {
+            errorMessage = "This page stopped because it used too much memory. Tap Reload to try again."
+            return
+        }
+        lastAutomaticReload = now
+        guard let webView else { return }
+        if webView.url != nil { webView.reload() } else if let url { webView.load(URLRequest(url: url)) }
     }
 
     /// Clears candidates when the top-level page changes. Same-document history updates only count
@@ -165,7 +257,7 @@ final class BrowserViewModel: ObservableObject {
         variantURLs.removeAll()
         if let newURL, ["http", "https"].contains(newURL.scheme?.lowercased()) {
             url = newURL
-            addressText = newURL.absoluteString
+            if !isEditingAddress { addressText = newURL.absoluteString }
             if !force { history?.record(newURL, title: newURL.host ?? "") }
         }
     }

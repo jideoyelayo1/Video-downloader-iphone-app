@@ -38,30 +38,39 @@ final class BrowserHistoryStore {
 
     init(context: ModelContext) { self.context = context }
 
+    /// Runs on every page load and same-page navigation, so it looks up one row
+    /// rather than loading the whole history.
     func record(_ rawURL: URL, title: String, at date: Date = Date()) {
         guard let url = Self.pageURL(rawURL) else { return }
-        guard let entries = try? context.fetch(FetchDescriptor<BrowsingHistoryEntry>()) else { return }
         let name = cleanTitle(title, for: url)
-        if let entry = entries.first(where: { $0.url == url }) {
+        if let entry = entry(for: url) {
             entry.title = name
             entry.visitedAt = date
         } else {
-            context.insert(BrowsingHistoryEntry(title: name, url: url, visitedAt: date))
-            if entries.count >= Self.maximumEntries {
-                for old in entries.sorted(by: { $0.visitedAt < $1.visitedAt }).prefix(entries.count - Self.maximumEntries + 1) {
-                    context.delete(old)
-                }
+            let count = (try? context.fetchCount(FetchDescriptor<BrowsingHistoryEntry>())) ?? 0
+            if count >= Self.maximumEntries {
+                var oldest = FetchDescriptor<BrowsingHistoryEntry>(sortBy: [SortDescriptor(\.visitedAt)])
+                oldest.fetchLimit = count - Self.maximumEntries + 1
+                (try? context.fetch(oldest))?.forEach(context.delete)
             }
+            context.insert(BrowsingHistoryEntry(title: name, url: url, visitedAt: date))
         }
         try? context.save()
     }
 
     func updateTitle(for rawURL: URL, title: String) {
         guard let url = Self.pageURL(rawURL), !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let entries = try? context.fetch(FetchDescriptor<BrowsingHistoryEntry>()),
-              let entry = entries.first(where: { $0.url == url }) else { return }
-        entry.title = cleanTitle(title, for: url)
+              let entry = entry(for: url) else { return }
+        let name = cleanTitle(title, for: url)
+        guard entry.title != name else { return }
+        entry.title = name
         try? context.save()
+    }
+
+    private func entry(for url: URL) -> BrowsingHistoryEntry? {
+        var descriptor = FetchDescriptor<BrowsingHistoryEntry>(predicate: #Predicate { $0.url == url })
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
     }
 
     func clear() {

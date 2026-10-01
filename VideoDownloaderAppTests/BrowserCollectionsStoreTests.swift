@@ -74,4 +74,22 @@ final class BrowserCollectionsStoreTests: XCTestCase {
         BrowserHistoryStore(context: upgraded.mainContext).record(savedURL, title: "Favourite")
         XCTAssertEqual(try upgraded.mainContext.fetchCount(FetchDescriptor<BrowsingHistoryEntry>()), 1)
     }
+
+    func testHistoryIsCappedByDroppingTheOldestVisits() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let store = BrowserHistoryStore(context: context)
+        let total = BrowserHistoryStore.maximumEntries + 3
+        for index in 0..<total {
+            store.record(URL(string: "https://example.com/page/\(index)")!, title: "Page \(index)", at: Date(timeIntervalSince1970: Double(index)))
+        }
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<BrowsingHistoryEntry>()), BrowserHistoryStore.maximumEntries)
+        let urls = Set(try context.fetch(FetchDescriptor<BrowsingHistoryEntry>()).map(\.url.absoluteString))
+        for dropped in 0..<3 { XCTAssertFalse(urls.contains("https://example.com/page/\(dropped)")) }
+        XCTAssertTrue(urls.contains("https://example.com/page/\(total - 1)"))
+        // Revisiting a page updates its row instead of adding (and evicting) another.
+        store.record(URL(string: "https://example.com/page/\(total - 1)")!, title: "Again", at: Date(timeIntervalSince1970: 1_000_000))
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<BrowsingHistoryEntry>()), BrowserHistoryStore.maximumEntries)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<BrowsingHistoryEntry>()).map(\.url.absoluteString).contains("https://example.com/page/3"))
+    }
 }

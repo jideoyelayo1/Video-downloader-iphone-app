@@ -22,6 +22,9 @@ struct ContentView: View {
         }
         .tint(.cyan)
         .preferredColorScheme(.dark)
+        // A page's video would otherwise keep playing, and streaming, behind other tabs and saved videos.
+        .onChange(of: selection) { previous, _ in if previous == .browse { browser.pauseMedia() } }
+        .onChange(of: playback.isPresented) { _, presented in if presented { browser.pauseMedia() } }
         .fullScreenCover(isPresented: $playback.isPresented) {
             PersistentPlayerScreen()
                 .environmentObject(playback)
