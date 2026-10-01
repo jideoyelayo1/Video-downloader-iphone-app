@@ -10,6 +10,10 @@ enum DownloadError: Error, Equatable {
     case hlsPlaylistAsFile
     case protectedStream
     case liveStream
+    /// MPEG-DASH (`.mpd`), which AVFoundation can neither play nor save.
+    case dashStream
+    /// The server answers as a playlist, but only the site's own player can decode the body.
+    case scrambledStream
     case insufficientStorage(required: Int64?, available: Int64?)
     case offline
     case networkLost
@@ -30,6 +34,8 @@ enum DownloadError: Error, Equatable {
         case .hlsPlaylistAsFile: return "The URL is an HLS playlist; choose its manifest as an HLS download."
         case .protectedStream: return "This video is DRM-protected and can't be downloaded."
         case .liveStream: return "Live streams can't be downloaded. Try again once the broadcast has ended."
+        case .dashStream: return "This is a DASH stream, which iPhone can't save. Try another server on the page."
+        case .scrambledStream: return "This player scrambles its stream, so it can't be saved. Try another server on the page."
         case .insufficientStorage(let required, let available):
             if let required, let available, required > available {
                 let needed = ByteCountFormatter.string(fromByteCount: required - available, countStyle: .file)

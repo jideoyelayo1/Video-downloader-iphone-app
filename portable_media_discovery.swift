@@ -20,6 +20,10 @@ struct PortableMediaDiscoveryTests {
         precondition(DownloadResponseValidation.failureMessage(statusCode: 503, mimeType: "video/mp4") != nil)
         precondition(DownloadResponseValidation.failure(statusCode: 403, mimeType: "video/mp4") == .expiredLink)
         precondition(DownloadResponseValidation.failureMessage(statusCode: 403, mimeType: nil) == DownloadError.expiredLink.message)
+        precondition(MediaDiscovery.candidate(from: ["url": "https://cdn.example/theme.mp3", "mediaElement": true], sourcePageURL: page) == nil)
+        precondition(MediaDiscovery.candidate(from: ["url": "https://cdn.example/stream", "mediaElement": true, "contentType": "audio/mpeg"], sourcePageURL: page) == nil)
+        precondition(DownloadResponseValidation.failure(statusCode: 200, mimeType: "application/dash+xml") == .dashStream)
+        precondition(DownloadResponseValidation.playlistFailure(mimeType: "application/vnd.apple.mpegurl", data: Data("lOd3dA1id49b7zjr".utf8)) == .scrambledStream)
         print("Swift MediaDiscoveryCore checks passed")
     }
 }

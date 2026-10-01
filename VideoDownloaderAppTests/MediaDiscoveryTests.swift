@@ -126,3 +126,14 @@ final class BrowserSessionTests: XCTestCase {
         XCTAssertEqual(BrowserSession.refererValue(for: frame, requesting: URL(string: "https://player.example/v.mp4")!), frame)
     }
 }
+
+final class MediaDiscoveryAudioTests: XCTestCase {
+    let page = URL(string: "https://***REMOVED***.to/anime")!
+
+    func testAudioOnlyFilesAreNotOfferedAsVideos() {
+        XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://aimgf.***REMOVED***.com/audios/jcBdahHBoSgKghASA/31830356.mp3", "mediaElement": true], sourcePageURL: page))
+        XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/stream?id=4", "mediaElement": true, "contentType": "audio/mp4"], sourcePageURL: page))
+        XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/stream?id=4", "mediaElement": true, "contentType": "video/mp4"], sourcePageURL: page))
+        XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/audio/english.m3u8"], sourcePageURL: page), "HLS audio renditions are hidden behind their master instead")
+    }
+}

@@ -202,6 +202,10 @@ final class LocalMediaServer {
                 : .text("Forbidden", "text/plain", status: 403)
         case "/hls/captions-master.m3u8": return .text(captionMasterPlaylist, Self.hlsType)
         case "/hls/separate-audio-master.m3u8": return .text(separateAudioMasterPlaylist, Self.hlsType)
+        // Like ***REMOVED***: labelled as a playlist, but only the site's player can decode the body.
+        case "/hls/scrambled.m3u8": return .text("lOd3dA1id49b7zjrlyMAkfBqsyDeJeE6n6EXDwKudaPj431nBQVm0CrrNPb1NRfx", Self.hlsType)
+        // Like the ***REMOVED*** proxy: an MPEG-DASH manifest without an extension.
+        case "/dash/manifest": return .text(#"<?xml version="1.0" encoding="utf-8"?><MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static"></MPD>"#, "application/dash+xml")
         case "/hls/video-only.m3u8": return .text("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXTINF:5,\nvideo-only.ts\n#EXT-X-ENDLIST\n", Self.hlsType)
         case "/hls/audio-only.m3u8": return .text("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXTINF:5,\naudio-only.ts\n#EXT-X-ENDLIST\n", Self.hlsType)
         case "/hls/video-only.ts": return .data(fixtures.hlsVideoOnly, "video/mp2t")

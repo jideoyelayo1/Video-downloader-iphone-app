@@ -6,6 +6,8 @@ enum MediaDiscovery {
     /// Fragmented stream pieces are not standalone videos, even if a player
     /// momentarily exposes one as an element's currentSrc.
     static let segmentExtensions: Set<String> = ["ts", "m4s"]
+    /// Audio-only files, such as a site's theme-song preview, aren't videos.
+    static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac"]
 
     static func candidate(from payload: Any, sourcePageURL: URL, frameURL: URL? = nil, isMainFrame: Bool = true) -> MediaCandidate? {
         guard let dictionary = payload as? [String: Any],
@@ -21,9 +23,9 @@ enum MediaDiscovery {
         let kind = MediaKind(contentType: contentType)
             ?? MediaKind(rawValue: (dictionary["kind"] as? String) ?? "").flatMap { $0 == .unknown ? nil : $0 }
             ?? MediaKind(url: url)
-        if segmentExtensions.contains(url.pathExtension.lowercased()) { return nil }
+        if segmentExtensions.contains(url.pathExtension.lowercased()) || audioExtensions.contains(url.pathExtension.lowercased()) { return nil }
         let mediaType = contentType?.lowercased() ?? ""
-        if mediaType.hasPrefix("video/iso.segment") || mediaType.hasPrefix("video/mp2t") { return nil }
+        if mediaType.hasPrefix("video/iso.segment") || mediaType.hasPrefix("video/mp2t") || mediaType.hasPrefix("audio/") { return nil }
         // Resource timing contains every image, script, and stylesheet.
         if !isMediaElement {
             guard kind != .unknown else { return nil }

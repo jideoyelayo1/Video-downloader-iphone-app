@@ -103,13 +103,12 @@ struct CandidateValidator {
     }
 
     private func validateHLS(_ url: URL, requestContext: RequestContext?, fullContext: RequestContext?, requiresReferer: Bool) async throws -> CandidateStatus {
-        let (text, finalURL) = try await fetchPlaylist(url, context: requestContext, fullContext: fullContext)
-        guard let manifest = HLSManifest.parse(text, baseURL: finalURL) else { return .unavailable(.notVideo) }
+        let (manifest, text, finalURL) = try await fetchPlaylist(url, context: requestContext, fullContext: fullContext)
         switch manifest {
         case .master(let variants):
             guard let best = variants.first else { return .unavailable(.notVideo) }
-            let (mediaText, mediaURL) = try await fetchPlaylist(best.url, context: requestContext, fullContext: fullContext)
-            guard case .media(let isFinite, let drm, _, let duration)? = HLSManifest.parse(mediaText, baseURL: mediaURL) else {
+            let (mediaManifest, mediaText, mediaURL) = try await fetchPlaylist(best.url, context: requestContext, fullContext: fullContext)
+            guard case .media(let isFinite, let drm, _, let duration) = mediaManifest else {
                 return .unavailable(.notVideo)
             }
             if drm { return .unavailable(.protectedStream) }
@@ -127,7 +126,7 @@ struct CandidateValidator {
         }
     }
 
-    private func fetchPlaylist(_ url: URL, context: RequestContext?, fullContext: RequestContext?) async throws -> (String, URL) {
+    private func fetchPlaylist(_ url: URL, context: RequestContext?, fullContext: RequestContext?) async throws -> (HLSManifest, String, URL) {
         var request = URLRequest(url: url)
         context?.apply(to: &request)
         let (data, response) = try await session.data(for: request, delegate: RedirectScoper(context: context, original: request))
@@ -136,8 +135,12 @@ struct CandidateValidator {
             try await throwRefererBlockerIfNeeded(url, status: status, fullContext: fullContext)
             throw error
         }
-        guard data.count < 4_000_000, let text = String(data: data, encoding: .utf8) else { throw DownloadError.notVideo }
-        return (text, response.url ?? url)
+        let finalURL = response.url ?? url
+        guard data.count < 4_000_000, let text = String(data: data, encoding: .utf8),
+              let manifest = HLSManifest.parse(text, baseURL: finalURL) else {
+            throw DownloadResponseValidation.playlistFailure(mimeType: response.mimeType, data: data)
+        }
+        return (manifest, text, finalURL)
     }
 
     /// Segments are often protected separately from the playlist, so the first one is checked too.
