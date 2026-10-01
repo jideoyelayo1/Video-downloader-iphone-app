@@ -154,6 +154,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if let location = hlsLocations.removeValue(forKey: item.id) ?? item.localURL { try? FileManager.default.removeItem(at: location) }
         try? FileManager.default.removeItem(at: item.resumeDataURL)
         try? FileManager.default.removeItem(at: DownloadStorage.thumbnailURL(for: item.id))
+        ThumbnailCache.shared.evict(item.id)
         releaseCookies(for: item.id)
         clearProgress(for: item.id)
         context.delete(item)

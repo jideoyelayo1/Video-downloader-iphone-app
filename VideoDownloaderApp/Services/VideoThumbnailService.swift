@@ -4,7 +4,7 @@ import UIKit
 
 /// Extracts a still from a saved video. HLS packages often have no I-frame-only
 /// rendition, so AVAssetImageGenerator alone cannot provide their thumbnails.
-@MainActor
+/// Not main-actor isolated: frame conversion and JPEG encoding run off the main thread.
 enum VideoThumbnailService {
     private static let size = CGSize(width: 240, height: 160)
     private static let ciContext = CIContext()

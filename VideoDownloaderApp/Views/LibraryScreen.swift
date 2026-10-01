@@ -35,6 +35,9 @@ struct LibraryScreen: View {
     }
 
     var body: some View {
+        // Each list is filtered once per render instead of once per use.
+        let displayed = displayed
+        let continueWatching = continueWatching
         NavigationStack {
             List {
                 if selectedFolderID == nil && searchText.isEmpty && !continueWatching.isEmpty {
@@ -217,11 +220,12 @@ private struct LibraryRow: View {
     @State private var duration: Double?
 
     var body: some View {
+        let fileExists = fileExists
         HStack(spacing: 12) {
             VideoThumbnailView(item: item, width: 112, height: 72)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
-                Text(detail).font(.caption).foregroundStyle(fileExists ? Color.secondary : Color.red)
+                Text(detail(fileExists: fileExists)).font(.caption).foregroundStyle(fileExists ? Color.secondary : Color.red)
                 if (item.playbackPosition ?? 0) > 10 {
                     Label("Continue watching", systemImage: "play.circle.fill")
                         .font(.caption2).foregroundStyle(.tint)
@@ -234,15 +238,14 @@ private struct LibraryRow: View {
             }
         }
         .task(id: item.localFileName) {
-            guard let url = item.localURL, (item.playbackPosition ?? 0) > 10 else { return }
-            let loaded = try? await AVURLAsset(url: url).load(.duration)
-            duration = loaded?.seconds.isFinite == true ? loaded?.seconds : nil
+            guard let url = item.localURL, let fileName = item.localFileName, (item.playbackPosition ?? 0) > 10 else { return }
+            duration = await ThumbnailCache.shared.duration(of: url, fileName: fileName)
         }
     }
 
     private var fileExists: Bool { item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
 
-    private var detail: String {
+    private func detail(fileExists: Bool) -> String {
         let date = item.completedAt.map { "Downloaded \($0.formatted(date: .abbreviated, time: .omitted))" }
             ?? "Added \(item.createdAt.formatted(date: .abbreviated, time: .omitted))"
         guard fileExists else { return "\(date) · File missing" }
@@ -260,7 +263,7 @@ private struct VideoThumbnailView: View {
 
     var body: some View {
         Group {
-            if let image {
+            if let image = image ?? ThumbnailCache.shared.cachedImage(for: item.id, fileName: item.localFileName) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Image(systemName: "film").font(.title2).foregroundStyle(.tint)
@@ -271,17 +274,9 @@ private struct VideoThumbnailView: View {
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: item.localFileName) {
+            // The body falls back to the in-memory cache, so clearing this doesn't flash a placeholder.
             image = nil
-            let cached = DownloadStorage.thumbnailURL(for: item.id)
-            if let data = try? Data(contentsOf: cached), let cachedImage = UIImage(data: data) {
-                image = cachedImage
-                return
-            }
-            guard let mediaURL = item.localURL else { return }
-            guard let data = await VideoThumbnailService.imageData(for: mediaURL, kind: item.kind),
-                  !Task.isCancelled else { return }
-            try? data.write(to: cached, options: .atomic)
-            image = UIImage(data: data)
+            image = await ThumbnailCache.shared.image(for: item.id, fileName: item.localFileName, mediaURL: item.localURL, kind: item.kind)
         }
     }
 }
