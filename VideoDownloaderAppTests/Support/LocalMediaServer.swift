@@ -194,6 +194,9 @@ final class LocalMediaServer {
         // Site subtitle files, like the per-language WebVTT tracks ***REMOVED***'s Plyr player loads.
         case "/subs/en.vtt": return .text("WEBVTT\n\nNOTE fixture\n\n1\n00:00.000 --> 00:30.000 line:85%\n<b>Fixture English line</b>\n", "text/vtt")
         case "/subs/es.vtt": return .text("WEBVTT\n\n00:00.000 --> 00:30.000\nLínea de prueba &amp; más\n", "text/vtt")
+        case "/long/video.mp4": return .data(fixtures.longMP4, "video/mp4")
+        // One cue per 10 s, so the subtitle shown tells a UI test where playback is.
+        case "/subs/long.vtt": return .text("WEBVTT\n\n00:00.000 --> 00:10.000\nZero to ten\n\n00:10.000 --> 00:20.000\nTen to twenty\n\n00:20.000 --> 00:30.000\nTwenty to thirty\n\n00:30.000 --> 00:40.000\nThirty to forty\n\n00:40.000 --> 00:50.000\nForty to fifty\n\n00:50.000 --> 01:00.000\nFifty to sixty\n\n", "text/vtt")
         case "/subs/expired.vtt": return .text("<!doctype html><p>Link expired</p>", "text/html")
         case "/invalid/video.mp4": return .data(Data("not an MP4 movie".utf8), "video/mp4")
         case "/hls/master.m3u8": return .text(masterPlaylist, Self.hlsType)
@@ -351,6 +354,11 @@ final class LocalMediaServer {
         "hls.html": page("HLS Video Page", #"<video id="video" src="/hls/master.m3u8" controls playsinline width="320" height="180"></video>"#),
         "referer-hls.html": page("Referer HLS Page", #"<video id="video" src="/hls/referer-master.m3u8" controls playsinline width="320" height="180"></video>"#),
         "fragment.html": page("Fragment Page", #"<video id="video" src="/hls/seg-57-s1080p-v1-a1.m4s" controls playsinline width="320" height="180"></video>"#),
+        "long.html": page("Long Video Page", """
+            <video id="video" src="/long/video.mp4" controls playsinline width="320" height="180">
+              <track kind="subtitles" src="/subs/long.vtt" srclang="en" label="English" default>
+            </video>
+            """),
         "tracks.html": page("Site Subtitles Page", """
             <video id="video" src="/video.mp4" controls playsinline width="320" height="180">
               <track kind="subtitles" src="/subs/en.vtt" srclang="en" label="English" default>
@@ -460,6 +468,8 @@ struct FixtureSet {
     var mp4: Data
     /// `fixture.mp4` plus an English `mov_text` subtitle track.
     var captionedMP4: Data
+    /// A 60-second clip for resume, seeking and Continue Watching.
+    var longMP4: Data
     var hlsVideoOnly: Data
     var hlsAudioOnly: Data
     /// Media playlist text; segment URIs are bare file names resolved against `/hls/`.
@@ -475,6 +485,7 @@ struct FixtureSet {
         }
         return FixtureSet(mp4: try load("fixture.mp4", in: bundle),
                           captionedMP4: try load("fixture_captions.mp4", in: bundle),
+                          longMP4: try load("fixture_long.mp4", in: bundle),
                           hlsVideoOnly: try load("fixture_video_only.ts.bin", in: bundle),
                           hlsAudioOnly: try load("fixture_audio_only.ts.bin", in: bundle),
                           hlsMediaPlaylist: playlist, hlsSegments: segments)

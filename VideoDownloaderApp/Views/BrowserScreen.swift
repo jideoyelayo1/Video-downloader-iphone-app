@@ -62,6 +62,7 @@ struct BrowserScreen: View {
                     model.navigate(to: url.absoluteString)
                 }
             }
+            .onDisappear { addressFocused = false }
             .alert("Browser error", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
                 Button("OK", role: .cancel) { model.errorMessage = nil }
             } message: { Text(model.errorMessage ?? "") }
@@ -82,7 +83,11 @@ struct BrowserScreen: View {
                 .submitLabel(.go)
                 .focused($addressFocused)
                 .onChange(of: addressFocused) { _, focused in model.isEditingAddress = focused }
-                .onSubmit { model.navigate(to: model.addressText) }
+                .onSubmit {
+                    // Otherwise the field keeps focus, and the keyboard returns later over other screens.
+                    addressFocused = false
+                    model.navigate(to: model.addressText)
+                }
                 .accessibilityIdentifier("browser.address")
                 .overlay(alignment: .trailing) {
                     if !model.addressText.isEmpty {

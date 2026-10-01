@@ -23,12 +23,16 @@ struct ContentView: View {
         .tint(.cyan)
         .preferredColorScheme(.dark)
         // A page's video would otherwise keep playing, and streaming, behind other tabs and saved videos.
-        .onChange(of: selection) { previous, _ in if previous == .browse { browser.pauseMedia() } }
-        .onChange(of: playback.isPresented) { _, presented in if presented { browser.pauseMedia() } }
-        .fullScreenCover(isPresented: $playback.isPresented) {
-            PersistentPlayerScreen()
-                .environmentObject(playback)
+        .onChange(of: selection) { previous, _ in
+            guard previous == .browse else { return }
+            browser.pauseMedia()
+            // The address field keeps first responder in the hidden tab otherwise.
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
+        .onChange(of: playback.isPresented) { _, presented in if presented { browser.pauseMedia() } }
+        .alert("Unable to play video", isPresented: Binding(get: { playback.errorMessage != nil }, set: { if !$0 { playback.clearError() } })) {
+            Button("OK", role: .cancel) { playback.clearError() }
+        } message: { Text(playback.errorMessage ?? "") }
         .alert("Can't start download", isPresented: Binding(get: { downloads.startError != nil }, set: { if !$0 { downloads.startError = nil } })) {
             Button("OK", role: .cancel) { downloads.startError = nil }
         } message: { Text(downloads.startError ?? "") }

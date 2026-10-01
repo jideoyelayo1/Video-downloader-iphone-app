@@ -3,10 +3,12 @@ import AVKit
 import SwiftData
 import SwiftUI
 
-/// Owns the AVPlayerViewController across SwiftUI presentation and PiP transitions.
+/// Plays saved videos in AVKit's own full-screen player, so there is one set of controls: AVKit's
+/// close button, title, transport, AirPlay, Picture in Picture and subtitle menu. Site subtitles
+/// (separate files AVKit can't list) get one extra button that shows and fades with taps.
 @MainActor
 final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVPlayerViewControllerDelegate {
-    @Published var isPresented = false
+    @Published private(set) var isPresented = false
     @Published private(set) var title = ""
     @Published private(set) var errorMessage: String?
     @Published private(set) var isLoading = false
@@ -23,7 +25,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private var item: DownloadItem?
     private var captionGroup: AVMediaSelectionGroup?
     /// Caption tracks inside the saved media. `captionNames` lists these first, then `siteSubtitles`.
+    /// Forced-only tracks (signs and foreign-language lines) aren't listed: like AVKit, the app
+    /// selects one as "Off".
     private var captionOptions: [AVMediaSelectionOption] = []
+    private var forcedCaptionOption: AVMediaSelectionOption?
     /// Subtitle files the site's player offered, saved with the download and drawn by `subtitleOverlay`.
     private var siteSubtitles: [SubtitleStore.Saved] = []
     private var siteCues: [Int: [SubtitleCue]] = [:]
@@ -35,11 +40,25 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private var loadID = UUID()
     private var playbackEnded = false
     private(set) var isInPiP = false
+    private var pictureInPictureStarting = false
+    /// False in unit tests, which exercise playback without presenting view controllers.
+    private let presentsPlayer: Bool
+    private var subtitlesButton: UIButton?
+    private var controlsSync: Timer?
+    private weak var avkitCloseButton: UIView?
+    private var selectionObserver: NSObjectProtocol?
+    /// Set while the app changes the selection, so only the viewer's own choices are remembered.
+    private var applyingCaption = false
+    /// AVKit applies its own subtitle preference just after it takes over a new player, which
+    /// would undo the viewer's remembered choice. Changes in this window are reverted.
+    private var automaticSelectionWindowEnd = Date.distantPast
+    private var automaticSelectionReverts = 0
 
-    init(context: ModelContext, diagnostics: DiagnosticsLog, preferences: UserDefaults = .standard) {
+    init(context: ModelContext, diagnostics: DiagnosticsLog, preferences: UserDefaults = .standard, presentsPlayer: Bool = true) {
         self.context = context
         self.diagnostics = diagnostics
         self.preferences = preferences
+        self.presentsPlayer = presentsPlayer
         controller = Self.makeController()
         super.init()
         controller.delegate = self
@@ -55,8 +74,9 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         controller.allowsPictureInPicturePlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.showsPlaybackControls = true
+        controller.modalPresentationStyle = .fullScreen
         controller.view.backgroundColor = .black
-        controller.entersFullScreenWhenPlaybackBegins = true
+        controller.view.accessibilityIdentifier = "player.video"
         return controller
     }
 
@@ -70,13 +90,14 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         loadID = token
         item = newItem
         title = newItem.title
+        guard let url = newItem.localURL, FileManager.default.fileExists(atPath: url.path) else {
+            item = nil
+            showError("The saved video file is missing. Delete it and download the video again.")
+            return
+        }
         isLoading = true
-        isPresented = true
+        presentPlayer()
         Task {
-            guard let url = newItem.localURL, FileManager.default.fileExists(atPath: url.path) else {
-                showFailure("The saved video file is missing.", token: token)
-                return
-            }
             let asset = AVURLAsset(url: url)
             guard (try? await asset.load(.isPlayable)) == true else {
                 showFailure("This saved video cannot be played on iPhone. Choose another source in Browse.", token: token)
@@ -94,16 +115,24 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             }
             guard loadID == token else { return }
             let playerItem = AVPlayerItem(asset: asset)
+            playerItem.externalMetadata = [Self.titleMetadata(newItem.title)]
             if let preferred = try? await asset.load(.preferredMediaSelection),
                let (group, option) = await HLSMediaSelections.audibleOption(for: asset, preferred: preferred) {
                 playerItem.select(option, in: group)
             }
             let player = AVPlayer(playerItem: playerItem)
             player.isMuted = false
+            // Selections then change only when the app or the viewer chooses, so a change seen in
+            // AVKit's subtitle menu can be remembered as the viewer's.
+            player.appliesMediaSelectionCriteriaAutomatically = false
             guard loadID == token else { return }
             controller.player = player
             await loadCaptions(from: asset, playerItem: playerItem, token: token)
             guard loadID == token else { return }
+            automaticSelectionWindowEnd = Date().addingTimeInterval(1.5)
+            automaticSelectionReverts = 0
+            observeSelection(of: playerItem)
+            installSubtitlesButton(for: player)
             timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 600), queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in self?.savePosition() }
             }
@@ -119,7 +148,11 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         let group = try? await asset.loadMediaSelectionGroup(for: .legible)
         let preferred = try? await asset.load(.preferredMediaSelection)
         guard loadID == token else { return }
-        let embedded = group.map { asset.assetCache?.mediaSelectionOptions(in: $0) ?? $0.options } ?? []
+        let all = group.map { asset.assetCache?.mediaSelectionOptions(in: $0) ?? $0.options } ?? []
+        let embedded = all.filter { !Self.isForcedOnly($0) }
+        let preferredOption = group.flatMap { preferred?.selectedMediaOption(in: $0) }
+        forcedCaptionOption = all.first { Self.isForcedOnly($0) && $0.extendedLanguageTag == preferredOption?.extendedLanguageTag }
+            ?? all.first(where: Self.isForcedOnly)
         let site = item.map { SubtitleStore.saved(for: $0.id) } ?? []
         captionGroup = group
         captionOptions = embedded
@@ -134,7 +167,11 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
         let defaultIndex: Int?
         if !embedded.isEmpty {
-            defaultIndex = group.flatMap { preferred?.selectedMediaOption(in: $0) }.flatMap { embedded.firstIndex(of: $0) } ?? 0
+            // The system often prefers the forced-only track; captions "on" means full subtitles,
+            // in the preferred track's language when there is one.
+            defaultIndex = preferredOption.flatMap { embedded.firstIndex(of: $0) }
+                ?? embedded.firstIndex { $0.extendedLanguageTag != nil && $0.extendedLanguageTag == preferredOption?.extendedLanguageTag }
+                ?? 0
         } else {
             defaultIndex = embedded.count + Self.defaultSiteIndex(site)
         }
@@ -158,8 +195,11 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// Selects an embedded track through AVFoundation, or draws a site subtitle file over the video.
     private func applyCaption(_ index: Int?, to playerItem: AVPlayerItem) {
         let index = index.flatMap { captionNames.indices.contains($0) ? $0 : nil }
+        applyingCaption = true
+        defer { applyingCaption = false; refreshSubtitlesMenu() }
         if let group = captionGroup {
-            let embedded = index.flatMap { $0 < captionOptions.count ? captionOptions[$0] : nil }
+            // Off (or a site subtitle) selects the forced-only track, as AVKit's own Off does.
+            let embedded = index.flatMap { $0 < captionOptions.count ? captionOptions[$0] : nil } ?? forcedCaptionOption
             if embedded != nil || group.allowsEmptySelection { playerItem.select(embedded, in: group) }
         }
         showSiteSubtitle(index.flatMap { $0 >= captionOptions.count ? $0 - captionOptions.count : nil })
@@ -203,6 +243,155 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// The site subtitle text currently drawn over the video.
     var siteSubtitleText: String? { subtitleOverlay?.text }
 
+    // MARK: AVKit's subtitle menu and the site subtitles button
+
+    /// Remembers choices made in AVKit's own subtitle menu, and hides a site subtitle it replaces.
+    private func observeSelection(of playerItem: AVPlayerItem) {
+        if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
+        selectionObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification,
+                                                                   object: playerItem, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.playerMenuChangedSelection() }
+        }
+    }
+
+    private func playerMenuChangedSelection() {
+        guard !applyingCaption, let group = captionGroup, let playerItem = controller.player?.currentItem else { return }
+        let selected = playerItem.currentMediaSelection.selectedMediaOption(in: group)
+        // A forced-only track is AVKit's Off.
+        let index = selected.flatMap { captionOptions.firstIndex(of: $0) }
+        let showingSite = selectedCaption.map { $0 >= captionOptions.count } ?? false
+        // The notification also arrives, later, for the app's own selections: only a selection
+        // that differs from the app's state is the viewer's. With a site subtitle showing, the
+        // embedded selection is off.
+        if showingSite ? index == nil : index == selectedCaption { return }
+        if Date() < automaticSelectionWindowEnd && automaticSelectionReverts < 3 {
+            automaticSelectionReverts += 1
+            applyCaption(selectedCaption, to: playerItem)
+            diagnostics.record(event: "captions", url: item?.localURL?.absoluteString ?? "app://player",
+                               note: "Kept " + (selectedCaption.map { captionNames[$0] } ?? "Off") + " over the player's automatic choice")
+            return
+        }
+        if index != nil { showSiteSubtitle(nil) }
+        selectedCaption = index
+        refreshSubtitlesMenu()
+        let option = index.map { preferenceOptions[$0] }
+        preferences.set(CaptionPreference.storedValue(for: option), forKey: CaptionPreference.defaultsKey)
+        diagnostics.record(event: "captions", url: item?.localURL?.absoluteString ?? "app://player",
+                           note: (index.map { captionNames[$0] } ?? "Off") + " (player menu)")
+    }
+
+    /// AVKit can't list subtitle files that aren't part of the media, so videos saved with site
+    /// subtitles get one button beside AVKit's own. It appears and fades with AVKit's controls.
+    private func installSubtitlesButton(for player: AVPlayer) {
+        guard !siteSubtitles.isEmpty, subtitlesButton == nil else { return }
+        var configuration: UIButton.Configuration
+        if #available(iOS 26.0, *) {
+            configuration = .glass()
+        } else {
+            configuration = .filled()
+            configuration.baseBackgroundColor = UIColor(white: 0.12, alpha: 0.72)
+            configuration.cornerStyle = .capsule
+        }
+        configuration.image = UIImage(systemName: "captions.bubble")
+        configuration.baseForegroundColor = .white
+        let button = UIButton(configuration: configuration)
+        button.showsMenuAsPrimaryAction = true
+        button.accessibilityIdentifier = "player.captions"
+        button.accessibilityLabel = "Subtitles"
+        button.translatesAutoresizingMaskIntoConstraints = false
+        controller.view.addSubview(button)
+        let guide = controller.view.safeAreaLayoutGuide
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 48),
+            button.heightAnchor.constraint(equalToConstant: 48),
+            button.centerYAnchor.constraint(equalTo: guide.centerYAnchor),
+            button.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16)
+        ])
+        subtitlesButton = button
+        refreshSubtitlesMenu()
+        // AVKit doesn't report when its controls show or hide, so follow its close button.
+        controlsSync = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.matchAVKitControls() }
+        }
+    }
+
+    private func matchAVKitControls() {
+        guard let subtitlesButton else { return }
+        let target: CGFloat = avkitControlsVisible() == false ? 0 : 1
+        guard subtitlesButton.alpha != target else { return }
+        UIView.animate(withDuration: 0.25) { subtitlesButton.alpha = target }
+    }
+
+    /// Whether AVKit is showing its controls, judged by its close button; nil if it can't be found,
+    /// in which case the subtitles button simply stays visible.
+    private func avkitControlsVisible() -> Bool? {
+        if avkitCloseButton?.window == nil { avkitCloseButton = Self.view(in: controller.view, identifier: "Close Button") }
+        guard let closeButton = avkitCloseButton else { return nil }
+        var view: UIView? = closeButton
+        var alpha: CGFloat = 1
+        while let current = view, current !== controller.view {
+            if current.isHidden { return false }
+            alpha *= current.alpha
+            view = current.superview
+        }
+        return alpha > 0.05
+    }
+
+    private static func view(in root: UIView, identifier: String) -> UIView? {
+        if root.accessibilityIdentifier == identifier { return root }
+        for subview in root.subviews {
+            if let match = view(in: subview, identifier: identifier) { return match }
+        }
+        return nil
+    }
+
+    private func refreshSubtitlesMenu() {
+        guard let subtitlesButton else { return }
+        let offset = captionOptions.count
+        let off = UIAction(title: "Off", state: selectedCaption == nil ? .on : .off) { [weak self] _ in self?.chooseCaption(nil) }
+        let site = siteSubtitles.indices.map { index in
+            UIAction(title: captionNames[offset + index], state: selectedCaption == offset + index ? .on : .off) { [weak self] _ in
+                self?.chooseCaption(offset + index)
+            }
+        }
+        subtitlesButton.menu = UIMenu(title: "Subtitles from the site", children: [off] + site)
+        subtitlesButton.accessibilityValue = selectedCaption.map { captionNames[$0] } ?? "Off"
+    }
+
+    private static func titleMetadata(_ title: String) -> AVMetadataItem {
+        let item = AVMutableMetadataItem()
+        item.identifier = .commonIdentifierTitle
+        item.value = title as NSString
+        item.extendedLanguageTag = "und"
+        return item
+    }
+
+    // MARK: Presentation
+
+    private func presentPlayer() {
+        isPresented = true
+        guard presentsPlayer, controller.presentingViewController == nil, let presenter = Self.topViewController() else { return }
+        // A text field left focused in another tab would otherwise bring its keyboard back over the
+        // player whenever a menu opens.
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        presenter.present(controller, animated: true)
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? scenes.first?.windows.first
+        var top = window?.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed { top = presented }
+        return top
+    }
+
+    func clearError() { errorMessage = nil }
+
+    private func showError(_ message: String) {
+        errorMessage = message
+        diagnostics.record(event: "playback-error", url: item?.localURL?.absoluteString ?? "app://player", note: message)
+    }
+
     /// Embedded and site tracks in one list, for the remembered choice.
     private var preferenceOptions: [CaptionPreference.Option] {
         captionOptions.map(Self.preferenceOption)
@@ -225,6 +414,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         return site.firstIndex(where: \.isDefault) ?? 0
     }
 
+    static func isForcedOnly(_ option: AVMediaSelectionOption) -> Bool {
+        option.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
+    }
+
     private static func preferenceOption(_ option: AVMediaSelectionOption) -> CaptionPreference.Option {
         CaptionPreference.Option(language: option.extendedLanguageTag ?? option.locale?.identifier, name: option.displayName)
     }
@@ -243,17 +436,29 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         subtitleOverlay = nil
         siteSubtitles = []
         siteCues = [:]
+        if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
+        selectionObserver = nil
+        controlsSync?.invalidate()
+        controlsSync = nil
+        subtitlesButton?.removeFromSuperview()
+        subtitlesButton = nil
         controller.player?.pause()
         controller.player = nil
+        // Closing with Picture in Picture running is the system's job; otherwise leave full screen.
+        if presentsPlayer, !wasInPiP, controller.presentingViewController != nil, !controller.isBeingDismissed {
+            controller.dismiss(animated: true)
+        }
         item = nil
         captionGroup = nil
         captionOptions = []
+        forcedCaptionOption = nil
         captionNames = []
         selectedCaption = nil
         errorMessage = nil
         isLoading = false
         isPresented = false
         isInPiP = false
+        pictureInPictureStarting = false
         playbackEnded = false
         if releasingAudioSession && !wasInPiP {
             // Deactivation can block briefly, so keep it off the main thread.
@@ -265,9 +470,16 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     private func showFailure(_ message: String, token: UUID) {
         guard loadID == token else { return }
-        isLoading = false
-        errorMessage = message
-        diagnostics.record(event: "playback-error", url: item?.localURL?.absoluteString ?? "app://player", note: message)
+        let url = item?.localURL?.absoluteString ?? "app://player"
+        // Leave full screen first; an alert can't appear over a player that is still closing.
+        let presented = presentsPlayer && controller.presentingViewController != nil
+        close()
+        diagnostics.record(event: "playback-error", url: url, note: message)
+        if presented {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.errorMessage = message }
+        } else {
+            errorMessage = message
+        }
     }
 
     private func savePosition() {
@@ -285,95 +497,54 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         try? context.save()
     }
 
-    func playerViewControllerShouldAutomaticallyDismissAtPictureInPictureStart(_ playerViewController: AVPlayerViewController) -> Bool { false }
+    /// AVKit's close button. Picture in Picture also leaves full screen, but playback continues there.
+    func playerViewController(_ playerViewController: AVPlayerViewController,
+                              willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator) {
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            MainActor.assumeIsolated {
+                guard let self, !context.isCancelled, playerViewController === self.controller else { return }
+                if self.isInPiP || self.pictureInPictureStarting {
+                    self.isPresented = false
+                } else {
+                    self.close()
+                }
+            }
+        }
+    }
+
+    func playerViewControllerShouldAutomaticallyDismissAtPictureInPictureStart(_ playerViewController: AVPlayerViewController) -> Bool { true }
+
+    func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+        pictureInPictureStarting = true
+    }
 
     func playerViewControllerDidStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
         isInPiP = true
+        pictureInPictureStarting = false
         diagnostics.record(event: "pip", url: item?.localURL?.absoluteString ?? "app://player", note: "Started")
     }
 
     func playerViewController(_ playerViewController: AVPlayerViewController, failedToStartPictureInPictureWithError error: Error) {
         isInPiP = false
+        pictureInPictureStarting = false
         diagnostics.record(event: "pip-error", url: item?.localURL?.absoluteString ?? "app://player", note: error.localizedDescription)
-        errorMessage = "Picture in Picture could not start: \(error.localizedDescription)"
     }
 
     func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
         isInPiP = false
         savePosition()
         diagnostics.record(event: "pip", url: item?.localURL?.absoluteString ?? "app://player", note: "Stopped")
+        // Closed from the Picture in Picture window rather than returned to the app.
+        if presentsPlayer, playerViewController === controller, controller.presentingViewController == nil { close() }
     }
 
     func playerViewController(_ playerViewController: AVPlayerViewController,
                               restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
-        if isPresented {
+        guard presentsPlayer, playerViewController.presentingViewController == nil, let presenter = Self.topViewController() else {
             completionHandler(true)
-        } else {
-            isPresented = true
-            // Let SwiftUI attach the retained controller before finishing the
-            // system's return-to-app transition.
-            DispatchQueue.main.async { completionHandler(true) }
+            return
         }
+        isPresented = true
+        presenter.present(playerViewController, animated: true) { completionHandler(true) }
     }
-}
-
-struct PersistentPlayerScreen: View {
-    @EnvironmentObject private var playback: PlaybackCoordinator
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if playback.controller.player != nil {
-                PlayerControllerView(controller: playback.controller)
-                    // A new video brings a new controller; never keep hosting the previous one.
-                    .id(ObjectIdentifier(playback.controller))
-                    .ignoresSafeArea()
-                    .accessibilityIdentifier("player.video")
-            } else if playback.isLoading {
-                ProgressView("Loading video").tint(.white).foregroundStyle(.white)
-            } else if let error = playback.errorMessage {
-                ContentUnavailableView("Unable to play video", systemImage: "exclamationmark.triangle", description: Text(error))
-            }
-        }
-        .safeAreaInset(edge: .top) {
-            HStack {
-                Button("Done") { playback.close() }
-                    .accessibilityIdentifier("player.done")
-                Spacer()
-                Text(playback.title).lineLimit(1).font(.subheadline.bold())
-                Spacer()
-                Menu {
-                    if playback.captionNames.isEmpty {
-                        Button("No caption track in saved video") {}.disabled(true)
-                        Button("Try subtitles in the site's player in Browse") {}.disabled(true)
-                    } else {
-                        // An inline picker checkmarks the active choice, which plain buttons never showed.
-                        Picker("Captions", selection: Binding(get: { playback.selectedCaption }, set: { playback.chooseCaption($0) })) {
-                            Text("Off").tag(Int?.none)
-                            ForEach(Array(playback.captionNames.enumerated()), id: \.offset) { index, name in
-                                Text(name).tag(Int?.some(index))
-                            }
-                        }
-                        .pickerStyle(.inline)
-                    }
-                } label: { Label("Captions", systemImage: playback.selectedCaption == nil ? "captions.bubble" : "captions.bubble.fill") }
-                    .accessibilityIdentifier("player.captions")
-                    .accessibilityValue(playback.selectedCaption.map { playback.captionNames[$0] } ?? "Off")
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .foregroundStyle(.white)
-            .background(.black.opacity(0.72))
-        }
-        .alert("Playback issue", isPresented: Binding(get: { playback.errorMessage != nil && playback.controller.player != nil },
-                                                       set: { _ in })) {
-            Button("OK") { playback.close() }
-        } message: { Text(playback.errorMessage ?? "") }
-    }
-}
-
-private struct PlayerControllerView: UIViewControllerRepresentable {
-    let controller: AVPlayerViewController
-    func makeUIViewController(context: Context) -> AVPlayerViewController { controller }
-    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {}
 }

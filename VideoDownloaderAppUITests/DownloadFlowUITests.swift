@@ -40,6 +40,48 @@ final class DownloadFlowUITests: XCTestCase {
         return button
     }
 
+    /// Downloads the page's first ready video and waits for it to complete.
+    private func downloadFirstCandidate() {
+        waitForReadyCandidates(1).tap()
+        app.buttons["candidate.download"].firstMatch.tap()
+        let status = app.staticTexts.matching(identifier: "download.status").firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        let completed = NSPredicate(format: "label BEGINSWITH 'Completed'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: completed, object: status)], timeout: 30), .completed, status.label)
+    }
+
+    private func wait(for element: XCUIElement, _ format: String, timeout: TimeInterval = 10, _ message: @autoclosure () -> String = "") {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: timeout), .completed, message())
+    }
+
+    /// AVKit toggles its controls on a tap, so tap until they are showing.
+    private func revealPlayerControls() {
+        let close = app.buttons["Close"]
+        for _ in 0..<4 {
+            if close.exists && close.isHittable { return }
+            app.otherElements["player.video"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: close)], timeout: 2)
+        }
+        XCTAssertTrue(close.isHittable, "AVKit's controls should appear after a tap")
+    }
+
+    /// Closes the player with AVKit's own close button, the only way out.
+    private func closePlayer() {
+        revealPlayerControls()
+        app.buttons["Close"].tap()
+        wait(for: app.otherElements["player.video"], "exists == false", timeout: 5, "the player should close")
+    }
+
+    private func openSubtitlesMenu() {
+        revealPlayerControls()
+        app.buttons["More Controls"].tap()
+        let subtitles = app.buttons["Subtitles"]
+        XCTAssertTrue(subtitles.waitForExistence(timeout: 5))
+        subtitles.tap()
+        XCTAssertTrue(app.buttons["AVSubtitlesOffAction"].waitForExistence(timeout: 5))
+    }
+
     func testBrowseDetectDownloadPlayExportRenameDelete() throws {
         launch(at: "/page/basic.html")
         waitForReadyCandidates(1).tap()
@@ -63,10 +105,12 @@ final class DownloadFlowUITests: XCTestCase {
 
         // Playback
         libraryItem.tap()
-        XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 5) || app.otherElements["Video"].waitForExistence(timeout: 2))
-        let done = app.buttons["player.done"]
-        XCTAssertTrue(done.waitForExistence(timeout: 5))
-        done.tap()
+        XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
+        revealPlayerControls()
+        // One way out, AVKit's own, and no second Done button of the app's.
+        XCTAssertEqual(app.buttons.matching(identifier: "Close Button").count, 1)
+        XCTAssertFalse(app.buttons["player.done"].exists)
+        closePlayer()
         libraryItem.press(forDuration: 1.2)
         let export = app.buttons["Export"].firstMatch
         XCTAssertTrue(export.waitForExistence(timeout: 5))
@@ -173,53 +217,33 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["candidate.audio-only.m3u8"].exists)
     }
 
+    /// Built-in caption tracks use AVKit's own subtitle menu; turning them off there is remembered.
     func testCaptionChoiceIsRememberedForTheNextPlayback() throws {
         launch(at: "/page/captions.html")
-        waitForReadyCandidates(1).tap()
-        app.buttons["candidate.download"].firstMatch.tap()
-        let status = app.staticTexts.matching(identifier: "download.status").firstMatch
-        XCTAssertTrue(status.waitForExistence(timeout: 5))
-        let completed = NSPredicate(format: "label BEGINSWITH 'Completed'")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: completed, object: status)], timeout: 20), .completed, status.label)
-
+        downloadFirstCandidate()
         app.tabBars.buttons["My Videos"].tap()
         let item = app.buttons["library.item"].firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5))
         item.tap()
-        let captions = app.buttons["player.captions"]
-        XCTAssertTrue(captions.waitForExistence(timeout: 10))
-        // The first playback turns on a caption track by default.
-        let on = NSPredicate(format: "value BEGINSWITH 'English'")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: on, object: captions)], timeout: 10), .completed,
-                       String(describing: captions.value))
-        captions.tap()
-        let off = app.buttons["Off"]
-        XCTAssertTrue(off.waitForExistence(timeout: 5))
-        off.tap()
-        XCTAssertEqual(captions.value as? String, "Off")
-        app.buttons["player.done"].tap()
-        // Taps during the player's closing animation don't reach the list (notably on iOS 18).
-        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["player.done"])
-        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
+        XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
+        openSubtitlesMenu()
+        // The first playback turns captions on.
+        XCTAssertTrue(app.buttons["AVSubtitlesOnAction"].isSelected)
+        app.buttons["AVSubtitlesOffAction"].tap()
+        closePlayer()
 
         item.tap()
-        XCTAssertTrue(captions.waitForExistence(timeout: 10))
-        let offAgain = NSPredicate(format: "value == 'Off'")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: offAgain, object: captions)], timeout: 10), .completed,
-                       "captions turned off should stay off, value: \(String(describing: captions.value))")
-        app.buttons["player.done"].tap()
+        XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
+        openSubtitlesMenu()
+        XCTAssertTrue(app.buttons["AVSubtitlesOffAction"].isSelected, "captions turned off should stay off")
+        app.buttons["AVSubtitlesOffAction"].tap()
+        closePlayer()
     }
 
     /// ***REMOVED***-style subtitles (separate <track> files) are saved with the download and shown over the saved video.
     func testSiteSubtitlesAreSavedAndShownInTheSavedVideo() throws {
         launch(at: "/page/tracks.html")
-        waitForReadyCandidates(1).tap()
-        app.buttons["candidate.download"].firstMatch.tap()
-        let status = app.staticTexts.matching(identifier: "download.status").firstMatch
-        XCTAssertTrue(status.waitForExistence(timeout: 5))
-        let completed = NSPredicate(format: "label BEGINSWITH 'Completed'")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: completed, object: status)], timeout: 20), .completed, status.label)
-
+        downloadFirstCandidate()
         app.tabBars.buttons["My Videos"].tap()
         let item = app.buttons["library.item"].firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5))
@@ -227,21 +251,77 @@ final class DownloadFlowUITests: XCTestCase {
         let subtitle = app.staticTexts["player.subtitle"]
         XCTAssertTrue(subtitle.waitForExistence(timeout: 10))
         XCTAssertEqual(subtitle.label, "Fixture English line")
-        let captions = app.buttons["player.captions"]
-        XCTAssertEqual(captions.value as? String, "English")
 
-        captions.tap()
+        // The subtitles button appears with AVKit's controls.
+        revealPlayerControls()
+        let button = app.buttons["player.captions"]
+        XCTAssertTrue(button.isHittable)
+        XCTAssertEqual(button.value as? String, "English")
+        button.tap()
         XCTAssertTrue(app.buttons["Español"].waitForExistence(timeout: 5))
         app.buttons["Español"].tap()
-        let spanish = NSPredicate(format: "label == 'Línea de prueba & más'")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: spanish, object: subtitle)], timeout: 5), .completed, subtitle.label)
+        wait(for: subtitle, "label == 'Línea de prueba & más'", timeout: 5, subtitle.label)
 
-        captions.tap()
+        // Landscape keeps the subtitle on the picture.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        sleep(1)
+        XCTAssertTrue(subtitle.exists)
+        let frame = subtitle.frame
+        XCTAssertGreaterThan(frame.width, 0)
+        XCUIDevice.shared.orientation = .portrait
+        sleep(1)
+
+        revealPlayerControls()
+        button.tap()
         XCTAssertTrue(app.buttons["Off"].waitForExistence(timeout: 5))
         app.buttons["Off"].tap()
-        let hidden = NSPredicate(format: "exists == false")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: hidden, object: subtitle)], timeout: 5), .completed)
-        app.buttons["player.done"].tap()
+        wait(for: subtitle, "exists == false", timeout: 5)
+        closePlayer()
+    }
+
+    /// A 60-second video with one subtitle line per 10 s, so the line shown tells where playback is.
+    func testResumeSeekAndContinueWatching() throws {
+        launch(at: "/page/long.html")
+        downloadFirstCandidate()
+        app.tabBars.buttons["My Videos"].tap()
+        let item = app.buttons["library.item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+        let subtitle = app.staticTexts["player.subtitle"]
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 10))
+        XCTAssertEqual(subtitle.label, "Zero to ten")
+        wait(for: subtitle, "label == 'Ten to twenty'", timeout: 15, subtitle.label)
+        sleep(2)
+        closePlayer()
+
+        // Watched past 10 s: the video is offered under Continue Watching and resumes where it stopped.
+        XCTAssertTrue(app.staticTexts["Continue Watching"].waitForExistence(timeout: 5))
+        wait(for: item, "label CONTAINS 'Continue watching'", timeout: 5, item.label)
+        item.tap()
+        XCTAssertTrue(app.buttons["Resume"].waitForExistence(timeout: 5))
+        app.buttons["Resume"].tap()
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 10))
+        XCTAssertEqual(subtitle.label, "Ten to twenty", "should resume near 12 s, not from the start")
+
+        // Seeking with AVKit's controls moves the subtitle with it. Paused, so the position is exact:
+        // about 12 s, +20 s, then -10 s.
+        revealPlayerControls()
+        app.buttons["Play/Pause"].tap()
+        app.buttons["Skip Forward"].tap()
+        app.buttons["Skip Forward"].tap()
+        wait(for: subtitle, "label == 'Thirty to forty'", timeout: 5, subtitle.label)
+        revealPlayerControls()
+        app.buttons["Skip Backward"].tap()
+        wait(for: subtitle, "label == 'Twenty to thirty'", timeout: 5, subtitle.label)
+        closePlayer()
+
+        item.tap()
+        XCTAssertTrue(app.buttons["Start from Beginning"].waitForExistence(timeout: 5))
+        app.buttons["Start from Beginning"].tap()
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 10))
+        XCTAssertEqual(subtitle.label, "Zero to ten")
+        closePlayer()
     }
 
     func testFragmentIsExplainedWithoutDownloadButton() throws {

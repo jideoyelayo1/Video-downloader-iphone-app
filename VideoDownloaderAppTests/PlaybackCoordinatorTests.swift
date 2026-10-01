@@ -43,7 +43,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let suite = "PlaybackCoordinatorTests-\(UUID().uuidString)"
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { preferences.removePersistentDomain(forName: suite) }
-        let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log, preferences: preferences)
+        let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log, preferences: preferences, presentsPlayer: false)
         let item = makeItem(in: container.mainContext)
 
         var released: [() -> Bool] = []
@@ -65,7 +65,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
     func testEachVideoGetsItsOwnControllerAndThePreviousOneIsReleased() async throws {
         let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log,
-                                              preferences: try XCTUnwrap(UserDefaults(suiteName: "PlaybackCoordinatorTests-controllers")))
+                                              preferences: try XCTUnwrap(UserDefaults(suiteName: "PlaybackCoordinatorTests-controllers")), presentsPlayer: false)
         let item = makeItem(in: container.mainContext)
 
         weak var first: AVPlayerViewController?
@@ -92,7 +92,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         defer { server.stop() }
         let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log,
-                                              preferences: try XCTUnwrap(UserDefaults(suiteName: "PlaybackCoordinatorTests-site-\(UUID().uuidString)")))
+                                              preferences: try XCTUnwrap(UserDefaults(suiteName: "PlaybackCoordinatorTests-site-\(UUID().uuidString)")), presentsPlayer: false)
         let item = makeItem(in: container.mainContext)
         let page = server.url("/page/tracks.html")
         await SubtitleStore.save([SubtitleTrack(url: server.url("/subs/es.vtt"), label: "Español", language: "es", isDefault: false, referer: page),
@@ -122,5 +122,53 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", false), saved("en", true)], preferredLanguages: ["ja"]), 1)
         XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", false), saved("fr", false)], preferredLanguages: ["ja"]), 0)
         XCTAssertEqual(PlaybackCoordinator.menuNames(embedded: ["English"], site: ["English", "Español"]), ["English", "English (site)", "Español"])
+    }
+
+    func testMissingFileShowsAnErrorWithoutOpeningThePlayer() {
+        let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log, presentsPlayer: false)
+        let item = makeItem(in: container.mainContext)
+        item.localFileName = "missing-\(UUID().uuidString).mp4"
+        coordinator.open(item, at: 0)
+        XCTAssertFalse(coordinator.isPresented)
+        XCTAssertNil(coordinator.controller.player)
+        XCTAssertEqual(coordinator.errorMessage?.contains("missing"), true)
+        coordinator.clearError()
+        XCTAssertNil(coordinator.errorMessage)
+    }
+
+    /// Built-in captions are chosen in AVKit's own menu; the app remembers that choice.
+    func testChoiceInThePlayersOwnMenuIsRemembered() async throws {
+        let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let suite = "PlaybackCoordinatorTests-menu-\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log, preferences: preferences, presentsPlayer: false)
+        let item = makeItem(in: container.mainContext)
+        coordinator.open(item, at: 0)
+        try await waitUntil("player ready") { coordinator.controller.player != nil && !coordinator.isLoading }
+        // Captions start on with full subtitles, not the forced-only track the system prefers.
+        XCTAssertEqual(coordinator.captionNames, ["English"])
+        XCTAssertEqual(coordinator.selectedCaption, 0)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertNil(preferences.string(forKey: CaptionPreference.defaultsKey), "the app's own default isn't a viewer choice")
+
+        let playerItem = try XCTUnwrap(coordinator.controller.player?.currentItem)
+        let loadedGroup = try await playerItem.asset.loadMediaSelectionGroup(for: .legible)
+        let group = try XCTUnwrap(loadedGroup)
+        // AVKit's Subtitles > Off selects the forced-only track.
+        let forced = try XCTUnwrap(group.options.first(where: PlaybackCoordinator.isForcedOnly))
+        playerItem.select(forced, in: group)
+        try await waitUntil("Off remembered") { preferences.string(forKey: CaptionPreference.defaultsKey) == CaptionPreference.off }
+        XCTAssertNil(coordinator.selectedCaption)
+        coordinator.close()
+
+        // The next playback starts with captions off: the forced-only track, as AVKit shows Off.
+        coordinator.open(item, at: 0)
+        try await waitUntil("player ready again") { coordinator.controller.player != nil && !coordinator.isLoading }
+        XCTAssertNil(coordinator.selectedCaption)
+        let reopened = try XCTUnwrap(coordinator.controller.player?.currentItem)
+        XCTAssertTrue(reopened.currentMediaSelection.selectedMediaOption(in: group).map(PlaybackCoordinator.isForcedOnly) ?? true)
+        coordinator.close()
     }
 }
