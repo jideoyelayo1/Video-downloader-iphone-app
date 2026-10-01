@@ -11,6 +11,7 @@ struct VideoDownloaderAppApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(services.downloads)
+                .environmentObject(services.downloads.progressStore)
                 .environmentObject(services.diagnostics)
                 .environmentObject(services.playback)
         }

@@ -12,8 +12,7 @@ final class DownloadManager: NSObject, ObservableObject {
     static let hlsSessionID = sessionPrefix + ".hls"
 
     /// Progress is kept in memory and only persisted occasionally, so ticks don't hit the store.
-    @Published private(set) var liveProgress: [UUID: Double] = [:]
-    @Published private(set) var liveEstimatedSeconds: [UUID: TimeInterval] = [:]
+    let progressStore = DownloadProgressStore()
     /// A start that was refused before any item was created (e.g. insufficient storage).
     @Published var startError: String?
 
@@ -110,7 +109,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if let cancelledAttemptID { cancelledAttempts[item.id] = cancelledAttemptID }
         userCancelled.insert(item.id)
         item.status = .cancelled
-        liveEstimatedSeconds[item.id] = nil
+        progressStore.setEstimate(item.id, nil)
         progressSamples[item.id] = nil
         save()
         let resumeURL = item.resumeDataURL
@@ -156,9 +155,7 @@ final class DownloadManager: NSObject, ObservableObject {
         try? FileManager.default.removeItem(at: item.resumeDataURL)
         try? FileManager.default.removeItem(at: DownloadStorage.thumbnailURL(for: item.id))
         releaseCookies(for: item.id)
-        liveProgress[item.id] = nil
-        liveEstimatedSeconds[item.id] = nil
-        progressSamples[item.id] = nil
+        clearProgress(for: item.id)
         context.delete(item)
         save()
     }
@@ -170,8 +167,8 @@ final class DownloadManager: NSObject, ObservableObject {
         save()
     }
 
-    func progress(of item: DownloadItem) -> Double { liveProgress[item.id] ?? item.progress }
-    func estimatedSeconds(of item: DownloadItem) -> TimeInterval? { liveEstimatedSeconds[item.id] }
+    func progress(of item: DownloadItem) -> Double { progressStore.fraction(of: item.id) ?? item.progress }
+    func estimatedSeconds(of item: DownloadItem) -> TimeInterval? { progressStore.estimatedSeconds[item.id] }
 
     func setBackgroundCompletionHandler(_ handler: @escaping () -> Void, for identifier: String) {
         backgroundCompletionHandlers[identifier] = handler
@@ -192,8 +189,8 @@ final class DownloadManager: NSObject, ObservableObject {
         item.errorMessage = nil
         diagnostics?.record(event: "download-start", url: item.remoteURL.absoluteString,
                             note: "kind=\(item.kind.rawValue) attempt=\(attemptID.uuidString)")
-        liveProgress[item.id] = item.progress
-        liveEstimatedSeconds[item.id] = nil
+        progressStore.set(item.id, fraction: item.progress)
+        progressStore.setEstimate(item.id, nil)
         progressSamples[item.id] = nil
         save()
         Task {
@@ -403,9 +400,7 @@ final class DownloadManager: NSObject, ObservableObject {
         item.fileSize = size
         item.completedAt = Date()
         item.errorMessage = nil
-        liveProgress[item.id] = nil
-        liveEstimatedSeconds[item.id] = nil
-        progressSamples[item.id] = nil
+        clearProgress(for: item.id)
         try? FileManager.default.removeItem(at: item.resumeDataURL)
         save()
     }
@@ -415,10 +410,15 @@ final class DownloadManager: NSObject, ObservableObject {
                             note: "\(error.message) item=\(item.id.uuidString)")
         item.status = error == .cancelled ? .cancelled : .failed
         item.errorMessage = error == .cancelled ? nil : error.message
-        if let progress = liveProgress.removeValue(forKey: item.id) { item.progress = progress }
-        liveEstimatedSeconds[item.id] = nil
-        progressSamples[item.id] = nil
+        if let progress = progressStore.fraction(of: item.id) { item.progress = progress }
+        clearProgress(for: item.id)
         save()
+    }
+
+    private func clearProgress(for id: UUID) {
+        progressStore.remove(id)
+        progressSamples[id] = nil
+        lastProgressSave[id] = nil
     }
 
     private func updateProgress(_ id: UUID, _ value: Double) {
@@ -427,12 +427,12 @@ final class DownloadManager: NSObject, ObservableObject {
         if let sample = progressSamples[id] {
             let elapsed = now.timeIntervalSince(sample.date)
             if elapsed >= 2, let estimate = DownloadTimeEstimate.seconds(elapsed: elapsed, from: sample.progress, to: value) {
-                let previous = liveEstimatedSeconds[id]
-                liveEstimatedSeconds[id] = previous.map { $0 * 0.7 + estimate * 0.3 } ?? estimate
+                let previous = progressStore.estimatedSeconds[id]
+                progressStore.setEstimate(id, previous.map { $0 * 0.7 + estimate * 0.3 } ?? estimate)
                 progressSamples[id] = (now, value)
             }
         } else { progressSamples[id] = (now, value) }
-        liveProgress[id] = value
+        progressStore.set(id, fraction: value, now: now)
         if now.timeIntervalSince(lastProgressSave[id] ?? .distantPast) > 2, let item = item(id) {
             lastProgressSave[id] = now
             item.progress = value
@@ -567,8 +567,11 @@ extension DownloadManager: URLSessionDownloadDelegate {
         let value = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
         MainActor.assumeIsolated {
             // A cancelled task can still deliver progress after a retry has
-            // installed a new task for the same item.
-            guard let item = self.item(id), associate(downloadTask, item: item, id: id, isHLS: false) else { return }
+            // installed a new task for the same item. The registered task needs
+            // no store lookup; this callback fires every few kilobytes.
+            if directTasks[id] !== downloadTask {
+                guard let item = self.item(id), associate(downloadTask, item: item, id: id, isHLS: false) else { return }
+            }
             updateProgress(id, value)
         }
     }
@@ -609,7 +612,9 @@ extension DownloadManager: AVAssetDownloadDelegate {
         guard total > 0, let id = Self.itemID(assetDownloadTask) else { return }
         let loaded = loadedTimeRanges.reduce(0.0) { $0 + $1.timeRangeValue.duration.seconds }
         MainActor.assumeIsolated {
-            guard let item = self.item(id), associate(assetDownloadTask, item: item, id: id, isHLS: true) else { return }
+            if hlsTasks[id] !== assetDownloadTask {
+                guard let item = self.item(id), associate(assetDownloadTask, item: item, id: id, isHLS: true) else { return }
+            }
             updateProgress(id, loaded / total)
         }
     }

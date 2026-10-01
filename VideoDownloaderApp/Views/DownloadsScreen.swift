@@ -7,6 +7,8 @@ struct DownloadsScreen: View {
     @Query(sort: \DownloadItem.createdAt, order: .reverse) private var items: [DownloadItem]
     @State private var searchText = ""
     @State private var showingDiagnostics = false
+    @State private var usedSpace: String?
+    @State private var availableSpace: String?
 
     private var displayed: [DownloadItem] {
         items.filter { searchText.isEmpty || $0.title.localizedStandardContains(searchText) }
@@ -26,8 +28,8 @@ struct DownloadsScreen: View {
                 if !needsAttention.isEmpty { Section("Needs Attention") { rows(needsAttention) } }
                 if !finished.isEmpty { Section("Completed") { rows(finished) } }
                 Section("Storage") {
-                    LabeledContent("Downloads used", value: usedSpace)
-                    LabeledContent("Available on iPhone", value: availableSpace)
+                    LabeledContent("Downloads used", value: usedSpace ?? "Calculating…")
+                    LabeledContent("Available on iPhone", value: availableSpace ?? "Calculating…")
                 }
             }
             .navigationTitle("Downloads")
@@ -39,34 +41,47 @@ struct DownloadsScreen: View {
                 }
             }
             .sheet(isPresented: $showingDiagnostics) { DiagnosticsScreen() }
+            .task(id: storageKey) { await refreshStorage() }
         }
     }
 
     @ViewBuilder private func rows(_ group: [DownloadItem]) -> some View {
         ForEach(group) { item in
-            DownloadRow(item: item, progress: downloads.progress(of: item), estimatedSeconds: downloads.estimatedSeconds(of: item),
-                        cancel: { downloads.cancel(item) }, retry: { downloads.retry(item) }, restart: { downloads.restart(item) },
+            DownloadRow(item: item, cancel: { downloads.cancel(item) }, retry: { downloads.retry(item) }, restart: { downloads.restart(item) },
                         delete: { downloads.delete(item) }, openSource: { openSource(item.sourcePageURL) })
         }
         .onDelete { offsets in offsets.map { group[$0] }.forEach(downloads.delete) }
     }
 
-    private var usedSpace: String {
-        let bytes = items.filter { $0.status == .completed }.reduce(Int64(0)) { total, item in
-            total + (item.fileSize ?? item.localURL.flatMap(DownloadStorage.allocatedSize) ?? 0)
-        }
-        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    /// Changes when a download completes, is deleted, or learns its size.
+    private var storageKey: [String] {
+        items.filter { $0.status == .completed }.map { "\($0.id.uuidString)|\($0.fileSize ?? -1)" }
     }
 
-    private var availableSpace: String {
-        DownloadStorage.availableCapacity().map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Unavailable"
+    /// Older items without a recorded size need a directory walk, so this runs off the main thread.
+    private func refreshStorage() async {
+        let completed = items.filter { $0.status == .completed }.map { (size: $0.fileSize, url: $0.localURL) }
+        let (used, available) = await Task.detached(priority: .utility) {
+            let used = completed.reduce(Int64(0)) { $0 + ($1.size ?? $1.url.flatMap(DownloadStorage.allocatedSize) ?? 0) }
+            return (used, DownloadStorage.availableCapacity())
+        }.value
+        guard !Task.isCancelled else { return }
+        usedSpace = ByteCountFormatter.string(fromByteCount: used, countStyle: .file)
+        availableSpace = available.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Unavailable"
     }
+}
+
+/// Reads live progress, so a progress tick re-renders only these small views.
+private struct LiveProgress<Content: View>: View {
+    @EnvironmentObject private var store: DownloadProgressStore
+    let item: DownloadItem
+    @ViewBuilder let content: (_ progress: Double, _ estimatedSeconds: TimeInterval?) -> Content
+
+    var body: some View { content(store.fractions[item.id] ?? item.progress, store.estimatedSeconds[item.id]) }
 }
 
 private struct DownloadRow: View {
     let item: DownloadItem
-    let progress: Double
-    let estimatedSeconds: TimeInterval?
     let cancel: () -> Void
     let retry: () -> Void
     let restart: () -> Void
@@ -85,9 +100,15 @@ private struct DownloadRow: View {
             HStack {
                 Text(statusText).font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("download.status")
                 Spacer()
-                if item.status == .downloading { Text(progress, format: .percent.precision(.fractionLength(0))).font(.caption.monospacedDigit()) }
+                if item.status == .downloading {
+                    LiveProgress(item: item) { progress, _ in
+                        Text(progress, format: .percent.precision(.fractionLength(0))).font(.caption.monospacedDigit())
+                    }
+                }
             }
-            if item.isActive { ProgressView(value: progress).accessibilityLabel("Download progress") }
+            if item.isActive {
+                LiveProgress(item: item) { progress, _ in ProgressView(value: progress).accessibilityLabel("Download progress") }
+            }
             if item.requiresReferer && item.isActive {
                 Text("Keep the app open until this stream finishes.")
                     .font(.caption).foregroundStyle(.orange)
@@ -96,8 +117,12 @@ private struct DownloadRow: View {
                 Text("This older download is only one piece of a video. Delete it and choose a complete playlist instead.")
                     .font(.caption).foregroundStyle(.orange)
             }
-            if item.status == .downloading, let estimatedSeconds, progress > 0, progress < 1 {
-                Text(estimateLabel(estimatedSeconds)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            if item.status == .downloading {
+                LiveProgress(item: item) { progress, estimatedSeconds in
+                    if let estimatedSeconds, progress > 0, progress < 1 {
+                        Text(estimateLabel(estimatedSeconds)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
             }
             if let error = item.errorMessage {
                 Text(error.contains("CoreMediaErrorDomain") ? "The video server stopped this transfer. Open the page and try again later." : error)
