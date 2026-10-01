@@ -173,6 +173,40 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["candidate.audio-only.m3u8"].exists)
     }
 
+    func testCaptionChoiceIsRememberedForTheNextPlayback() throws {
+        launch(at: "/page/captions.html")
+        waitForReadyCandidates(1).tap()
+        app.buttons["candidate.download"].firstMatch.tap()
+        let status = app.staticTexts.matching(identifier: "download.status").firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        let completed = NSPredicate(format: "label BEGINSWITH 'Completed'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: completed, object: status)], timeout: 20), .completed, status.label)
+
+        app.tabBars.buttons["My Videos"].tap()
+        let item = app.buttons["library.item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+        let captions = app.buttons["player.captions"]
+        XCTAssertTrue(captions.waitForExistence(timeout: 10))
+        // The first playback turns on a caption track by default.
+        let on = NSPredicate(format: "value BEGINSWITH 'English'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: on, object: captions)], timeout: 10), .completed,
+                       String(describing: captions.value))
+        captions.tap()
+        let off = app.buttons["Off"]
+        XCTAssertTrue(off.waitForExistence(timeout: 5))
+        off.tap()
+        XCTAssertEqual(captions.value as? String, "Off")
+        app.buttons["player.done"].tap()
+
+        item.tap()
+        XCTAssertTrue(captions.waitForExistence(timeout: 10))
+        let offAgain = NSPredicate(format: "value == 'Off'")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: offAgain, object: captions)], timeout: 10), .completed,
+                       "captions turned off should stay off, value: \(String(describing: captions.value))")
+        app.buttons["player.done"].tap()
+    }
+
     func testFragmentIsExplainedWithoutDownloadButton() throws {
         launch(at: "/page/fragment.html")
         let button = app.buttons["browser.foundVideos"]

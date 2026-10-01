@@ -16,6 +16,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     let controller = AVPlayerViewController()
     private let context: ModelContext
     private let diagnostics: DiagnosticsLog
+    private let preferences: UserDefaults
     private var item: DownloadItem?
     private var captionGroup: AVMediaSelectionGroup?
     private var captionOptions: [AVMediaSelectionOption] = []
@@ -24,9 +25,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private var playbackEnded = false
     private(set) var isInPiP = false
 
-    init(context: ModelContext, diagnostics: DiagnosticsLog) {
+    init(context: ModelContext, diagnostics: DiagnosticsLog, preferences: UserDefaults = .standard) {
         self.context = context
         self.diagnostics = diagnostics
+        self.preferences = preferences
         super.init()
         controller.delegate = self
         controller.allowsPictureInPicturePlayback = true
@@ -39,7 +41,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     }
 
     func open(_ newItem: DownloadItem, at position: Double) {
-        close()
+        // The next video activates the session again right away.
+        close(releasingAudioSession: false)
         let token = UUID()
         loadID = token
         item = newItem
@@ -103,18 +106,24 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         captionGroup = group
         captionOptions = options
         captionNames = options.map { $0.displayName }
+        var defaultIndex: Int? = options.isEmpty ? nil : 0
         if let preferred = try? await asset.load(.preferredMediaSelection),
            let selected = preferred.selectedMediaOption(in: group),
            let index = options.firstIndex(of: selected) {
-            playerItem.select(selected, in: group)
-            selectedCaption = index
-        } else if let first = options.first {
-            playerItem.select(first, in: group)
-            selectedCaption = 0
+            defaultIndex = index
         }
-        if let selectedCaption {
+        // Respect the viewer's last choice, including Off, instead of turning captions on for every video.
+        let stored = preferences.string(forKey: CaptionPreference.defaultsKey)
+        let choice = CaptionPreference.index(for: stored, in: options.map(Self.preferenceOption), defaultIndex: defaultIndex)
+        if let choice {
+            playerItem.select(options[choice], in: group)
+            selectedCaption = choice
             diagnostics.record(event: "captions", url: asset.url.absoluteString,
-                               note: "Selected \(options[selectedCaption].displayName) by default")
+                               note: "Selected \(options[choice].displayName) \(stored == nil ? "by default" : "(remembered)")")
+        } else if !options.isEmpty {
+            if group.allowsEmptySelection { playerItem.select(nil, in: group) }
+            selectedCaption = nil
+            diagnostics.record(event: "captions", url: asset.url.absoluteString, note: "Captions off (remembered)")
         }
         if options.isEmpty {
             diagnostics.record(event: "captions", url: asset.url.absoluteString,
@@ -127,10 +136,17 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         let option = index.flatMap { captionOptions.indices.contains($0) ? captionOptions[$0] : nil }
         playerItem.select(option, in: group)
         selectedCaption = index
+        preferences.set(CaptionPreference.storedValue(for: option.map(Self.preferenceOption)), forKey: CaptionPreference.defaultsKey)
         diagnostics.record(event: "captions", url: item?.localURL?.absoluteString ?? "app://player", note: option?.displayName ?? "Off")
     }
 
-    func close() {
+    private static func preferenceOption(_ option: AVMediaSelectionOption) -> CaptionPreference.Option {
+        CaptionPreference.Option(language: option.extendedLanguageTag ?? option.locale?.identifier, name: option.displayName)
+    }
+
+    /// - Parameter releasingAudioSession: lets music or podcasts paused by playback resume.
+    func close(releasingAudioSession: Bool = true) {
+        let wasInPiP = isInPiP
         loadID = UUID()
         savePosition()
         if let timeObserver, let player = controller.player { player.removeTimeObserver(timeObserver) }
@@ -147,6 +163,12 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         isPresented = false
         isInPiP = false
         playbackEnded = false
+        if releasingAudioSession && !wasInPiP {
+            // Deactivation can block briefly, so keep it off the main thread.
+            DispatchQueue.global(qos: .utility).async {
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            }
+        }
     }
 
     private func showFailure(_ message: String, token: UUID) {
@@ -231,13 +253,18 @@ struct PersistentPlayerScreen: View {
                         Button("No caption track in saved video") {}.disabled(true)
                         Button("Try subtitles in the site's player in Browse") {}.disabled(true)
                     } else {
-                        Button("Off") { playback.chooseCaption(nil) }
-                        ForEach(Array(playback.captionNames.enumerated()), id: \.offset) { index, name in
-                            Button(name) { playback.chooseCaption(index) }
+                        // An inline picker checkmarks the active choice, which plain buttons never showed.
+                        Picker("Captions", selection: Binding(get: { playback.selectedCaption }, set: { playback.chooseCaption($0) })) {
+                            Text("Off").tag(Int?.none)
+                            ForEach(Array(playback.captionNames.enumerated()), id: \.offset) { index, name in
+                                Text(name).tag(Int?.some(index))
+                            }
                         }
+                        .pickerStyle(.inline)
                     }
-                } label: { Label("Captions", systemImage: "captions.bubble") }
+                } label: { Label("Captions", systemImage: playback.selectedCaption == nil ? "captions.bubble" : "captions.bubble.fill") }
                     .accessibilityIdentifier("player.captions")
+                    .accessibilityValue(playback.selectedCaption.map { playback.captionNames[$0] } ?? "Off")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)

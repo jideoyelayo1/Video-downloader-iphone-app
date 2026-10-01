@@ -50,7 +50,7 @@ final class AppServices {
         StarterBookmarks.install(in: context, inMemory: inMemory)
         history = BrowserHistoryStore(context: context)
         downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)
-        playback = PlaybackCoordinator(context: context, diagnostics: diagnostics)
+        playback = PlaybackCoordinator(context: context, diagnostics: diagnostics, preferences: LaunchOptions.preferences(isolated: inMemory))
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }
         downloads.diagnostics = diagnostics
     }
@@ -81,6 +81,14 @@ enum LaunchOptions {
         #else
         return false
         #endif
+    }
+
+    /// Test runs keep viewer preferences (such as captions) out of the simulator's real defaults.
+    static func preferences(isolated: Bool) -> UserDefaults {
+        let suite = "VideoDownloaderApp.TestRun"
+        guard isolated, let defaults = UserDefaults(suiteName: suite) else { return .standard }
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
     }
 
     static var diagnosticsEnabled: Bool {

@@ -190,6 +190,7 @@ final class LocalMediaServer {
         let origin = baseURL?.absoluteString ?? ""
         switch request.path {
         case "/video.mp4", "/noext/stream": return mp4
+        case "/captions/video.mp4": return .data(fixtures.captionedMP4, "video/mp4")
         case "/invalid/video.mp4": return .data(Data("not an MP4 movie".utf8), "video/mp4")
         case "/hls/master.m3u8": return .text(masterPlaylist, Self.hlsType)
         case "/hls/referer-master.m3u8":
@@ -342,6 +343,7 @@ final class LocalMediaServer {
         "hls.html": page("HLS Video Page", #"<video id="video" src="/hls/master.m3u8" controls playsinline width="320" height="180"></video>"#),
         "referer-hls.html": page("Referer HLS Page", #"<video id="video" src="/hls/referer-master.m3u8" controls playsinline width="320" height="180"></video>"#),
         "fragment.html": page("Fragment Page", #"<video id="video" src="/hls/seg-57-s1080p-v1-a1.m4s" controls playsinline width="320" height="180"></video>"#),
+        "captions.html": page("Captioned Video Page", #"<video id="video" src="/captions/video.mp4" controls playsinline width="320" height="180"></video>"#),
         // Like hls.js players: the page script also loads the separate audio playlist.
         "separate-audio.html": page("Separate Audio Page", """
             <video id="video" src="/hls/separate-audio-master.m3u8" controls playsinline width="320" height="180"></video>
@@ -441,6 +443,8 @@ final class LocalMediaServer {
 /// Fixture bytes served by `LocalMediaServer`.
 struct FixtureSet {
     var mp4: Data
+    /// `fixture.mp4` plus an English `mov_text` subtitle track.
+    var captionedMP4: Data
     var hlsVideoOnly: Data
     var hlsAudioOnly: Data
     /// Media playlist text; segment URIs are bare file names resolved against `/hls/`.
@@ -455,6 +459,7 @@ struct FixtureSet {
             segments[line] = try load(line, in: bundle)
         }
         return FixtureSet(mp4: try load("fixture.mp4", in: bundle),
+                          captionedMP4: try load("fixture_captions.mp4", in: bundle),
                           hlsVideoOnly: try load("fixture_video_only.ts.bin", in: bundle),
                           hlsAudioOnly: try load("fixture_audio_only.ts.bin", in: bundle),
                           hlsMediaPlaylist: playlist, hlsSegments: segments)
