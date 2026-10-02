@@ -112,8 +112,11 @@ struct NewShowSheet: View {
                                         Text("Moves from another show").font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
+                                Spacer(minLength: 0)
                             }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .accessibilityAddTraits(selected.contains(item.id) ? .isSelected : [])
                     }
                 } header: {
@@ -190,7 +193,7 @@ struct ShowScreen: View {
                             VideoThumbnailView(item: next, width: 112, height: 63)
                             VStack(alignment: .leading, spacing: 3) {
                                 Label(playLabel(next, all: episodes), systemImage: "play.fill").font(.headline).foregroundStyle(.tint)
-                                Text(next.displayTitle).font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
+                                Text(next.displayTitle).font(.caption).foregroundStyle(Color.secondary).lineLimit(2).truncationMode(.middle)
                             }
                         }
                     }
@@ -204,6 +207,7 @@ struct ShowScreen: View {
             Section("Episodes") {
                 ForEach(Array(episodes.enumerated()), id: \.element.id) { index, item in
                     Button { open(item) } label: { EpisodeRow(number: index + 1, item: item) }
+                        .buttonStyle(.plain)
                         .accessibilityIdentifier("show.episode")
                         .swipeActions(edge: .leading) {
                             Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
@@ -311,6 +315,8 @@ private struct EpisodeRow: View {
                         .accessibilityLabel("Playback progress")
                 }
             }
+            Spacer(minLength: 0)
         }
+        .contentShape(Rectangle())
     }
 }

@@ -259,4 +259,54 @@ final class PlaybackCoordinatorTests: XCTestCase {
             if !watched { XCTAssertEqual(try XCTUnwrap(item.playbackPosition), position, accuracy: 0.2) }
         }
     }
+
+    private func makeEpisode(_ number: Int) throws -> DownloadItem {
+        let name = "playback-episode-\(number)-\(UUID().uuidString).mp4"
+        let file = DownloadStorage.libraryDirectory.appendingPathComponent(name)
+        let source = try XCTUnwrap(FixtureSet.resourceURL(named: "fixture_captions.mp4", in: Bundle(for: LocalMediaServer.self)))
+        try FileManager.default.copyItem(at: source, to: file)
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        let item = DownloadItem(title: "Fixture Show Ep. \(number)", remoteURL: URL(string: "https://cdn.example/\(number).mp4")!,
+                                sourcePageURL: URL(string: "https://site.example/watch?ep=\(number)")!, kind: .video, status: .completed)
+        item.localFileName = name
+        container.mainContext.insert(item)
+        return item
+    }
+
+    func testTheEndOfAnEpisodePlaysTheNextInTheSamePlayer() async throws {
+        let coordinator = makeCoordinator()
+        let shows = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "PlaybackCoordinatorTests-\(UUID().uuidString)")!)
+        coordinator.shows = shows
+        let first = try makeEpisode(1), second = try makeEpisode(2)
+        let show = shows.create(title: "Fixture Show", with: [first, second])
+
+        coordinator.open(first, at: 0)
+        try await waitUntil("episode 1 ready") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        let player = try XCTUnwrap(coordinator.controller.player)
+        let firstItem = try XCTUnwrap(player.currentItem)
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: firstItem)
+        try await waitUntil("episode 2 playing") { coordinator.title == "Fixture Show Ep. 2" && player.currentItem !== firstItem && !coordinator.isLoading }
+        XCTAssertTrue(coordinator.controller.player === player, "the same player, so full screen or Picture in Picture carries on")
+        XCTAssertTrue(first.isWatched)
+        XCTAssertNotNil(second.lastPlayedAt)
+        XCTAssertFalse(coordinator.isShowingUpNext)
+
+        // The last episode ends the show.
+        let secondItem = try XCTUnwrap(player.currentItem)
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: secondItem)
+        try await waitUntil("episode 2 watched") { second.isWatched }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(player.currentItem === secondItem)
+
+        // With autoplay off, the player stays on the finished episode.
+        show.autoplayNext = false
+        coordinator.open(first, at: 0)
+        try await waitUntil("episode 1 ready again") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        let finished = try XCTUnwrap(coordinator.controller.player?.currentItem)
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: finished)
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertTrue(coordinator.controller.player?.currentItem === finished)
+        XCTAssertEqual(coordinator.title, "Fixture Show Ep. 1")
+        coordinator.close()
+    }
 }

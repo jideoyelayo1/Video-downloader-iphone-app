@@ -55,6 +55,13 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// would undo the viewer's remembered choice. Changes in this window are reverted.
     private var automaticSelectionWindowEnd = Date.distantPast
     private var automaticSelectionReverts = 0
+    /// Plays on to the next episode of a show that has autoplay on.
+    var shows: ShowStore?
+    private var upNextItem: DownloadItem?
+    private var upNextPanel: UIView?
+    private var upNextCountdownLabel: UILabel?
+    private var upNextTimer: Timer?
+    private var upNextCountdown = 0
 
     init(context: ModelContext, diagnostics: DiagnosticsLog, preferences: UserDefaults = .standard, presentsPlayer: Bool = true) {
         self.context = context
@@ -101,31 +108,57 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         newItem.lastPlayedAt = Date()
         try? context.save()
         presentPlayer()
-        Task {
-            let asset = AVURLAsset(url: url)
-            guard (try? await asset.load(.isPlayable)) == true else {
-                showFailure("This saved video cannot be played on iPhone. Choose another source in Browse.", token: token)
-                return
-            }
-            if let duration = try? await asset.load(.duration).seconds, duration.isFinite, duration > 0 { newItem.duration = duration }
-            if newItem.kind == .hls, await HLSMediaSelections.isOfflineAudioMissing(in: asset) {
-                showFailure("This saved stream has no offline audio track. Download it again from the master playlist.", token: token)
-                return
-            }
-            do {
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-                try AVAudioSession.sharedInstance().setActive(true)
-            } catch {
-                diagnostics.record(event: "playback", url: url.absoluteString, note: "Audio session: \(error.localizedDescription)")
-            }
-            guard loadID == token else { return }
-            let playerItem = AVPlayerItem(asset: asset)
-            playerItem.externalMetadata = [Self.titleMetadata(newItem.displayTitle)]
-            if let preferred = try? await asset.load(.preferredMediaSelection),
-               let (group, option) = await HLSMediaSelections.audibleOption(for: asset, preferred: preferred) {
-                playerItem.select(option, in: group)
-            }
-            let player = AVPlayer(playerItem: playerItem)
+        Task { await load(newItem, from: url, at: position, token: token, into: nil) }
+    }
+
+    /// Moves on to the next episode in the same player, so full screen or Picture in Picture carries on.
+    func playNext(_ next: DownloadItem) {
+        guard let player = controller.player, let url = next.localURL, FileManager.default.fileExists(atPath: url.path) else { return }
+        resetItemState()
+        let token = UUID()
+        loadID = token
+        item = next
+        title = next.displayTitle
+        next.lastPlayedAt = Date()
+        try? context.save()
+        isLoading = true
+        diagnostics.record(event: "playback", url: url.absoluteString, note: "Up next → \(next.displayTitle)")
+        let position = !next.isWatched && (next.playbackPosition ?? 0) > 10 ? next.playbackPosition ?? 0 : 0
+        Task { await load(next, from: url, at: position, token: token, into: player) }
+    }
+
+    /// Loads a saved video into a new player, or into `existing` for the next episode.
+    private func load(_ newItem: DownloadItem, from url: URL, at position: Double, token: UUID, into existing: AVPlayer?) async {
+        let asset = AVURLAsset(url: url)
+        guard (try? await asset.load(.isPlayable)) == true else {
+            showFailure("This saved video cannot be played on iPhone. Choose another source in Browse.", token: token)
+            return
+        }
+        if let duration = try? await asset.load(.duration).seconds, duration.isFinite, duration > 0 { newItem.duration = duration }
+        if newItem.kind == .hls, await HLSMediaSelections.isOfflineAudioMissing(in: asset) {
+            showFailure("This saved stream has no offline audio track. Download it again from the master playlist.", token: token)
+            return
+        }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            diagnostics.record(event: "playback", url: url.absoluteString, note: "Audio session: \(error.localizedDescription)")
+        }
+        guard loadID == token else { return }
+        let playerItem = AVPlayerItem(asset: asset)
+        playerItem.externalMetadata = [Self.titleMetadata(newItem.displayTitle)]
+        if let preferred = try? await asset.load(.preferredMediaSelection),
+           let (group, option) = await HLSMediaSelections.audibleOption(for: asset, preferred: preferred) {
+            playerItem.select(option, in: group)
+        }
+        guard loadID == token else { return }
+        let player: AVPlayer
+        if let existing {
+            existing.replaceCurrentItem(with: playerItem)
+            player = existing
+        } else {
+            player = AVPlayer(playerItem: playerItem)
             player.isMuted = false
             if #available(iOS 26.0, *) {
                 // iOS 26 keeps re-applying the system's subtitle preference over the viewer's
@@ -133,23 +166,22 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
                 // AVKit needs them for its own Off, so they stay on there.
                 player.appliesMediaSelectionCriteriaAutomatically = false
             }
-            guard loadID == token else { return }
             controller.player = player
-            await loadCaptions(from: asset, playerItem: playerItem, token: token)
-            guard loadID == token else { return }
-            automaticSelectionWindowEnd = Date().addingTimeInterval(2)
-            automaticSelectionReverts = 0
-            observeSelection(of: playerItem)
-            installSubtitlesButton(for: player)
-            timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 600), queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.savePosition() }
-            }
-            isLoading = false
-            if position > 0 {
-                player.seek(to: CMTime(seconds: position, preferredTimescale: 600)) { _ in player.play() }
-            } else { player.play() }
-            diagnostics.record(event: "playback", url: url.absoluteString, note: "Started; captions=\(captionNames.count)")
         }
+        await loadCaptions(from: asset, playerItem: playerItem, token: token)
+        guard loadID == token else { return }
+        automaticSelectionWindowEnd = Date().addingTimeInterval(2)
+        automaticSelectionReverts = 0
+        observeSelection(of: playerItem)
+        installSubtitlesButton(for: player)
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 600), queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.savePosition() }
+        }
+        isLoading = false
+        if position > 0 {
+            player.seek(to: CMTime(seconds: position, preferredTimescale: 600)) { _ in player.play() }
+        } else { player.play() }
+        diagnostics.record(event: "playback", url: url.absoluteString, note: "Started; captions=\(captionNames.count)")
     }
 
     private func loadCaptions(from asset: AVURLAsset, playerItem: AVPlayerItem, token: UUID) async {
@@ -443,6 +475,29 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         let wasInPiP = isInPiP
         loadID = UUID()
         savePosition(closing: true)
+        resetItemState()
+        controller.player?.pause()
+        controller.player = nil
+        // Closing with Picture in Picture running is the system's job; otherwise leave full screen.
+        if presentsPlayer, !wasInPiP, controller.presentingViewController != nil, !controller.isBeingDismissed {
+            controller.dismiss(animated: true)
+        }
+        item = nil
+        errorMessage = nil
+        isLoading = false
+        isPresented = false
+        isInPiP = false
+        pictureInPictureStarting = false
+        if releasingAudioSession && !wasInPiP {
+            // Deactivation can block briefly, so keep it off the main thread.
+            DispatchQueue.global(qos: .utility).async {
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            }
+        }
+    }
+
+    /// Everything tied to the current video, cleared on close and before the next episode.
+    private func resetItemState() {
         if let timeObserver, let player = controller.player { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
         if let subtitleObserver, let player = controller.player { player.removeTimeObserver(subtitleObserver) }
@@ -458,30 +513,13 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         controlsSync = nil
         subtitlesButton?.removeFromSuperview()
         subtitlesButton = nil
-        controller.player?.pause()
-        controller.player = nil
-        // Closing with Picture in Picture running is the system's job; otherwise leave full screen.
-        if presentsPlayer, !wasInPiP, controller.presentingViewController != nil, !controller.isBeingDismissed {
-            controller.dismiss(animated: true)
-        }
-        item = nil
+        hideUpNext()
         captionGroup = nil
         captionOptions = []
         forcedCaptionOption = nil
         captionNames = []
         selectedCaption = nil
-        errorMessage = nil
-        isLoading = false
-        isPresented = false
-        isInPiP = false
-        pictureInPictureStarting = false
         playbackEnded = false
-        if releasingAudioSession && !wasInPiP {
-            // Deactivation can block briefly, so keep it off the main thread.
-            DispatchQueue.global(qos: .utility).async {
-                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-            }
-        }
     }
 
     private func showFailure(_ message: String, token: UUID) {
@@ -516,7 +554,118 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         playbackEnded = true
         item?.setWatched(true)
         try? context.save()
+        guard let item, let next = shows?.autoplayNext(after: item) else { return }
+        // Nothing can be shown in Picture in Picture or the background, so the next episode starts at once.
+        if !presentsPlayer || isInPiP || UIApplication.shared.applicationState != .active {
+            playNext(next)
+        } else {
+            showUpNext(next)
+        }
     }
+
+    // MARK: Up next
+
+    /// A short countdown over the finished episode, with Play Now and Cancel.
+    private func showUpNext(_ next: DownloadItem) {
+        hideUpNext()
+        upNextItem = next
+        upNextCountdown = 5
+        let panel = makeUpNextPanel(title: next.displayTitle)
+        controller.view.addSubview(panel)
+        let guide = controller.view.safeAreaLayoutGuide
+        let width = panel.widthAnchor.constraint(equalToConstant: 300)
+        width.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            width,
+            panel.widthAnchor.constraint(lessThanOrEqualTo: guide.widthAnchor, constant: -32),
+            panel.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+            // Clear of AVKit's scrubber and transport controls.
+            panel.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -100)
+        ])
+        upNextPanel = panel
+        updateUpNextCountdown()
+        upNextTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tickUpNext() }
+        }
+    }
+
+    private func tickUpNext() {
+        upNextCountdown -= 1
+        if upNextCountdown <= 0, let next = upNextItem { playNext(next) } else { updateUpNextCountdown() }
+    }
+
+    private func updateUpNextCountdown() {
+        upNextCountdownLabel?.text = "Playing in \(upNextCountdown)"
+    }
+
+    private func hideUpNext() {
+        upNextTimer?.invalidate()
+        upNextTimer = nil
+        upNextPanel?.removeFromSuperview()
+        upNextPanel = nil
+        upNextCountdownLabel = nil
+        upNextItem = nil
+    }
+
+    private func makeUpNextPanel(title: String) -> UIView {
+        let panel = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
+        panel.layer.cornerRadius = 18
+        panel.layer.cornerCurve = .continuous
+        panel.clipsToBounds = true
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.accessibilityIdentifier = "player.upNext"
+
+        let heading = UILabel()
+        heading.text = "Up Next"
+        heading.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold)
+        heading.textColor = UIColor(white: 1, alpha: 0.7)
+        let name = UILabel()
+        name.text = title
+        name.font = .preferredFont(forTextStyle: .headline)
+        name.textColor = .white
+        name.numberOfLines = 2
+        name.lineBreakMode = .byTruncatingMiddle
+        let countdown = UILabel()
+        countdown.font = .monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .regular)
+        countdown.textColor = UIColor(white: 1, alpha: 0.8)
+        upNextCountdownLabel = countdown
+
+        var playConfiguration = UIButton.Configuration.filled()
+        playConfiguration.title = "Play Now"
+        playConfiguration.image = UIImage(systemName: "play.fill")
+        playConfiguration.imagePadding = 6
+        playConfiguration.cornerStyle = .capsule
+        let play = UIButton(configuration: playConfiguration, primaryAction: UIAction { [weak self] _ in
+            guard let self, let next = self.upNextItem else { return }
+            self.playNext(next)
+        })
+        play.accessibilityIdentifier = "player.upNext.play"
+        var cancelConfiguration = UIButton.Configuration.gray()
+        cancelConfiguration.title = "Cancel"
+        cancelConfiguration.cornerStyle = .capsule
+        let cancel = UIButton(configuration: cancelConfiguration, primaryAction: UIAction { [weak self] _ in self?.hideUpNext() })
+        cancel.accessibilityIdentifier = "player.upNext.cancel"
+        let buttons = UIStackView(arrangedSubviews: [play, cancel])
+        buttons.spacing = 8
+        buttons.distribution = .fillEqually
+
+        let stack = UIStackView(arrangedSubviews: [heading, name, countdown, buttons])
+        stack.axis = .vertical
+        stack.spacing = 4
+        stack.setCustomSpacing(12, after: countdown)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        panel.contentView.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: panel.contentView.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: panel.contentView.trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: panel.contentView.topAnchor, constant: 14),
+            stack.bottomAnchor.constraint(equalTo: panel.contentView.bottomAnchor, constant: -14)
+        ])
+        return panel
+    }
+
+    /// Whether the countdown for the next episode is showing.
+    var isShowingUpNext: Bool { upNextItem != nil }
 
     /// AVKit's close button. Picture in Picture also leaves full screen, but playback continues there.
     func playerViewController(_ playerViewController: AVPlayerViewController,
@@ -537,6 +686,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
         pictureInPictureStarting = true
+        // The countdown can't show in Picture in Picture.
+        if let next = upNextItem { playNext(next) }
     }
 
     func playerViewControllerDidStartPictureInPicture(_ playerViewController: AVPlayerViewController) {

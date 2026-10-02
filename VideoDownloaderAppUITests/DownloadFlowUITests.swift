@@ -452,6 +452,28 @@ final class DownloadFlowUITests: XCTestCase {
         wait(for: episodes.element(boundBy: 0), "label CONTAINS 'Ep. 1'", timeout: 5, episodes.element(boundBy: 0).label)
     }
 
+    func testShowPlaysTheNextEpisodeAfterACountdown() throws {
+        makeTwoEpisodeShow()
+        app.buttons["library.show"].firstMatch.tap()
+        XCTAssertTrue(app.switches["show.autoplay"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.switches["show.autoplay"].value as? String, "1", "autoplay is on for new shows")
+        app.buttons["show.playNext"].tap()
+        XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
+
+        // Episode 1 (5 s) ends: the Up Next countdown appears, then episode 2 plays in the same player.
+        let playNow = app.buttons["player.upNext.play"]
+        XCTAssertTrue(playNow.waitForExistence(timeout: 15), "Up Next appears when episode 1 ends")
+        XCTAssertTrue(app.staticTexts["Fixture Show Ep. 2"].exists)
+        wait(for: playNow, "exists == false", timeout: 8, "the countdown starts episode 2")
+        XCTAssertTrue(app.otherElements["player.video"].exists, "the player stays open")
+
+        // Episode 2 is the last: no Up Next after it.
+        sleep(7)
+        XCTAssertFalse(app.buttons["player.upNext.play"].exists)
+        closePlayer()
+        XCTAssertTrue(app.staticTexts["2 of 2 watched"].waitForExistence(timeout: 5))
+    }
+
     func testResumeSeekAndContinueWatching() throws {
         launch(at: "/page/long.html")
         downloadFirstCandidate()

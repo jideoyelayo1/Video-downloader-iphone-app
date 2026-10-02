@@ -62,6 +62,7 @@ final class AppServices {
         downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)
         downloads.labelStore = labels
         playback = PlaybackCoordinator(context: context, diagnostics: diagnostics, preferences: preferences)
+        playback.shows = shows
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }
         downloads.diagnostics = diagnostics
     }
