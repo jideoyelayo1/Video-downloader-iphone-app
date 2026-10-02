@@ -38,6 +38,8 @@ final class AppServices {
     let playback: PlaybackCoordinator
     let history: BrowserHistoryStore
     let labels: LabelStore
+    /// App settings; a fresh, separate store when UI tests run with an in-memory library.
+    let preferences: UserDefaults
 
     private init() {
         let inMemory = LaunchOptions.isRunningUnitTests || LaunchOptions.flag("-UITestInMemory")
@@ -51,7 +53,7 @@ final class AppServices {
         StarterBookmarks.install(in: context, inMemory: inMemory)
         history = BrowserHistoryStore(context: context)
         // Created once: an isolated test suite is cleared each time it is requested.
-        let preferences = LaunchOptions.preferences(isolated: inMemory)
+        preferences = LaunchOptions.preferences(isolated: inMemory)
         labels = LabelStore(context: context, preferences: preferences)
         labels.backfillSiteLabelsIfNeeded()
         downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)

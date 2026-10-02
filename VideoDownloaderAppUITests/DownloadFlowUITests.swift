@@ -55,6 +55,31 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: timeout), .completed, message())
     }
 
+    private func openPage(_ path: String) {
+        app.tabBars.buttons["Browse"].tap()
+        let address = app.textFields["browser.address"]
+        app.buttons["Clear address"].tap()
+        address.tap()
+        address.typeText(server.url(path).absoluteString + "\n")
+    }
+
+    /// Two 5-second videos: "Basic Video Page", then "Captioned Video Page". Ends in My Videos.
+    private func downloadBasicAndCaptioned() {
+        launch(at: "/page/basic.html")
+        downloadFirstCandidate()
+        openPage("/page/captions.html")
+        downloadFirstCandidate()
+        app.tabBars.buttons["My Videos"].tap()
+        let items = app.buttons.matching(identifier: "library.item")
+        wait(for: items.element(boundBy: 1), "exists == true", timeout: 5, "both videos are listed")
+    }
+
+    private var libraryTitles: [String] {
+        app.buttons.matching(identifier: "library.item").allElementsBoundByIndex.map { item in
+            ["Basic Video Page", "Captioned Video Page"].first { item.label.contains($0) } ?? item.label
+        }
+    }
+
     /// AVKit toggles its controls on a tap, so tap until they are showing.
     private func revealPlayerControls() {
         let close = app.buttons["Close"]
@@ -340,6 +365,40 @@ final class DownloadFlowUITests: XCTestCase {
         app.buttons["Done"].tap()
         wait(for: item, "NOT (label CONTAINS 'Favourites')", timeout: 5, item.label)
         XCTAssertTrue(item.label.contains("Basic Video Page"), "deleting a label keeps its videos")
+    }
+
+    func testSortAndFilter() throws {
+        downloadBasicAndCaptioned()
+        XCTAssertEqual(libraryTitles, ["Captioned Video Page", "Basic Video Page"], "newest first")
+        let menu = app.buttons["library.sortFilter"]
+        menu.tap()
+        app.buttons["Oldest Downloads"].tap()
+        wait(for: app.buttons["library.item"].firstMatch, "label CONTAINS 'Basic Video Page'", timeout: 5, libraryTitles.joined(separator: ", "))
+
+        // Watched filter, shown as a removable chip.
+        app.buttons.matching(identifier: "library.moreOptions").element(boundBy: 0).tap()
+        app.buttons["Mark as Watched"].tap()
+        menu.tap()
+        app.buttons["Unwatched"].tap()
+        let chip = app.buttons["Remove filter: Unwatched"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        XCTAssertEqual(libraryTitles, ["Captioned Video Page"])
+        chip.tap()
+        wait(for: app.buttons.matching(identifier: "library.item").element(boundBy: 1), "exists == true", timeout: 5, "both listed again")
+
+        // A label filter.
+        app.buttons.matching(identifier: "library.moreOptions").element(boundBy: 1).tap()
+        app.buttons["Labels"].tap()
+        app.buttons["New Label…"].tap()
+        app.alerts["New Label"].textFields.firstMatch.typeText("Keep")
+        app.alerts["New Label"].buttons["Add"].tap()
+        menu.tap()
+        app.buttons["Keep"].tap()
+        XCTAssertTrue(app.buttons["Remove filter: Keep"].waitForExistence(timeout: 5))
+        XCTAssertEqual(libraryTitles, ["Captioned Video Page"])
+        menu.tap()
+        app.buttons["Clear Filters"].tap()
+        wait(for: app.buttons.matching(identifier: "library.item").element(boundBy: 1), "exists == true", timeout: 5, "filters cleared")
     }
 
     func testResumeSeekAndContinueWatching() throws {

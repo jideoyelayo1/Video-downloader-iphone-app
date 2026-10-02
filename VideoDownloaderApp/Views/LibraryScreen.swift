@@ -25,13 +25,25 @@ struct LibraryScreen: View {
     @State private var showingManageLabels = false
     @State private var labelingItem: DownloadItem?
     @State private var newLabelName = ""
+    @AppStorage("librarySort", store: AppServices.shared.preferences) private var sortRaw = LibraryQuery.Sort.newest.rawValue
+    @AppStorage("libraryStatus", store: AppServices.shared.preferences) private var statusRaw = LibraryQuery.Status.all.rawValue
+    @AppStorage("libraryLabels", store: AppServices.shared.preferences) private var labelFilterRaw = ""
 
-    private var displayed: [DownloadItem] {
-        completed.filter { item in
-            !item.isStreamFragment &&
-            (selectedFolderID == nil || item.folderID == selectedFolderID) &&
-            (searchText.isEmpty || item.title.localizedStandardContains(searchText))
-        }
+    private var query: LibraryQuery {
+        // Labels deleted since they were chosen drop out of the filter.
+        let existing = Set(allLabels.map(\.id))
+        return LibraryQuery(sort: LibraryQuery.Sort(rawValue: sortRaw) ?? .newest,
+                            status: LibraryQuery.Status(rawValue: statusRaw) ?? .all,
+                            labelIDs: labelFilter.intersection(existing),
+                            folderID: selectedFolderID, searchText: searchText)
+    }
+
+    private var labelFilter: Set<UUID> { Set(labelFilterRaw.split(separator: ",").compactMap { UUID(uuidString: String($0)) }) }
+
+    private func setLabelFilter(_ id: UUID, _ on: Bool) {
+        var ids = labelFilter
+        if on { ids.insert(id) } else { ids.remove(id) }
+        labelFilterRaw = ids.map(\.uuidString).sorted().joined(separator: ",")
     }
 
     private var playableCompletedCount: Int { completed.filter { !$0.isStreamFragment }.count }
@@ -43,13 +55,15 @@ struct LibraryScreen: View {
 
     var body: some View {
         // Each list is filtered once per render instead of once per use.
-        let displayed = displayed
+        let query = query
+        let displayed = query.apply(to: completed)
         let continueWatching = continueWatching
         let labelsByID = Dictionary(allLabels.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         NavigationStack {
             List {
                 expiryWarning
-                if selectedFolderID == nil && searchText.isEmpty && !continueWatching.isEmpty {
+                if query.isFiltering || selectedFolderID != nil { filterChips(query) }
+                if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering && !continueWatching.isEmpty {
                     continueWatchingSection(continueWatching)
                 }
                 if displayed.isEmpty { emptyState }
@@ -61,6 +75,7 @@ struct LibraryScreen: View {
                 if let selectedFolderID, !ids.contains(selectedFolderID) { self.selectedFolderID = nil }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { sortAndFilterMenu(query) }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("All Videos") { selectedFolderID = nil }
@@ -157,7 +172,7 @@ struct LibraryScreen: View {
     private var emptyState: some View {
         VStack(spacing: 14) {
             ContentUnavailableView(playableCompletedCount == 0 ? "Your library is empty" : "No matching videos", systemImage: "play.rectangle",
-                                   description: Text(playableCompletedCount == 0 ? "Completed downloads play here, even offline." : "Try another search or folder."))
+                                   description: Text(playableCompletedCount == 0 ? "Completed downloads play here, even offline." : "Try another search, filter or folder."))
             if playableCompletedCount == 0 {
                 Button { showBrowse() } label: { Label("Find a video", systemImage: "safari") }
                     .buttonStyle(.borderedProminent)
@@ -196,6 +211,66 @@ struct LibraryScreen: View {
                 }
             }
         }
+    }
+
+    private func sortAndFilterMenu(_ query: LibraryQuery) -> some View {
+        Menu {
+            Section("Sort By") {
+                ForEach(LibraryQuery.Sort.allCases) { sort in
+                    Button { sortRaw = sort.rawValue } label: { checkmarked(sort.name, query.sort == sort) }
+                }
+            }
+            Section("Show") {
+                ForEach(LibraryQuery.Status.allCases) { status in
+                    Button { statusRaw = status.rawValue } label: { checkmarked(status.name, query.status == status) }
+                }
+            }
+            if !allLabels.isEmpty {
+                Section("Labels") {
+                    ForEach(allLabels) { label in
+                        let on = query.labelIDs.contains(label.id)
+                        Button { setLabelFilter(label.id, !on) } label: { checkmarked(label.name, on) }
+                    }
+                }
+            }
+            if query.isFiltering {
+                Button("Clear Filters", systemImage: "xmark.circle", role: .destructive, action: clearFilters)
+            }
+        } label: {
+            Label("Sort & Filter", systemImage: query.isFiltering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        }
+        .accessibilityIdentifier("library.sortFilter")
+    }
+
+    @ViewBuilder private func checkmarked(_ title: String, _ on: Bool) -> some View {
+        if on { Label(title, systemImage: "checkmark") } else { Text(title) }
+    }
+
+    /// What is narrowing the list, each removable on its own.
+    private func filterChips(_ query: LibraryQuery) -> some View {
+        Section {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    if let folderID = query.folderID, let folder = folders.first(where: { $0.id == folderID }) {
+                        FilterChip(title: folder.title, systemImage: "folder", color: .cyan) { selectedFolderID = nil }
+                    }
+                    if query.status != .all {
+                        FilterChip(title: query.status.name, systemImage: "eye", color: .cyan) { statusRaw = LibraryQuery.Status.all.rawValue }
+                    }
+                    ForEach(allLabels.filter { query.labelIDs.contains($0.id) }) { label in
+                        FilterChip(title: label.name, systemImage: "tag", color: label.color) { setLabelFilter(label.id, false) }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+    }
+
+    private func clearFilters() {
+        statusRaw = LibraryQuery.Status.all.rawValue
+        labelFilterRaw = ""
     }
 
     @ViewBuilder private func actions(for item: DownloadItem) -> some View {
@@ -278,6 +353,29 @@ private struct ManageFoldersSheet: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }
         }
+    }
+}
+
+private struct FilterChip: View {
+    let title: String
+    let systemImage: String
+    let color: Color
+    let remove: () -> Void
+
+    var body: some View {
+        Button(action: remove) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage).font(.caption2)
+                Text(title).font(.subheadline.weight(.medium)).lineLimit(1)
+                Image(systemName: "xmark").font(.caption2.bold())
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .foregroundStyle(color)
+            .background(color.opacity(0.16), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Remove filter: \(title)")
     }
 }
 
