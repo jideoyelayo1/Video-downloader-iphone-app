@@ -8,10 +8,12 @@ struct LibraryScreen: View {
     @EnvironmentObject private var downloads: DownloadManager
     @EnvironmentObject private var playback: PlaybackCoordinator
     @EnvironmentObject private var labelStore: LabelStore
+    @EnvironmentObject private var showStore: ShowStore
     @Query(filter: #Predicate<DownloadItem> { $0.statusRaw == "completed" }, sort: \DownloadItem.completedAt, order: .reverse)
     private var completed: [DownloadItem]
     @Query(sort: \DownloadFolder.title) private var folders: [DownloadFolder]
     @Query(sort: \VideoLabel.name) private var allLabels: [VideoLabel]
+    @Query(sort: \Show.title) private var shows: [Show]
     @Environment(\.modelContext) private var modelContext
     @State private var pendingPlayback: DownloadItem?
     @State private var renaming: DownloadItem?
@@ -25,6 +27,7 @@ struct LibraryScreen: View {
     @State private var showingManageLabels = false
     @State private var labelingItem: DownloadItem?
     @State private var newLabelName = ""
+    @State private var newShowSeed: NewShowSeed?
     @AppStorage("librarySort", store: AppServices.shared.preferences) private var sortRaw = LibraryQuery.Sort.newest.rawValue
     @AppStorage("libraryStatus", store: AppServices.shared.preferences) private var statusRaw = LibraryQuery.Status.all.rawValue
     @AppStorage("libraryLabels", store: AppServices.shared.preferences) private var labelFilterRaw = ""
@@ -66,6 +69,7 @@ struct LibraryScreen: View {
                 if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering && !continueWatching.isEmpty {
                     continueWatchingSection(continueWatching)
                 }
+                if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering { showsSection }
                 if displayed.isEmpty { emptyState }
                 allVideosSection(displayed, labelsByID: labelsByID)
             }
@@ -92,6 +96,7 @@ struct LibraryScreen: View {
             }
             .sheet(isPresented: $showingManageFolders) { ManageFoldersSheet() }
             .sheet(isPresented: $showingManageLabels) { ManageLabelsSheet() }
+            .sheet(item: $newShowSeed) { NewShowSheet(seed: $0) }
             .alert("New Label", isPresented: Binding(get: { labelingItem != nil }, set: { if !$0 { labelingItem = nil } })) {
                 TextField("Label name", text: $newLabelName)
                 Button("Add") {
@@ -166,6 +171,34 @@ struct LibraryScreen: View {
                 }
                 .padding(.vertical, 4)
             }
+        }
+    }
+
+    /// Suggested shows to confirm, then the viewer's shows.
+    @ViewBuilder private var showsSection: some View {
+        let suggestions = ShowSuggestion.suggestions(items: completed, shows: shows, dismissed: showStore.dismissed)
+        if !shows.isEmpty || !suggestions.isEmpty {
+            Section("Shows") {
+                ForEach(suggestions) { suggestion in
+                    ShowSuggestionRow(suggestion: suggestion, accept: { accept(suggestion) }, dismiss: { showStore.dismissSuggestion(suggestion) })
+                }
+                ForEach(shows) { show in
+                    NavigationLink { ShowScreen(show: show) } label: {
+                        ShowRow(show: show, episodes: ShowPlaylist.episodes(of: show.id, in: completed)) { item in
+                            start(item, at: item.isWatched ? 0 : item.playbackPosition ?? 0)
+                        }
+                    }
+                    .accessibilityIdentifier("library.show")
+                }
+            }
+        }
+    }
+
+    private func accept(_ suggestion: ShowSuggestion.Suggestion) {
+        if let show = suggestion.existingShow {
+            showStore.add(suggestion.items, to: show)
+        } else {
+            newShowSeed = NewShowSeed(title: suggestion.series, selected: Set(suggestion.items.map(\.id)))
         }
     }
 
@@ -287,6 +320,16 @@ struct LibraryScreen: View {
             Divider()
             Button("New Label…", systemImage: "plus") { newLabelName = ""; labelingItem = item }
         } label: { Label("Labels", systemImage: "tag") }
+        Menu {
+            ForEach(shows.filter { $0.id != item.showID }) { show in
+                Button(show.title) { showStore.add([item], to: show) }
+            }
+            if !shows.isEmpty { Divider() }
+            Button("New Show…", systemImage: "plus") { newShowSeed = .around(item, in: completed) }
+        } label: { Label(item.showID == nil ? "Add to Show" : "Move to Show", systemImage: "rectangle.stack.badge.plus") }
+        if item.showID != nil {
+            Button { showStore.remove(item) } label: { Label("Remove from Show", systemImage: "rectangle.stack.badge.minus") }
+        }
         Menu {
             Button("No Folder") { item.folderID = nil; try? modelContext.save() }
             ForEach(folders) { folder in
@@ -423,7 +466,7 @@ private struct LibraryRow: View {
     private var fileExists: Bool { item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
 }
 
-private struct VideoThumbnailView: View {
+struct VideoThumbnailView: View {
     let item: DownloadItem
     var width: CGFloat = 72
     var height: CGFloat = 48

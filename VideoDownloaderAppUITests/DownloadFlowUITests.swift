@@ -80,6 +80,32 @@ final class DownloadFlowUITests: XCTestCase {
         }
     }
 
+    private func renameVideo(at index: Int, to title: String) {
+        app.buttons.matching(identifier: "library.moreOptions").element(boundBy: index).tap()
+        app.buttons["Rename"].firstMatch.tap()
+        let field = app.alerts.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        replaceText(in: field, with: title)
+        app.alerts.buttons["Save"].tap()
+        wait(for: app.buttons.matching(identifier: "library.item").element(boundBy: index), "label CONTAINS %@".replacingOccurrences(of: "%@", with: "'\(title)'"),
+             timeout: 5, "renamed to \(title)")
+    }
+
+    /// The two 5-second videos as episodes 1 and 2 of "Fixture Show", made into a show from its suggestion.
+    private func makeTwoEpisodeShow() {
+        downloadBasicAndCaptioned()
+        renameVideo(at: 1, to: "Fixture Show Ep. 1")
+        renameVideo(at: 0, to: "Fixture Show Ep. 2")
+        let create = app.buttons["Create Show"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5), "two episodes of one series are suggested as a show")
+        create.tap()
+        let name = app.textFields["newShow.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, "Fixture Show")
+        app.navigationBars.buttons["Create"].tap()
+        XCTAssertTrue(app.buttons["library.show"].firstMatch.waitForExistence(timeout: 5))
+    }
+
     /// AVKit toggles its controls on a tap, so tap until they are showing.
     private func revealPlayerControls() {
         let close = app.buttons["Close"]
@@ -399,6 +425,31 @@ final class DownloadFlowUITests: XCTestCase {
         menu.tap()
         app.buttons["Clear Filters"].tap()
         wait(for: app.buttons.matching(identifier: "library.item").element(boundBy: 1), "exists == true", timeout: 5, "filters cleared")
+    }
+
+    func testShowFromSuggestionKeepsTheViewersOrder() throws {
+        makeTwoEpisodeShow()
+        let show = app.buttons["library.show"].firstMatch
+        XCTAssertTrue(show.label.contains("Fixture Show") && show.label.contains("0 of 2 watched"), show.label)
+        XCTAssertFalse(app.buttons["Create Show"].exists, "the suggestion is gone once the show exists")
+        show.tap()
+
+        let episodes = app.buttons.matching(identifier: "show.episode")
+        wait(for: episodes.element(boundBy: 1), "exists == true", timeout: 5, "both episodes listed")
+        XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 1"), episodes.element(boundBy: 0).label)
+        XCTAssertTrue(app.buttons["show.playNext"].label.contains("Play Ep. 1"), app.buttons["show.playNext"].label)
+
+        // Drag episode 2 above episode 1.
+        app.buttons["Edit"].tap()
+        let handles = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reorder'"))
+        wait(for: handles.element(boundBy: 1), "exists == true", timeout: 5, "reorder handles")
+        handles.element(boundBy: 1).press(forDuration: 0.6, thenDragTo: handles.element(boundBy: 0))
+        app.buttons["Done"].tap()
+        wait(for: episodes.element(boundBy: 0), "label CONTAINS 'Ep. 2'", timeout: 5, episodes.element(boundBy: 0).label)
+
+        app.buttons["show.options"].tap()
+        app.buttons["Order by Episode Number"].tap()
+        wait(for: episodes.element(boundBy: 0), "label CONTAINS 'Ep. 1'", timeout: 5, episodes.element(boundBy: 0).label)
     }
 
     func testResumeSeekAndContinueWatching() throws {

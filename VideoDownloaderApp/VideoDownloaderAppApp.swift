@@ -15,6 +15,7 @@ struct VideoDownloaderAppApp: App {
                 .environmentObject(services.diagnostics)
                 .environmentObject(services.playback)
                 .environmentObject(services.labels)
+                .environmentObject(services.shows)
         }
         .modelContainer(services.container)
     }
@@ -38,6 +39,7 @@ final class AppServices {
     let playback: PlaybackCoordinator
     let history: BrowserHistoryStore
     let labels: LabelStore
+    let shows: ShowStore
     /// App settings; a fresh, separate store when UI tests run with an in-memory library.
     let preferences: UserDefaults
 
@@ -56,6 +58,7 @@ final class AppServices {
         preferences = LaunchOptions.preferences(isolated: inMemory)
         labels = LabelStore(context: context, preferences: preferences)
         labels.backfillSiteLabelsIfNeeded()
+        shows = ShowStore(context: context, preferences: preferences)
         downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)
         downloads.labelStore = labels
         playback = PlaybackCoordinator(context: context, diagnostics: diagnostics, preferences: preferences)
