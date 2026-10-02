@@ -30,9 +30,10 @@ struct LibraryScreen: View {
     }
 
     private var playableCompletedCount: Int { completed.filter { !$0.isStreamFragment }.count }
+    /// Started but not finished, most recently played first.
     private var continueWatching: [DownloadItem] {
-        completed.filter { !$0.isStreamFragment && ($0.playbackPosition ?? 0) > 10 }
-            .sorted { ($0.playbackPosition ?? 0) > ($1.playbackPosition ?? 0) }
+        completed.filter { !$0.isStreamFragment && !$0.isWatched && ($0.playbackPosition ?? 0) > 10 }
+            .sorted { ($0.lastPlayedAt ?? .distantPast, $0.playbackPosition ?? 0) > ($1.lastPlayedAt ?? .distantPast, $1.playbackPosition ?? 0) }
     }
 
     var body: some View {
@@ -68,6 +69,7 @@ struct LibraryScreen: View {
                                         .buttonStyle(.plain)
                                         HStack(alignment: .top, spacing: 4) {
                                             Text(item.title).font(.subheadline.bold()).lineLimit(2)
+                                                .truncationMode(.middle)
                                                 .foregroundStyle(.primary)
                                             Spacer(minLength: 0)
                                             Menu { actions(for: item) } label: {
@@ -114,6 +116,12 @@ struct LibraryScreen: View {
                             .accessibilityIdentifier("library.moreOptions")
                         }
                         .contextMenu { actions(for: item) }
+                        .swipeActions(edge: .leading) {
+                            Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
+                                setWatched(item, !item.isWatched)
+                            }
+                            .tint(.green)
+                        }
                         .swipeActions(edge: .trailing) {
                             Button("Delete", role: .destructive) { downloads.delete(item) }
                             Button("Rename") { beginRename(item) }.tint(.blue)
@@ -159,6 +167,9 @@ struct LibraryScreen: View {
     }
 
     @ViewBuilder private func actions(for item: DownloadItem) -> some View {
+        Button { setWatched(item, !item.isWatched) } label: {
+            Label(item.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle")
+        }
         Button { beginRename(item) } label: { Label("Rename", systemImage: "pencil") }
         Menu {
             Button("No Folder") { item.folderID = nil; try? modelContext.save() }
@@ -170,6 +181,11 @@ struct LibraryScreen: View {
             ShareLink(item: url, preview: SharePreview(item.title)) { Label("Export", systemImage: "square.and.arrow.up") }
         }
         Button(role: .destructive) { downloads.delete(item) } label: { Label("Delete", systemImage: "trash") }
+    }
+
+    private func setWatched(_ item: DownloadItem, _ watched: Bool) {
+        item.setWatched(watched)
+        try? modelContext.save()
     }
 
     private func beginRename(_ item: DownloadItem) {
@@ -233,7 +249,8 @@ private struct LibraryRow: View {
         HStack(spacing: 12) {
             VideoThumbnailView(item: item, width: 112, height: 72)
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
+                // Middle truncation keeps the episode number at the end of long series titles visible.
+                Text(item.title).font(.headline).foregroundStyle(.primary).lineLimit(2).truncationMode(.middle)
                 // Date and size on their own lines: together they always wrap mid-way at this width.
                 Text(item.downloadedText).font(.caption).foregroundStyle(.secondary)
                 if !fileExists {
@@ -241,10 +258,13 @@ private struct LibraryRow: View {
                 } else if let size = item.fileSize {
                     Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)).font(.caption).foregroundStyle(.secondary)
                 }
-                if (item.playbackPosition ?? 0) > 10 {
+                if item.isWatched {
+                    Label("Watched", systemImage: "checkmark.circle.fill")
+                        .font(.caption2).foregroundStyle(.green)
+                } else if (item.playbackPosition ?? 0) > 10 {
                     Label("Continue watching", systemImage: "play.circle.fill")
                         .font(.caption2).foregroundStyle(.tint)
-                    if let duration, duration > 0 {
+                    if let duration = item.duration ?? duration, duration > 0 {
                         ProgressView(value: min((item.playbackPosition ?? 0) / duration, 1))
                             .tint(.cyan)
                             .accessibilityLabel("Playback progress")
@@ -253,7 +273,8 @@ private struct LibraryRow: View {
             }
         }
         .task(id: item.localFileName) {
-            guard let url = item.localURL, let fileName = item.localFileName, (item.playbackPosition ?? 0) > 10 else { return }
+            // Videos played before durations were recorded measure the file instead.
+            guard item.duration == nil, let url = item.localURL, let fileName = item.localFileName, (item.playbackPosition ?? 0) > 10 else { return }
             duration = await ThumbnailCache.shared.duration(of: url, fileName: fileName)
         }
     }
@@ -278,6 +299,15 @@ private struct VideoThumbnailView: View {
         .frame(width: width, height: height)
         .clipped()
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .topTrailing) {
+            if item.isWatched {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.white, .green)
+                    .padding(4)
+                    .accessibilityHidden(true)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: item.localFileName) {
             // The body falls back to the in-memory cache, so clearing this doesn't flash a placeholder.

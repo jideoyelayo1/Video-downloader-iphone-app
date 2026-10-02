@@ -222,4 +222,41 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertNil(reopened.currentMediaSelection.selectedMediaOption(in: group), "no track at all, as the viewer left it")
         coordinator.close()
     }
+
+    private func makeCoordinator() -> PlaybackCoordinator {
+        let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
+        let preferences = UserDefaults(suiteName: "PlaybackCoordinatorTests-\(UUID().uuidString)")!
+        return PlaybackCoordinator(context: container.mainContext, diagnostics: log, preferences: preferences, presentsPlayer: false)
+    }
+
+    func testPlayingToTheEndMarksTheVideoWatched() async throws {
+        let coordinator = makeCoordinator()
+        let item = makeItem(in: container.mainContext)
+        coordinator.open(item, at: 0)
+        XCTAssertNotNil(item.lastPlayedAt)
+        try await waitUntil("player ready") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        XCTAssertEqual(try XCTUnwrap(item.duration), 5, accuracy: 0.5, "the length is recorded for progress and the 90% rule")
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: coordinator.controller.player?.currentItem)
+        try await waitUntil("watched") { item.isWatched }
+        XCTAssertEqual(item.playbackPosition, 0)
+        coordinator.close()
+        XCTAssertTrue(item.isWatched)
+    }
+
+    /// Closing during the credits (the last 10%) counts as watched; closing halfway keeps the resume point.
+    func testClosingInTheLastTenPercentMarksTheVideoWatched() async throws {
+        let coordinator = makeCoordinator()
+        let item = makeItem(in: container.mainContext)
+        for (position, watched) in [(2.5, false), (4.7, true)] {
+            item.setWatched(false)
+            coordinator.open(item, at: 0)
+            try await waitUntil("player ready") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+            let player = try XCTUnwrap(coordinator.controller.player)
+            player.pause()
+            await player.seek(to: CMTime(seconds: position, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            coordinator.close()
+            XCTAssertEqual(item.isWatched, watched, "closed at \(position) s of 5 s")
+            if !watched { XCTAssertEqual(try XCTUnwrap(item.playbackPosition), position, accuracy: 0.2) }
+        }
+    }
 }

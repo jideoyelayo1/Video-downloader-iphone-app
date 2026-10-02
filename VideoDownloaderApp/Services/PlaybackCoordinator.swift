@@ -98,6 +98,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             return
         }
         isLoading = true
+        newItem.lastPlayedAt = Date()
+        try? context.save()
         presentPlayer()
         Task {
             let asset = AVURLAsset(url: url)
@@ -105,6 +107,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
                 showFailure("This saved video cannot be played on iPhone. Choose another source in Browse.", token: token)
                 return
             }
+            if let duration = try? await asset.load(.duration).seconds, duration.isFinite, duration > 0 { newItem.duration = duration }
             if newItem.kind == .hls, await HLSMediaSelections.isOfflineAudioMissing(in: asset) {
                 showFailure("This saved stream has no offline audio track. Download it again from the master playlist.", token: token)
                 return
@@ -439,7 +442,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     func close(releasingAudioSession: Bool = true) {
         let wasInPiP = isInPiP
         loadID = UUID()
-        savePosition()
+        savePosition(closing: true)
         if let timeObserver, let player = controller.player { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
         if let subtitleObserver, let player = controller.player { player.removeTimeObserver(subtitleObserver) }
@@ -495,18 +498,23 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
     }
 
-    private func savePosition() {
+    /// Closing in the last 10% (usually the credits) counts as watching to the end.
+    private func savePosition(closing: Bool = false) {
         guard !playbackEnded, let item,
               let seconds = controller.player?.currentTime().seconds,
               seconds.isFinite, seconds > 0 else { return }
-        item.playbackPosition = seconds
+        if closing, WatchProgress.isFinished(position: seconds, duration: item.duration ?? controller.player?.currentItem?.duration.seconds) {
+            item.setWatched(true)
+        } else {
+            item.playbackPosition = seconds
+        }
         try? context.save()
     }
 
     private func didFinishPlayback(_ notification: Notification) {
         guard let current = controller.player?.currentItem, notification.object as? AVPlayerItem === current else { return }
         playbackEnded = true
-        item?.playbackPosition = 0
+        item?.setWatched(true)
         try? context.save()
     }
 

@@ -289,6 +289,30 @@ final class DownloadFlowUITests: XCTestCase {
     }
 
     /// A 60-second video with one subtitle line per 10 s, so the line shown tells where playback is.
+    func testWatchedAtTheEndAndByHand() throws {
+        launch(at: "/page/basic.html")
+        downloadFirstCandidate()
+        app.tabBars.buttons["My Videos"].tap()
+        let item = app.buttons["library.item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        XCTAssertFalse(item.label.contains("Watched"), item.label)
+
+        // The 5-second video plays to the end.
+        item.tap()
+        XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
+        sleep(7)
+        closePlayer()
+        wait(for: item, "label CONTAINS 'Watched'", timeout: 5, item.label)
+
+        app.buttons["library.moreOptions"].firstMatch.tap()
+        app.buttons["Mark as Unwatched"].tap()
+        wait(for: item, "NOT (label CONTAINS 'Watched')", timeout: 5, item.label)
+
+        item.swipeRight()
+        app.buttons["Watched"].tap()
+        wait(for: item, "label CONTAINS 'Watched'", timeout: 5, item.label)
+    }
+
     func testResumeSeekAndContinueWatching() throws {
         launch(at: "/page/long.html")
         downloadFirstCandidate()
