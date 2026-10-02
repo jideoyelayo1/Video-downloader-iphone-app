@@ -13,7 +13,7 @@ final class DownloadIntegrationTests: XCTestCase {
     override func setUp() async throws {
         server = try LocalMediaServer()
         try server.start()
-        container = try ModelContainer(for: DownloadItem.self, Bookmark.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = try LibrarySchema.container(inMemory: true)
         manager = DownloadManager(context: container.mainContext, directConfiguration: .ephemeral, restore: false)
         requestContext = nil
         manager.requestContextProvider = { [weak self] _, _ in self?.requestContext }

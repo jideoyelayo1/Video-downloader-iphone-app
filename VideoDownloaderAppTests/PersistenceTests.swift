@@ -5,8 +5,7 @@ import XCTest
 @MainActor
 final class PersistenceTests: XCTestCase {
     private func makeContainer() throws -> ModelContainer {
-        try ModelContainer(for: DownloadItem.self, Bookmark.self, DownloadFolder.self,
-                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        try LibrarySchema.container(inMemory: true)
     }
 
     func testDownloadItemRoundTrip() throws {
@@ -29,6 +28,39 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(fetched.requiresReferer)
         XCTAssertEqual(fetched.refererURL?.absoluteString, "https://player.example/")
         XCTAssertEqual(fetched.localURL, DownloadStorage.containerRoot.appendingPathComponent("Library/com.apple.UserManagedAssets.X/Episode_1.movpkg"))
+    }
+
+    func testWatchedLabelsAndShowsPersist() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let label = VideoLabel(name: "***REMOVED***", colorName: "purple", sites: ["***REMOVED***.to"], isSiteLabel: true)
+        let show = Show(title: "***REMOVED***")
+        let item = DownloadItem(title: "***REMOVED*** Ep. 2 · ***REMOVED***", remoteURL: URL(string: "https://cdn.example/2.mp4")!,
+                                sourcePageURL: URL(string: "https://***REMOVED***.to/anime/x/p-2-dub")!, kind: .video)
+        let watched = Date(timeIntervalSince1970: 1_790_000_000)
+        item.watchedAt = watched
+        item.lastPlayedAt = watched
+        item.duration = 1_420
+        item.labelIDs = [label.id]
+        item.showID = show.id
+        item.showOrder = 1
+        context.insert(label)
+        context.insert(show)
+        context.insert(item)
+        try context.save()
+
+        let fresh = ModelContext(container)
+        let fetched = try XCTUnwrap(fresh.fetch(FetchDescriptor<DownloadItem>()).first)
+        XCTAssertTrue(fetched.isWatched)
+        XCTAssertEqual(fetched.watchedAt, watched)
+        XCTAssertEqual(fetched.duration, 1_420)
+        XCTAssertEqual(fetched.labelIDs, [label.id])
+        XCTAssertEqual(fetched.showID, show.id)
+        XCTAssertEqual(fetched.showOrder, 1)
+        let fetchedLabel = try XCTUnwrap(fresh.fetch(FetchDescriptor<VideoLabel>()).first)
+        XCTAssertEqual(fetchedLabel.sites, ["***REMOVED***.to"])
+        XCTAssertEqual(fetchedLabel.isSiteLabel, true)
+        XCTAssertTrue(try XCTUnwrap(fresh.fetch(FetchDescriptor<Show>()).first).autoplayNext, "autoplay is on for new shows")
     }
 
     func testManagedPathIsRelativeToContainer() {

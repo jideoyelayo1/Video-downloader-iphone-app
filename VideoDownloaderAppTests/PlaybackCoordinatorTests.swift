@@ -10,8 +10,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
     private var container: ModelContainer!
 
     override func setUp() async throws {
-        container = try ModelContainer(for: DownloadItem.self, Bookmark.self, DownloadFolder.self, BrowsingHistoryEntry.self,
-                                       configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        container = try LibrarySchema.container(inMemory: true)
         fileName = "playback-test-\(UUID().uuidString).mp4"
         let source = try XCTUnwrap(FixtureSet.resourceURL(named: "fixture_captions.mp4", in: Bundle(for: LocalMediaServer.self)))
         try FileManager.default.copyItem(at: source, to: DownloadStorage.libraryDirectory.appendingPathComponent(fileName))

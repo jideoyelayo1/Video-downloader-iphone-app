@@ -40,8 +40,7 @@ final class AppServices {
     private init() {
         let inMemory = LaunchOptions.isRunningUnitTests || LaunchOptions.flag("-UITestInMemory")
         do {
-            container = try ModelContainer(for: DownloadItem.self, Bookmark.self, DownloadFolder.self, BrowsingHistoryEntry.self,
-                                           configurations: ModelConfiguration(isStoredInMemoryOnly: inMemory))
+            container = try LibrarySchema.container(inMemory: inMemory)
         } catch {
             fatalError("Unable to open the download library: \(error)")
         }

@@ -65,6 +65,16 @@ enum DownloadStorage {
     }
 }
 
+/// Every model the library stores; the app and tests open the same schema.
+enum LibrarySchema {
+    static let models: [any PersistentModel.Type] = [DownloadItem.self, Bookmark.self, DownloadFolder.self, BrowsingHistoryEntry.self,
+                                                     VideoLabel.self, Show.self]
+
+    static func container(inMemory: Bool) throws -> ModelContainer {
+        try ModelContainer(for: Schema(models), configurations: ModelConfiguration(isStoredInMemoryOnly: inMemory))
+    }
+}
+
 enum DownloadStatus: String, Codable {
     case queued
     case downloading
@@ -97,6 +107,17 @@ final class DownloadItem {
     var preferredBitrate: Int?
     /// Relay HLS requests through the app when the host requires a Referer.
     var requiresRefererRaw: Bool?
+    /// When the video was finished; nil while unwatched.
+    var watchedAt: Date?
+    /// When the video was last opened, for Continue Watching and the Recently Watched sort.
+    var lastPlayedAt: Date?
+    /// Length in seconds, recorded when the video is played.
+    var duration: Double?
+    /// Library labels. Kept as IDs, like `folderID`, so deleting a label never deletes media.
+    var labelIDs: [UUID]?
+    /// The show this video is an episode of, and its place in the show's watch order.
+    var showID: UUID?
+    var showOrder: Int?
 
     init(id: UUID = UUID(), title: String, remoteURL: URL, sourcePageURL: URL, refererURL: URL? = nil, kind: MediaKind,
          status: DownloadStatus = .queued, createdAt: Date = Date(), preferredBitrate: Int? = nil, requiresReferer: Bool = false) {
@@ -132,6 +153,8 @@ final class DownloadItem {
         set { requiresRefererRaw = newValue }
     }
 
+    var isWatched: Bool { watchedAt != nil }
+
     /// When the download finished, such as "today at 21:40" or "26 Sep 2026 at 09:05", in the
     /// viewer's language and clock style. Downloads saved before this was recorded fall back to
     /// when they were added.
@@ -163,6 +186,50 @@ final class DownloadFolder {
         self.id = id
         self.title = title
         self.createdAt = createdAt
+    }
+}
+
+/// A user's label for videos. Labels with `sites` are added automatically to downloads from
+/// those sites; site labels ("***REMOVED***") are created for each site the first time it is used.
+@Model
+final class VideoLabel {
+    @Attribute(.unique) var id: UUID
+    var name: String
+    var colorName: String
+    /// Hosts such as "***REMOVED***.to"; subdomains match too.
+    var sites: [String]?
+    /// Created automatically for the site it is named after.
+    var isSiteLabel: Bool?
+    var createdAt: Date
+
+    init(id: UUID = UUID(), name: String, colorName: String = "blue", sites: [String] = [], isSiteLabel: Bool = false, createdAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.colorName = colorName
+        self.sites = sites
+        self.isSiteLabel = isSiteLabel
+        self.createdAt = createdAt
+    }
+}
+
+/// Episodes in the viewer's watch order (`DownloadItem.showOrder`), optionally playing on one after another.
+@Model
+final class Show {
+    @Attribute(.unique) var id: UUID
+    var title: String
+    var autoplayNextRaw: Bool?
+    var createdAt: Date
+
+    init(id: UUID = UUID(), title: String, autoplayNext: Bool = true, createdAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.autoplayNextRaw = autoplayNext
+        self.createdAt = createdAt
+    }
+
+    var autoplayNext: Bool {
+        get { autoplayNextRaw ?? true }
+        set { autoplayNextRaw = newValue }
     }
 }
 
