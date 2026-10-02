@@ -16,11 +16,10 @@ struct NewShowSeed: Identifiable {
     }
 }
 
-/// A show in My Videos: the next episode's thumbnail, progress and a Play button.
+/// A show in My Videos: the next episode's thumbnail and progress.
 struct ShowRow: View {
     let show: Show
     let episodes: [DownloadItem]
-    let play: (DownloadItem) -> Void
 
     var body: some View {
         let next = ShowPlaylist.upNext(in: episodes)
@@ -40,14 +39,8 @@ struct ShowRow: View {
                 }
             }
             Spacer(minLength: 0)
-            if let next {
-                Button { play(next) } label: {
-                    Image(systemName: "play.circle.fill").font(.title)
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Play \(show.title)")
-            }
         }
+        .contentShape(Rectangle())
     }
 }
 

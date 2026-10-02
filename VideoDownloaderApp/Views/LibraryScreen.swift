@@ -28,6 +28,7 @@ struct LibraryScreen: View {
     @State private var labelingItem: DownloadItem?
     @State private var newLabelName = ""
     @State private var newShowSeed: NewShowSeed?
+    @State private var openedShow: Show?
     @AppStorage("librarySort", store: AppServices.shared.preferences) private var sortRaw = LibraryQuery.Sort.newest.rawValue
     @AppStorage("libraryStatus", store: AppServices.shared.preferences) private var statusRaw = LibraryQuery.Status.all.rawValue
     @AppStorage("libraryLabels", store: AppServices.shared.preferences) private var labelFilterRaw = ""
@@ -65,13 +66,16 @@ struct LibraryScreen: View {
         NavigationStack {
             List {
                 expiryWarning
-                if query.isFiltering || selectedFolderID != nil { filterChips(query) }
                 if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering && !continueWatching.isEmpty {
                     continueWatchingSection(continueWatching)
                 }
                 if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering { showsSection }
                 if displayed.isEmpty { emptyState }
                 allVideosSection(displayed, labelsByID: labelsByID)
+            }
+            // Outside the list: on iOS 18 a list row swallows taps on buttons in a scroll view.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if query.isFiltering || selectedFolderID != nil { filterChips(query) }
             }
             .navigationTitle("My Videos")
             .searchable(text: $searchText, prompt: "Search videos")
@@ -97,6 +101,7 @@ struct LibraryScreen: View {
             .sheet(isPresented: $showingManageFolders) { ManageFoldersSheet() }
             .sheet(isPresented: $showingManageLabels) { ManageLabelsSheet() }
             .sheet(item: $newShowSeed) { NewShowSheet(seed: $0) }
+            .navigationDestination(item: $openedShow) { ShowScreen(show: $0) }
             .alert("New Label", isPresented: Binding(get: { labelingItem != nil }, set: { if !$0 { labelingItem = nil } })) {
                 TextField("Label name", text: $newLabelName)
                 Button("Add") {
@@ -183,12 +188,22 @@ struct LibraryScreen: View {
                     ShowSuggestionRow(suggestion: suggestion, accept: { accept(suggestion) }, dismiss: { showStore.dismissSuggestion(suggestion) })
                 }
                 ForEach(shows) { show in
-                    NavigationLink { ShowScreen(show: show) } label: {
-                        ShowRow(show: show, episodes: ShowPlaylist.episodes(of: show.id, in: completed)) { item in
-                            start(item, at: item.isWatched ? 0 : item.playbackPosition ?? 0)
+                    let episodes = ShowPlaylist.episodes(of: show.id, in: completed)
+                    // A row button and a separate Play button, like video rows: a button inside a
+                    // navigation link takes the link's taps on iOS 18.
+                    HStack(spacing: 4) {
+                        Button { openedShow = show } label: { ShowRow(show: show, episodes: episodes) }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("library.show")
+                        if let next = ShowPlaylist.upNext(in: episodes) {
+                            Button { start(next, at: next.isWatched ? 0 : next.playbackPosition ?? 0) } label: {
+                                Image(systemName: "play.circle.fill").font(.title).frame(minWidth: 44, minHeight: 44)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Play \(show.title)")
                         }
                     }
-                    .accessibilityIdentifier("library.show")
                 }
             }
         }
@@ -281,24 +296,22 @@ struct LibraryScreen: View {
 
     /// What is narrowing the list, each removable on its own.
     private func filterChips(_ query: LibraryQuery) -> some View {
-        Section {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    if let folderID = query.folderID, let folder = folders.first(where: { $0.id == folderID }) {
-                        FilterChip(title: folder.title, systemImage: "folder", color: .cyan) { selectedFolderID = nil }
-                    }
-                    if query.status != .all {
-                        FilterChip(title: query.status.name, systemImage: "eye", color: .cyan) { statusRaw = LibraryQuery.Status.all.rawValue }
-                    }
-                    ForEach(allLabels.filter { query.labelIDs.contains($0.id) }) { label in
-                        FilterChip(title: label.name, systemImage: "tag", color: label.color) { setLabelFilter(label.id, false) }
-                    }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if let folderID = query.folderID, let folder = folders.first(where: { $0.id == folderID }) {
+                    FilterChip(title: folder.title, systemImage: "folder", color: .cyan) { selectedFolderID = nil }
                 }
-                .padding(.vertical, 2)
+                if query.status != .all {
+                    FilterChip(title: query.status.name, systemImage: "eye", color: .cyan) { statusRaw = LibraryQuery.Status.all.rawValue }
+                }
+                ForEach(allLabels.filter { query.labelIDs.contains($0.id) }) { label in
+                    FilterChip(title: label.name, systemImage: "tag", color: label.color) { setLabelFilter(label.id, false) }
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+        .background(.bar)
     }
 
     private func clearFilters() {

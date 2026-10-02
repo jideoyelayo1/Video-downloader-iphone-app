@@ -112,9 +112,25 @@ final class DownloadFlowUITests: XCTestCase {
         for _ in 0..<4 {
             if close.exists && close.isHittable { return }
             app.otherElements["player.video"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: close)], timeout: 2)
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: close)], timeout: 2)
         }
         XCTAssertTrue(close.isHittable, "AVKit's controls should appear after a tap")
+    }
+
+    /// Taps a control that shows and hides with AVKit's (they hide about 2 s after appearing),
+    /// trying again if they hid first.
+    private func tapPlayerControl(_ control: XCUIElement, opening result: XCUIElement) {
+        for _ in 0..<3 {
+            revealPlayerControls()
+            // A tap at its position, not on the element: if the controls hide first, the tap only
+            // shows them again instead of failing the test.
+            if control.exists && control.isHittable {
+                let frame = control.frame
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+            }
+            if result.waitForExistence(timeout: 2) { return }
+        }
+        XCTFail("\(control) didn't open \(result)")
     }
 
     /// Closes the player with AVKit's own close button, the only way out.
@@ -314,10 +330,9 @@ final class DownloadFlowUITests: XCTestCase {
         // The subtitles button appears with AVKit's controls.
         revealPlayerControls()
         let button = app.buttons["player.captions"]
-        XCTAssertTrue(button.isHittable)
+        XCTAssertTrue(button.waitForExistence(timeout: 3))
         XCTAssertEqual(button.value as? String, "English")
-        button.tap()
-        XCTAssertTrue(app.buttons["Español"].waitForExistence(timeout: 5))
+        tapPlayerControl(button, opening: app.buttons["Español"])
         app.buttons["Español"].tap()
         wait(for: subtitle, "label == 'Línea de prueba & más'", timeout: 5, subtitle.label)
 
@@ -331,9 +346,7 @@ final class DownloadFlowUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         sleep(1)
 
-        revealPlayerControls()
-        button.tap()
-        XCTAssertTrue(app.buttons["Off"].waitForExistence(timeout: 5))
+        tapPlayerControl(button, opening: app.buttons["Off"])
         app.buttons["Off"].tap()
         wait(for: subtitle, "exists == false", timeout: 5)
         closePlayer()
