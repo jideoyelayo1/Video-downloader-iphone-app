@@ -49,6 +49,23 @@ final class BrowserViewModelStateTests: XCTestCase {
         XCTAssertNil(model.errorMessage)
     }
 
+    /// WebKit ends hidden pages' processes during long Picture in Picture sessions. Reloading them
+    /// in the background spends memory and data on a page nobody is looking at.
+    func testAPageThatCrashesWhileHiddenReloadsWhenShown() {
+        let model = makeModel()
+        model.pageDidChange(to: URL(string: "https://site.example/watch?ep=1"), force: true)
+        model.add(MediaCandidate(url: URL(string: "http://127.0.0.1:9/a.mp4")!, sourcePageURL: URL(string: "https://site.example/watch?ep=1")!))
+        model.isVisible = false
+        model.webContentProcessDidTerminate()
+        model.webContentProcessDidTerminate()
+        XCTAssertTrue(model.pendingCrashReload)
+        XCTAssertTrue(model.candidates.isEmpty)
+        XCTAssertNil(model.errorMessage, "crashes while hidden don't count as a crash loop")
+        model.isVisible = true
+        XCTAssertFalse(model.pendingCrashReload)
+        XCTAssertNil(model.errorMessage)
+    }
+
     /// Routers such as SvelteKit's can change the URL without calling the page's
     /// `history.pushState`, which the discovery script hooks. The model must still
     /// follow the URL, title and Back state.

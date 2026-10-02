@@ -71,7 +71,8 @@ final class DiagnosticsLog: ObservableObject {
             entries = stored.split(separator: "\n").suffix(Self.maxEntries).map { Entry(previousLine: String($0)) }
         }
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        record(event: "session", url: "app://launch", note: "version=\(version) iOS=\(ProcessInfo.processInfo.operatingSystemVersionString)")
+        let expiry = BuildExpiry.date.map { " expires=" + $0.formatted(.iso8601) } ?? ""
+        record(event: "session", url: "app://launch", note: "version=\(version) iOS=\(ProcessInfo.processInfo.operatingSystemVersionString)" + expiry)
     }
 
     func record(event: String, url: String, frameURL: URL? = nil, isMainFrame: Bool = true, contentType: String? = nil, note: String? = nil) {

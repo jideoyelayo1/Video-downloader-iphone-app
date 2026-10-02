@@ -81,6 +81,13 @@ final class BrowserViewModel: ObservableObject {
     private var observations: [NSKeyValueObservation] = []
     private var pendingURL: URL?
     private var lastAutomaticReload: Date?
+    /// Whether the page is on screen: the Browse tab, in the foreground, with no saved video over it.
+    var isVisible = true {
+        didSet { if isVisible && !oldValue && pendingCrashReload { reloadAfterCrash(now: Date()) } }
+    }
+    /// A page that crashed while hidden, often during Picture in Picture, reloads when it is shown
+    /// again instead of loading, and streaming, in the background.
+    private(set) var pendingCrashReload = false
     private let validator: CandidateValidator
     private let contextProvider: DownloadManager.ContextProvider
     /// Variant and rendition playlists already represented by a master playlist in the list.
@@ -238,8 +245,18 @@ final class BrowserViewModel: ObservableObject {
     /// WebKit ends a page's content process when it uses too much memory, leaving a blank view.
     /// Reload once automatically; a page that keeps crashing waits for the user.
     func webContentProcessDidTerminate(now: Date = Date()) {
-        diagnostics?.record(event: "webcontent-terminated", url: url?.absoluteString ?? "about:blank")
+        diagnostics?.record(event: "webcontent-terminated", url: url?.absoluteString ?? "about:blank",
+                            note: isVisible ? nil : "Reloads when Browse is shown")
         pageDidChange(to: url, force: true)
+        guard isVisible else {
+            pendingCrashReload = true
+            return
+        }
+        reloadAfterCrash(now: now)
+    }
+
+    private func reloadAfterCrash(now: Date) {
+        pendingCrashReload = false
         if let last = lastAutomaticReload, now.timeIntervalSince(last) < 30 {
             errorMessage = "This page stopped because it used too much memory. Tap Reload to try again."
             return

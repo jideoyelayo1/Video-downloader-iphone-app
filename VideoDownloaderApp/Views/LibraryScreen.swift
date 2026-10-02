@@ -19,6 +19,7 @@ struct LibraryScreen: View {
     @State private var showingNewFolder = false
     @State private var showingManageFolders = false
     @State private var newFolderTitle = ""
+    @State private var expiryWarningDismissed = false
 
     private var displayed: [DownloadItem] {
         completed.filter { item in
@@ -40,6 +41,21 @@ struct LibraryScreen: View {
         let continueWatching = continueWatching
         NavigationStack {
             List {
+                if !expiryWarningDismissed, let warning = BuildExpiry.warning(expiry: BuildExpiry.date) {
+                    Section {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            Text(warning).font(.subheadline)
+                                .accessibilityIdentifier("library.expiryWarning")
+                            Spacer(minLength: 0)
+                            Button { expiryWarningDismissed = true } label: {
+                                Image(systemName: "xmark").font(.subheadline.bold()).foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Dismiss")
+                        }
+                    }
+                }
                 if selectedFolderID == nil && searchText.isEmpty && !continueWatching.isEmpty {
                     Section("Continue Watching") {
                         ScrollView(.horizontal, showsIndicators: false) {

@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var playback: PlaybackCoordinator
     @StateObject private var browser = BrowserViewModel(diagnostics: AppServices.shared.diagnostics, history: AppServices.shared.history)
     @State private var selection = Tab.library
+    @Environment(\.scenePhase) private var scenePhase
 
     enum Tab { case browse, downloads, library }
 
@@ -29,12 +30,22 @@ struct ContentView: View {
             // The address field keeps first responder in the hidden tab otherwise.
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
-        .onChange(of: playback.isPresented) { _, presented in if presented { browser.pauseMedia() } }
+        .onChange(of: playback.isPresented) { _, presented in
+            if presented { browser.pauseMedia() }
+            updateBrowserVisibility()
+        }
+        .onChange(of: selection) { updateBrowserVisibility() }
+        .onChange(of: scenePhase) { updateBrowserVisibility() }
+        .onAppear { updateBrowserVisibility() }
         .alert("Unable to play video", isPresented: Binding(get: { playback.errorMessage != nil }, set: { if !$0 { playback.clearError() } })) {
             Button("OK", role: .cancel) { playback.clearError() }
         } message: { Text(playback.errorMessage ?? "") }
         .alert("Can't start download", isPresented: Binding(get: { downloads.startError != nil }, set: { if !$0 { downloads.startError = nil } })) {
             Button("OK", role: .cancel) { downloads.startError = nil }
         } message: { Text(downloads.startError ?? "") }
+    }
+
+    private func updateBrowserVisibility() {
+        browser.isVisible = selection == .browse && scenePhase == .active && !playback.isPresented
     }
 }
