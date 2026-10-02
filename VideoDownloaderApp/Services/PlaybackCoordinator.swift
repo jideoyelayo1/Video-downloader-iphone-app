@@ -91,7 +91,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         let token = UUID()
         loadID = token
         item = newItem
-        title = newItem.title
+        title = newItem.displayTitle
         guard let url = newItem.localURL, FileManager.default.fileExists(atPath: url.path) else {
             item = nil
             showError("The saved video file is missing. Delete it and download the video again.")
@@ -120,7 +120,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             }
             guard loadID == token else { return }
             let playerItem = AVPlayerItem(asset: asset)
-            playerItem.externalMetadata = [Self.titleMetadata(newItem.title)]
+            playerItem.externalMetadata = [Self.titleMetadata(newItem.displayTitle)]
             if let preferred = try? await asset.load(.preferredMediaSelection),
                let (group, option) = await HLSMediaSelections.audibleOption(for: asset, preferred: preferred) {
                 playerItem.select(option, in: group)

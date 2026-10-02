@@ -7,9 +7,11 @@ struct LibraryScreen: View {
     var showBrowse: () -> Void = {}
     @EnvironmentObject private var downloads: DownloadManager
     @EnvironmentObject private var playback: PlaybackCoordinator
+    @EnvironmentObject private var labelStore: LabelStore
     @Query(filter: #Predicate<DownloadItem> { $0.statusRaw == "completed" }, sort: \DownloadItem.completedAt, order: .reverse)
     private var completed: [DownloadItem]
     @Query(sort: \DownloadFolder.title) private var folders: [DownloadFolder]
+    @Query(sort: \VideoLabel.name) private var allLabels: [VideoLabel]
     @Environment(\.modelContext) private var modelContext
     @State private var pendingPlayback: DownloadItem?
     @State private var renaming: DownloadItem?
@@ -20,6 +22,9 @@ struct LibraryScreen: View {
     @State private var showingManageFolders = false
     @State private var newFolderTitle = ""
     @State private var expiryWarningDismissed = false
+    @State private var showingManageLabels = false
+    @State private var labelingItem: DownloadItem?
+    @State private var newLabelName = ""
 
     private var displayed: [DownloadItem] {
         completed.filter { item in
@@ -40,94 +45,15 @@ struct LibraryScreen: View {
         // Each list is filtered once per render instead of once per use.
         let displayed = displayed
         let continueWatching = continueWatching
+        let labelsByID = Dictionary(allLabels.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         NavigationStack {
             List {
-                if !expiryWarningDismissed, let warning = BuildExpiry.warning(expiry: BuildExpiry.date) {
-                    Section {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                            Text(warning).font(.subheadline)
-                                .accessibilityIdentifier("library.expiryWarning")
-                            Spacer(minLength: 0)
-                            Button { expiryWarningDismissed = true } label: {
-                                Image(systemName: "xmark").font(.subheadline.bold()).foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Dismiss")
-                        }
-                    }
-                }
+                expiryWarning
                 if selectedFolderID == nil && searchText.isEmpty && !continueWatching.isEmpty {
-                    Section("Continue Watching") {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 14) {
-                                ForEach(continueWatching) { item in
-                                    VStack(alignment: .leading, spacing: 7) {
-                                        Button { start(item, at: item.playbackPosition ?? 0) } label: {
-                                            VideoThumbnailView(item: item, width: 174, height: 98)
-                                        }
-                                        .buttonStyle(.plain)
-                                        HStack(alignment: .top, spacing: 4) {
-                                            Text(item.title).font(.subheadline.bold()).lineLimit(2)
-                                                .truncationMode(.middle)
-                                                .foregroundStyle(.primary)
-                                            Spacer(minLength: 0)
-                                            Menu { actions(for: item) } label: {
-                                                Image(systemName: "ellipsis.circle")
-                                                    .accessibilityLabel("More options for \(item.title)")
-                                            }
-                                        }
-                                        Text(item.downloadedText).font(.caption2).foregroundStyle(.secondary)
-                                        Label("Resume", systemImage: "play.fill")
-                                            .font(.caption).foregroundStyle(.tint)
-                                    }
-                                    .frame(width: 174, alignment: .leading)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
+                    continueWatchingSection(continueWatching)
                 }
-                if displayed.isEmpty {
-                    VStack(spacing: 14) {
-                        ContentUnavailableView(playableCompletedCount == 0 ? "Your library is empty" : "No matching videos", systemImage: "play.rectangle",
-                                               description: Text(playableCompletedCount == 0 ? "Completed downloads play here, even offline." : "Try another search or folder."))
-                        if playableCompletedCount == 0 {
-                            Button { showBrowse() } label: { Label("Find a video", systemImage: "safari") }
-                                .buttonStyle(.borderedProminent)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                }
-                Section(displayed.isEmpty ? "" : "All Videos") {
-                    ForEach(displayed) { item in
-                        HStack(spacing: 4) {
-                            Button { open(item) } label: { LibraryRow(item: item) }
-                                .buttonStyle(.plain)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .accessibilityIdentifier("library.item")
-                            Menu { actions(for: item) } label: {
-                                Image(systemName: "ellipsis.circle")
-                                    .font(.title3)
-                                    .frame(minWidth: 40, minHeight: 44)
-                                    .accessibilityLabel("More options for \(item.title)")
-                            }
-                            .accessibilityIdentifier("library.moreOptions")
-                        }
-                        .contextMenu { actions(for: item) }
-                        .swipeActions(edge: .leading) {
-                            Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
-                                setWatched(item, !item.isWatched)
-                            }
-                            .tint(.green)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button("Delete", role: .destructive) { downloads.delete(item) }
-                            Button("Rename") { beginRename(item) }.tint(.blue)
-                        }
-                    }
-                }
+                if displayed.isEmpty { emptyState }
+                allVideosSection(displayed, labelsByID: labelsByID)
             }
             .navigationTitle("My Videos")
             .searchable(text: $searchText, prompt: "Search videos")
@@ -144,11 +70,23 @@ struct LibraryScreen: View {
                         Divider()
                         Button("New Folder", systemImage: "folder.badge.plus") { newFolderTitle = ""; showingNewFolder = true }
                         Button("Manage Folders", systemImage: "folder") { showingManageFolders = true }
+                        Button("Manage Labels", systemImage: "tag") { showingManageLabels = true }
                     } label: { Label("Folders", systemImage: "folder") }
                         .accessibilityIdentifier("library.folders")
                 }
             }
             .sheet(isPresented: $showingManageFolders) { ManageFoldersSheet() }
+            .sheet(isPresented: $showingManageLabels) { ManageLabelsSheet() }
+            .alert("New Label", isPresented: Binding(get: { labelingItem != nil }, set: { if !$0 { labelingItem = nil } })) {
+                TextField("Label name", text: $newLabelName)
+                Button("Add") {
+                    if let item = labelingItem, let label = labelStore.create(name: newLabelName), item.labelIDs?.contains(label.id) != true {
+                        labelStore.toggle(label, on: item)
+                    }
+                    labelingItem = nil
+                }
+                Button("Cancel", role: .cancel) { labelingItem = nil }
+            }
             .confirmationDialog("Play video", isPresented: Binding(get: { pendingPlayback != nil }, set: { if !$0 { pendingPlayback = nil } })) {
                 Button("Resume") { if let item = pendingPlayback { start(item, at: item.playbackPosition ?? 0) }; pendingPlayback = nil }
                 Button("Start from Beginning") { if let item = pendingPlayback { start(item, at: 0) }; pendingPlayback = nil }
@@ -166,11 +104,114 @@ struct LibraryScreen: View {
         }
     }
 
+    @ViewBuilder private var expiryWarning: some View {
+        if !expiryWarningDismissed, let warning = BuildExpiry.warning(expiry: BuildExpiry.date) {
+            Section {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(warning).font(.subheadline)
+                        .accessibilityIdentifier("library.expiryWarning")
+                    Spacer(minLength: 0)
+                    Button { expiryWarningDismissed = true } label: {
+                        Image(systemName: "xmark").font(.subheadline.bold()).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss")
+                }
+            }
+        }
+    }
+
+    private func continueWatchingSection(_ items: [DownloadItem]) -> some View {
+        Section("Continue Watching") {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(items) { item in
+                        VStack(alignment: .leading, spacing: 7) {
+                            Button { start(item, at: item.playbackPosition ?? 0) } label: {
+                                VideoThumbnailView(item: item, width: 174, height: 98)
+                            }
+                            .buttonStyle(.plain)
+                            HStack(alignment: .top, spacing: 4) {
+                                Text(item.displayTitle).font(.subheadline.bold()).lineLimit(2)
+                                    .truncationMode(.middle)
+                                    .foregroundStyle(.primary)
+                                Spacer(minLength: 0)
+                                Menu { actions(for: item) } label: {
+                                    Image(systemName: "ellipsis.circle")
+                                        .accessibilityLabel("More options for \(item.title)")
+                                }
+                            }
+                            Text(item.downloadedText).font(.caption2).foregroundStyle(.secondary)
+                            Label("Resume", systemImage: "play.fill")
+                                .font(.caption).foregroundStyle(.tint)
+                        }
+                        .frame(width: 174, alignment: .leading)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            ContentUnavailableView(playableCompletedCount == 0 ? "Your library is empty" : "No matching videos", systemImage: "play.rectangle",
+                                   description: Text(playableCompletedCount == 0 ? "Completed downloads play here, even offline." : "Try another search or folder."))
+            if playableCompletedCount == 0 {
+                Button { showBrowse() } label: { Label("Find a video", systemImage: "safari") }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+
+    private func allVideosSection(_ displayed: [DownloadItem], labelsByID: [UUID: VideoLabel]) -> some View {
+        Section(displayed.isEmpty ? "" : "All Videos") {
+            ForEach(displayed) { item in
+                HStack(spacing: 4) {
+                    Button { open(item) } label: { LibraryRow(item: item, labels: item.labelIDs?.compactMap { labelsByID[$0] } ?? []) }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("library.item")
+                    Menu { actions(for: item) } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                            .frame(minWidth: 40, minHeight: 44)
+                            .accessibilityLabel("More options for \(item.title)")
+                    }
+                    .accessibilityIdentifier("library.moreOptions")
+                }
+                .contextMenu { actions(for: item) }
+                .swipeActions(edge: .leading) {
+                    Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
+                        setWatched(item, !item.isWatched)
+                    }
+                    .tint(.green)
+                }
+                .swipeActions(edge: .trailing) {
+                    Button("Delete", role: .destructive) { downloads.delete(item) }
+                    Button("Rename") { beginRename(item) }.tint(.blue)
+                }
+            }
+        }
+    }
+
     @ViewBuilder private func actions(for item: DownloadItem) -> some View {
         Button { setWatched(item, !item.isWatched) } label: {
             Label(item.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle")
         }
         Button { beginRename(item) } label: { Label("Rename", systemImage: "pencil") }
+        Menu {
+            ForEach(allLabels) { label in
+                Button { labelStore.toggle(label, on: item) } label: {
+                    if item.labelIDs?.contains(label.id) == true { Label(label.name, systemImage: "checkmark") } else { Text(label.name) }
+                }
+            }
+            Divider()
+            Button("New Label…", systemImage: "plus") { newLabelName = ""; labelingItem = item }
+        } label: { Label("Labels", systemImage: "tag") }
         Menu {
             Button("No Folder") { item.folderID = nil; try? modelContext.save() }
             ForEach(folders) { folder in
@@ -242,6 +283,7 @@ private struct ManageFoldersSheet: View {
 
 private struct LibraryRow: View {
     let item: DownloadItem
+    let labels: [VideoLabel]
     @State private var duration: Double?
 
     var body: some View {
@@ -250,7 +292,7 @@ private struct LibraryRow: View {
             VideoThumbnailView(item: item, width: 112, height: 72)
             VStack(alignment: .leading, spacing: 3) {
                 // Middle truncation keeps the episode number at the end of long series titles visible.
-                Text(item.title).font(.headline).foregroundStyle(.primary).lineLimit(2).truncationMode(.middle)
+                Text(item.displayTitle).font(.headline).foregroundStyle(.primary).lineLimit(2).truncationMode(.middle)
                 // Date and size on their own lines: together they always wrap mid-way at this width.
                 Text(item.downloadedText).font(.caption).foregroundStyle(.secondary)
                 if !fileExists {
@@ -258,6 +300,7 @@ private struct LibraryRow: View {
                 } else if let size = item.fileSize {
                     Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)).font(.caption).foregroundStyle(.secondary)
                 }
+                LabelChips(labels: labels)
                 if item.isWatched {
                     Label("Watched", systemImage: "checkmark.circle.fill")
                         .font(.caption2).foregroundStyle(.green)

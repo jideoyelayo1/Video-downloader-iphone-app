@@ -14,6 +14,7 @@ struct VideoDownloaderAppApp: App {
                 .environmentObject(services.downloads.progressStore)
                 .environmentObject(services.diagnostics)
                 .environmentObject(services.playback)
+                .environmentObject(services.labels)
         }
         .modelContainer(services.container)
     }
@@ -36,6 +37,7 @@ final class AppServices {
     let diagnostics = DiagnosticsLog()
     let playback: PlaybackCoordinator
     let history: BrowserHistoryStore
+    let labels: LabelStore
 
     private init() {
         let inMemory = LaunchOptions.isRunningUnitTests || LaunchOptions.flag("-UITestInMemory")
@@ -48,8 +50,13 @@ final class AppServices {
         if !inMemory { LegacyDownloadImport.run(into: context) }
         StarterBookmarks.install(in: context, inMemory: inMemory)
         history = BrowserHistoryStore(context: context)
+        // Created once: an isolated test suite is cleared each time it is requested.
+        let preferences = LaunchOptions.preferences(isolated: inMemory)
+        labels = LabelStore(context: context, preferences: preferences)
+        labels.backfillSiteLabelsIfNeeded()
         downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)
-        playback = PlaybackCoordinator(context: context, diagnostics: diagnostics, preferences: LaunchOptions.preferences(isolated: inMemory))
+        downloads.labelStore = labels
+        playback = PlaybackCoordinator(context: context, diagnostics: diagnostics, preferences: preferences)
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }
         downloads.diagnostics = diagnostics
     }

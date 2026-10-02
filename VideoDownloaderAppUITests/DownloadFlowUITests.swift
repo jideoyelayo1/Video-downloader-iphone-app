@@ -313,6 +313,35 @@ final class DownloadFlowUITests: XCTestCase {
         wait(for: item, "label CONTAINS 'Watched'", timeout: 5, item.label)
     }
 
+    func testSiteLabelAndLabelsFromTheMenu() throws {
+        launch(at: "/page/basic.html")
+        downloadFirstCandidate()
+        app.tabBars.buttons["My Videos"].tap()
+        let item = app.buttons["library.item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        // The test server's site has no name, so its label is its address.
+        XCTAssertTrue(item.label.contains("Labels: 127.0.0.1"), item.label)
+
+        app.buttons["library.moreOptions"].firstMatch.tap()
+        app.buttons["Labels"].tap()
+        app.buttons["New Label…"].tap()
+        let alert = app.alerts["New Label"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.textFields.firstMatch.typeText("Favourites")
+        alert.buttons["Add"].tap()
+        wait(for: item, "label CONTAINS 'Favourites'", timeout: 5, item.label)
+
+        app.buttons["library.folders"].tap()
+        app.buttons["Manage Labels"].tap()
+        let favourites = app.cells.containing(.staticText, identifier: "Favourites").firstMatch
+        XCTAssertTrue(favourites.waitForExistence(timeout: 5))
+        favourites.swipeLeft()
+        app.buttons["Delete"].tap()
+        app.buttons["Done"].tap()
+        wait(for: item, "NOT (label CONTAINS 'Favourites')", timeout: 5, item.label)
+        XCTAssertTrue(item.label.contains("Basic Video Page"), "deleting a label keeps its videos")
+    }
+
     func testResumeSeekAndContinueWatching() throws {
         launch(at: "/page/long.html")
         downloadFirstCandidate()

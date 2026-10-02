@@ -19,6 +19,8 @@ final class DownloadManager: NSObject, ObservableObject {
     let context: ModelContext
     var requestContextProvider: ContextProvider?
     var diagnostics: DiagnosticsLog?
+    /// Adds the site and rule labels to each new download.
+    var labelStore: LabelStore?
     private let directConfiguration: URLSessionConfiguration
     private var directTasks: [UUID: URLSessionDownloadTask] = [:]
     private var hlsTasks: [UUID: AVAssetDownloadTask] = [:]
@@ -92,6 +94,7 @@ final class DownloadManager: NSObject, ObservableObject {
             existing.requiresReferer = requiresReferer
             restart(existing)
             saveSubtitles(subtitles, for: existing)
+            labelStore?.applyAutomaticLabels(to: existing)
             return existing
         }
         let title = candidate.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -99,6 +102,7 @@ final class DownloadManager: NSObject, ObservableObject {
                                 refererURL: candidate.referer, kind: candidate.kind, preferredBitrate: preferredBitrate,
                                 requiresReferer: requiresReferer)
         context.insert(item)
+        labelStore?.applyAutomaticLabels(to: item)
         begin(item)
         saveSubtitles(subtitles, for: item)
         return item

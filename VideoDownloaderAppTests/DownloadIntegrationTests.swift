@@ -65,6 +65,18 @@ final class DownloadIntegrationTests: XCTestCase {
         XCTAssertEqual(manager.progress(of: item), 1)
     }
 
+    func testNewDownloadsGetTheirSiteAndRuleLabels() async throws {
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: "DownloadIntegrationTests-\(UUID().uuidString)"))
+        let labels = LabelStore(context: container.mainContext, preferences: preferences)
+        manager.labelStore = labels
+        let local = try XCTUnwrap(labels.create(name: "Local", sites: ["127.0.0.1"]))
+        let item = try start("/video.mp4")
+        let names = Set((item.labelIDs ?? []).compactMap { id in labels.labels.first { $0.id == id }?.name })
+        XCTAssertEqual(names, ["Local", "127.0.0.1"], "the rule label and the site label")
+        XCTAssertTrue(item.labelIDs?.contains(local.id) == true)
+        try await waitForFinish(item)
+    }
+
     func testExtensionlessURLUsesContentTypeForFileExtension() async throws {
         let item = try start("/noext/stream?id=1", kind: .unknown)
         try await waitForFinish(item)
