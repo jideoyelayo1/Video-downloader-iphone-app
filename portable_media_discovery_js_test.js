@@ -167,3 +167,36 @@ setTimeout(() => {
   if (events().length !== 2) throw new Error('Refresh should report the tracks again');
   console.log('WebKit discovery subtitle track checks passed');
 })();
+
+// Artwork: a player's <video poster> and the page's og:image are reported once each, as absolute URLs.
+(() => {
+  const posted = [];
+  const docListeners = {};
+  const video = { nodeType: 1, tagName: 'VIDEO', src: '', currentSrc: '', querySelectorAll: () => [],
+                  getAttribute: name => (name === 'poster' ? '/art/ep1.jpg' : null) };
+  const meta = { getAttribute: name => (name === 'content' ? 'https://cdn.example/series.png' : null) };
+  const ctx = {
+    document: {
+      baseURI: 'https://site.example/watch/1', title: 'Episode', readyState: 'complete', documentElement: {},
+      querySelectorAll: selector => (selector.includes('video') ? [video] : []),
+      querySelector: selector => (selector.includes('og:image') ? meta : null),
+      addEventListener: (name, callback) => { docListeners[name] = callback; }
+    },
+    location: { href: 'https://site.example/watch/1' },
+    window: { webkit: { messageHandlers: { mediaDiscovery: { postMessage: value => posted.push(value) } } }, addEventListener: () => {} },
+    history: { pushState: function () {}, replaceState: function () {} },
+    MutationObserver: class { observe() {} },
+    PerformanceObserver: class { observe() {} },
+    performance: { getEntriesByType: () => [], now: () => 1000 },
+    setTimeout, URL, console
+  };
+  ctx.window.top = ctx.window;
+  vm.runInNewContext(match[1], ctx);
+  const posters = () => posted.filter(message => message.event === 'poster');
+  const urls = posters().map(message => `${message.kind} ${message.url}`).sort();
+  if (urls.join(',') !== 'page https://cdn.example/series.png,video https://site.example/art/ep1.jpg')
+    throw new Error(`unexpected posters: ${urls.join(', ')}`);
+  docListeners.play({ target: video });
+  if (posters().length !== 2) throw new Error('the same poster was reported again');
+  console.log('WebKit discovery poster checks passed');
+})();

@@ -54,7 +54,8 @@ struct BrowserScreen: View {
                     candidate.kind = probe?.kind ?? candidate.kind
                     showingCandidates = false
                     if downloads.start(candidate, expectedBytes: probe?.expectedBytes, preferredBitrate: variant?.bandwidth,
-                                       requiresReferer: probe?.requiresReferer ?? false, subtitles: model.subtitleTracks) != nil { showDownloads() }
+                                       requiresReferer: probe?.requiresReferer ?? false, subtitles: model.subtitleTracks,
+                                       poster: model.posterURL) != nil { showDownloads() }
                 }, downloadNextEpisodes: { count in
                     guard let page = model.url else { return }
                     showingCandidates = false

@@ -97,7 +97,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     @discardableResult
     func start(_ candidate: MediaCandidate, expectedBytes: Int64? = nil, preferredBitrate: Int? = nil,
-               requiresReferer: Bool = false, subtitles: [SubtitleTrack] = []) -> DownloadItem? {
+               requiresReferer: Bool = false, subtitles: [SubtitleTrack] = [], poster: URL? = nil) -> DownloadItem? {
         if MediaDiscovery.segmentExtensions.contains(candidate.url.pathExtension.lowercased()) {
             startError = DownloadError.streamSegment.message
             return nil
@@ -122,6 +122,7 @@ final class DownloadManager: NSObject, ObservableObject {
             existing.requiresReferer = requiresReferer
             restart(existing)
             saveSubtitles(subtitles, for: existing)
+            savePoster(poster, for: existing)
             labelStore?.applyAutomaticLabels(to: existing)
             return existing
         }
@@ -130,11 +131,29 @@ final class DownloadManager: NSObject, ObservableObject {
                                 refererURL: candidate.referer, kind: candidate.kind, preferredBitrate: preferredBitrate,
                                 requiresReferer: requiresReferer)
         context.insert(item)
+        savePoster(poster, for: item)
         labelStore?.applyAutomaticLabels(to: item)
         showStore?.addToMatchingShow(item)
         enqueue(item)
         saveSubtitles(subtitles, for: item)
         return item
+    }
+
+    /// The page's poster becomes the video's thumbnail, fetched now with the page as Referer.
+    private func savePoster(_ poster: URL?, for item: DownloadItem) {
+        guard let poster else { return }
+        item.posterURL = poster
+        let id = item.id
+        let referer = item.sourcePageURL
+        Task.detached(priority: .utility) {
+            var request = URLRequest(url: poster, timeoutInterval: 20)
+            request.setValue(referer.absoluteString, forHTTPHeaderField: "Referer")
+            guard let (data, response) = try? await URLSession.shared.data(for: request),
+                  (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
+                  let jpeg = PosterImage.thumbnailJPEG(from: data) else { return }
+            try? jpeg.write(to: DownloadStorage.thumbnailURL(for: id), options: .atomic)
+            await MainActor.run { ThumbnailCache.shared.evict(id) }
+        }
     }
 
     /// Site subtitle files aren't part of the stream, so they are fetched now, while their links still work.

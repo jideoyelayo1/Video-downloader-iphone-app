@@ -6,6 +6,8 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
     var onNavigation: ((URL?) -> Void)?
     var onFragment: (() -> Void)?
     var onSubtitles: (([SubtitleTrack]) -> Void)?
+    /// A poster image; `fromPlayer` is a `<video poster>`, otherwise the page's preview image.
+    var onPoster: ((_ url: URL, _ fromPlayer: Bool) -> Void)?
     var diagnostics: DiagnosticsLog?
     weak var webView: WKWebView?
 
@@ -103,11 +105,29 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         reportedTracks.add(key);
         post({ event: 'subtitles', tracks, documentURL: location.href });
       };
+      // Artwork for the library: a player's poster, or the page's preview image.
+      let reportedPosters = new Set();
+      const reportPoster = (src, kind) => {
+        if (!src || src.startsWith('data:') || src.startsWith('blob:')) return;
+        let url;
+        try { url = new URL(src, document.baseURI).href; } catch (_) { return; }
+        if (reportedPosters.has(url)) return;
+        reportedPosters.add(url);
+        post({ event: 'poster', url, kind, documentURL: location.href });
+      };
+      const reportPagePoster = () => {
+        if (window !== window.top || !document.querySelector) return;
+        const meta = document.querySelector('meta[property="og:image"], meta[name="og:image"], meta[name="twitter:image"]');
+        if (meta) reportPoster(meta.getAttribute('content'), 'page');
+      };
       const inspect = node => {
         if (!node) return;
         const tag = (node.tagName || '').toUpperCase();
         if (tag === 'TRACK') { reportTracks(node.parentElement); return; }
-        if (tag === 'VIDEO') reportTracks(node);
+        if (tag === 'VIDEO') {
+          reportTracks(node);
+          if (node.getAttribute) reportPoster(node.getAttribute('poster'), 'video');
+        }
         const isMedia = tag === 'VIDEO' || tag === 'AUDIO' || tag === 'SOURCE';
         if (isMedia && node.currentSrc) send(node.currentSrc, node.getAttribute('data-quality'), true);
         if (isMedia && node.src) send(node.src, node.getAttribute('data-quality'), true);
@@ -138,12 +158,15 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       window.__vdaRescan = () => {
         seen = new Set();
         reportedTracks = new Set();
+        reportedPosters = new Set();
         document.querySelectorAll('video,audio,source').forEach(inspect);
+        reportPagePoster();
         scanResources();
         document.querySelectorAll('iframe').forEach(f => { try { f.contentWindow.postMessage({ __vdaRescan: true }, '*'); } catch (_) {} });
       };
       window.addEventListener('message', event => { if (event.data && event.data.__vdaRescan === true) window.__vdaRescan(); });
       document.querySelectorAll('video,audio,source').forEach(inspect);
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', reportPagePoster); else reportPagePoster();
       document.addEventListener('loadedmetadata', event => inspect(event.target), true);
       document.addEventListener('play', event => inspect(event.target), true);
       document.addEventListener('pointerdown', activate, true);
@@ -157,7 +180,12 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
           m.addedNodes.forEach(scheduleMediaScan);
         }
       })).observe(document.documentElement || document, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
-      const notifyNavigation = () => { seen = new Set(); reportedTracks = new Set(); reportedFragment = false; post({ event: 'navigation', url: location.href }); };
+      const notifyNavigation = () => {
+        seen = new Set(); reportedTracks = new Set(); reportedPosters = new Set(); reportedFragment = false;
+        post({ event: 'navigation', url: location.href });
+        // Client-side routers update the preview image after the address.
+        setTimeout(reportPagePoster, 800);
+      };
       window.addEventListener('popstate', notifyNavigation);
       window.addEventListener('hashchange', notifyNavigation);
       const pushState = history.pushState;
@@ -229,6 +257,14 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         let frameURL = message.frameInfo.request.url
         let rawURL = dictionary["url"] as? String ?? ""
 
+        if dictionary["event"] as? String == "poster" {
+            let documentURL = (dictionary["documentURL"] as? String).flatMap(URL.init(string:))
+            if let url = URL(string: rawURL), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+               !MediaDiscovery.isStale(documentURL: documentURL, isMainFrame: isMainFrame, currentPageURL: mainURL) {
+                onPoster?(url, dictionary["kind"] as? String == "video")
+            }
+            return
+        }
         if dictionary["event"] as? String == "subtitles" {
             let tracks = SubtitleTrack.tracks(from: dictionary, frameURL: frameURL)
             diagnostics?.record(event: "subtitles", url: (dictionary["documentURL"] as? String) ?? "", frameURL: frameURL, isMainFrame: isMainFrame,

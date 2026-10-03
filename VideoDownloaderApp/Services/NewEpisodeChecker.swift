@@ -50,7 +50,7 @@ final class NewEpisodeChecker {
         guard let latest = show.followSourceURL, let next = EpisodeURL.next(after: latest) else { return false }
         show.lastCheckedAt = now
         shows.save()
-        guard case .found(var candidate, let probe, let subtitles, let title) = await find(next) else {
+        guard case .found(var candidate, let probe, let subtitles, let title, let poster) = await find(next) else {
             diagnostics?.record(event: "new-episode", url: next.absoluteString, note: "\(show.title): not out yet")
             return false
         }
@@ -60,7 +60,7 @@ final class NewEpisodeChecker {
             candidate.kind = probe.kind
             if !title.isEmpty { candidate.title = title }
             if let item = downloads.start(candidate, expectedBytes: probe.expectedBytes, preferredBitrate: nil,
-                                          requiresReferer: probe.requiresReferer, subtitles: subtitles), item.showID != show.id {
+                                          requiresReferer: probe.requiresReferer, subtitles: subtitles, poster: poster), item.showID != show.id {
                 shows.add([item], to: show)
             }
         }

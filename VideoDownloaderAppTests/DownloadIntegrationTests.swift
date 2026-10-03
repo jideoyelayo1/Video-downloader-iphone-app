@@ -1,5 +1,6 @@
 import SwiftData
 import XCTest
+import UIKit
 @testable import VideoDownloaderApp
 
 /// Drives the real download delegate code against `LocalMediaServer` using a foreground session.
@@ -69,6 +70,16 @@ final class DownloadIntegrationTests: XCTestCase {
         XCTAssertEqual(manager.maxConcurrentDownloads, 2)
         manager.maxConcurrentDownloads = 9
         XCTAssertEqual(manager.maxConcurrentDownloads, 4, "at most 4")
+    }
+
+    func testThePagesPosterBecomesTheThumbnail() async throws {
+        let item = try XCTUnwrap(manager.start(candidate("/video.mp4"), poster: server.url("/poster.png")))
+        XCTAssertEqual(item.posterURL, server.url("/poster.png"))
+        let thumbnail = DownloadStorage.thumbnailURL(for: item.id)
+        try await waitUntil { FileManager.default.fileExists(atPath: thumbnail.path) }
+        let image = try XCTUnwrap(UIImage(contentsOfFile: thumbnail.path))
+        XCTAssertEqual(image.size.width, 640, "scaled down for the library")
+        try await waitForFinish(item)
     }
 
     func testDirectMP4DownloadsCompletely() async throws {

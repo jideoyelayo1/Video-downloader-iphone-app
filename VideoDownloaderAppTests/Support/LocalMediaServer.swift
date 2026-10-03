@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import UIKit
 
 /// A tiny HTTP/1.1 server on 127.0.0.1 (ephemeral port) serving fixture media for integration and UI tests.
 ///
@@ -238,6 +239,7 @@ final class LocalMediaServer {
             return .text("<!doctype html><html><head><title>Error</title></head><body><h1>Access denied</h1></body></html>", "text/html; charset=utf-8")
         case "/drop/video.mp4": return .data(fixtures.mp4, "video/mp4", delivery: .drop)
         case "/slow/video.mp4": return .data(fixtures.mp4, "video/mp4", delivery: .slow)
+        case "/poster.png": return .data(Self.posterPNG, "image/png")
         default:
             if request.path.hasPrefix("/hls/referer-seg"),
                let segment = fixtures.hlsSegments[String(request.path.dropFirst(5)).replacingOccurrences(of: "referer-seg", with: "fixture_seg")] {
@@ -333,6 +335,16 @@ final class LocalMediaServer {
         let index = lines.firstIndex { $0.hasPrefix("#EXTINF") } ?? lines.count
         lines.insert(#"#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://key",KEYFORMAT="com.apple.streamingkeydelivery",KEYFORMATVERSIONS="1""#, at: index)
         return lines.joined(separator: "\n")
+    }
+
+    /// A 1280×720 orange image, for poster artwork.
+    static let posterPNG: Data = UIGraphicsImageRenderer(size: CGSize(width: 1280, height: 720), format: {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return format
+    }()).pngData { context in
+        UIColor.orange.setFill()
+        context.fill(CGRect(x: 0, y: 0, width: 1280, height: 720))
     }
 
     /// `/series/ep-2.html` → 2.

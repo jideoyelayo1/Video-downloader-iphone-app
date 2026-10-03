@@ -26,7 +26,7 @@ final class SeasonDownloader: ObservableObject {
     }
 
     enum PageResult: Equatable {
-        case found(MediaCandidate, ProbeResult, [SubtitleTrack], title: String)
+        case found(MediaCandidate, ProbeResult, [SubtitleTrack], title: String, poster: URL? = nil)
         case noVideo
         case verification
         case unsupported
@@ -34,7 +34,7 @@ final class SeasonDownloader: ObservableObject {
         static func == (lhs: PageResult, rhs: PageResult) -> Bool {
             switch (lhs, rhs) {
             case (.noVideo, .noVideo), (.verification, .verification), (.unsupported, .unsupported): return true
-            case (.found(let a, _, _, _), .found(let b, _, _, _)): return a.url == b.url
+            case (.found(let a, _, _, _, _), .found(let b, _, _, _, _)): return a.url == b.url
             default: return false
             }
         }
@@ -67,12 +67,12 @@ final class SeasonDownloader: ObservableObject {
             current = next
             status = "Finding episode \(index) of \(count)…"
             switch await findVideo(on: next) {
-            case .found(var candidate, let probe, let subtitles, let title):
+            case .found(var candidate, let probe, let subtitles, let title, let poster):
                 guard !Task.isCancelled else { return }
                 candidate.kind = probe.kind
                 if !title.isEmpty { candidate.title = title }
                 if downloads.start(candidate, expectedBytes: probe.expectedBytes, preferredBitrate: nil,
-                                   requiresReferer: probe.requiresReferer, subtitles: subtitles) != nil {
+                                   requiresReferer: probe.requiresReferer, subtitles: subtitles, poster: poster) != nil {
                     queued += 1
                 }
             case .verification:
@@ -116,7 +116,7 @@ final class SeasonDownloader: ObservableObject {
             }
         }
         guard let best = model.bestReady else { return .noVideo }
-        return .found(best.candidate, best.probe, model.subtitleTracks, title: model.pageTitle)
+        return .found(best.candidate, best.probe, model.subtitleTracks, title: model.pageTitle, poster: model.posterURL)
     }
 
     static func isVerificationPage(title: String) -> Bool {

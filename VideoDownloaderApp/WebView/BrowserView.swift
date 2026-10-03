@@ -64,6 +64,9 @@ final class BrowserViewModel: ObservableObject {
     @Published private(set) var statuses: [UUID: CandidateStatus] = [:]
     /// Subtitle files the page's players offer; saved with a download from this page.
     @Published private(set) var subtitleTracks: [SubtitleTrack] = []
+    /// Artwork for downloads from this page: a player's poster, else the page's preview image.
+    @Published private(set) var posterURL: URL?
+    private var posterIsFromPlayer = false
     @Published private(set) var isLoading = false
     /// Page load progress, published in coarse steps for the address bar's loading line.
     @Published private(set) var loadProgress = 0.0
@@ -112,6 +115,11 @@ final class BrowserViewModel: ObservableObject {
         discovery.onNavigation = { [weak self] newURL in self?.pageDidChange(to: newURL, force: false) }
         discovery.onFragment = { [weak self] in self?.observedFragments = true }
         discovery.onSubtitles = { [weak self] tracks in self?.addSubtitles(tracks) }
+        discovery.onPoster = { [weak self] url, fromPlayer in
+            guard let self, self.posterURL == nil || (fromPlayer && !self.posterIsFromPlayer) else { return }
+            self.posterURL = url
+            self.posterIsFromPlayer = fromPlayer
+        }
     }
 
     var readyCount: Int { statuses.values.filter(\.isReady).count }
@@ -293,6 +301,8 @@ final class BrowserViewModel: ObservableObject {
         statuses.removeAll()
         variantURLs.removeAll()
         subtitleTracks.removeAll()
+        posterURL = nil
+        posterIsFromPlayer = false
         if let newURL, ["http", "https"].contains(newURL.scheme?.lowercased()) {
             url = newURL
             if !isEditingAddress { addressText = newURL.absoluteString }
