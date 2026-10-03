@@ -63,6 +63,7 @@ final class AppServices {
         downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)
         downloads.labelStore = labels
         downloads.preferences = preferences
+        downloads.showStore = shows
         subtitleEmbedder = SubtitleEmbedder(context: context)
         subtitleEmbedder.diagnostics = diagnostics
         downloads.subtitleEmbedder = subtitleEmbedder

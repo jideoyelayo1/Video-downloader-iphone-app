@@ -30,6 +30,7 @@ final class ShowStore: ObservableObject {
             item.showID = show.id
             item.showOrder = index
         }
+        updateFollowedPage(show)
         save()
         return show
     }
@@ -45,7 +46,30 @@ final class ShowStore: ObservableObject {
             item.showOrder = order
             order += 1
         }
+        updateFollowedPage(show)
         save()
+    }
+
+    /// A new download joins the show its title belongs to, matched by the show's name or by its
+    /// episodes' series name.
+    @discardableResult
+    func addToMatchingShow(_ item: DownloadItem) -> Show? {
+        guard item.showID == nil else { return nil }
+        let parsed = ShowSuggestion.parse(item.displayTitle)
+        guard parsed.episode != nil else { return nil }
+        let all = videos()
+        let show = shows.first { show in
+            ShowSuggestion.Parsed(series: show.title, season: nil, episode: nil).key == parsed.key
+                || ShowPlaylist.episodes(of: show.id, in: all).contains { ShowSuggestion.parse($0.displayTitle).key == parsed.key }
+        }
+        if let show { add([item], to: show) }
+        return show
+    }
+
+    /// The page of the highest-numbered episode, from which the next one is looked for.
+    private func updateFollowedPage(_ show: Show) {
+        let latest = ShowSuggestion.inEpisodeOrder(episodes(of: show)).last
+        if let latest { show.followSourceURL = latest.sourcePageURL }
     }
 
     /// Takes the video out of its show; the video stays in the library.

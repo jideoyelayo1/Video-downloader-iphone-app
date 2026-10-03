@@ -97,4 +97,34 @@ final class ShowTests: XCTestCase {
         XCTAssertTrue(all.allSatisfy { $0.showID == nil && $0.showOrder == nil }, "the videos stay, outside any show")
         XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<DownloadItem>()).count, 4)
     }
+
+    func testContinueWatchingOffersTheNextEpisodeOfAFinishedOne() throws {
+        let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
+        let episodes = [1, 2, 3].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") }
+        store.create(title: "***REMOVED***", with: episodes)
+        let other = video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · ***REMOVED***")
+        other.playbackPosition = 300
+        other.lastPlayedAt = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(ShowPlaylist.continueWatching([other] + episodes).map(\.id), [other.id], "nothing of the show played yet")
+
+        episodes[0].lastPlayedAt = Date(timeIntervalSince1970: 2_000)
+        episodes[0].setWatched(true)
+        XCTAssertEqual(ShowPlaylist.continueWatching([other] + episodes).map(\.id), [episodes[1].id, other.id],
+                       "episode 2 follows the finished episode 1, most recent first")
+
+        episodes[1].lastPlayedAt = Date(timeIntervalSince1970: 3_000)
+        episodes[1].playbackPosition = 120
+        XCTAssertEqual(ShowPlaylist.continueWatching([other] + episodes).map(\.id), [episodes[1].id, other.id], "now in progress, listed once")
+    }
+
+    func testNewEpisodesJoinTheirShow() {
+        let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
+        let show = store.create(title: "My Smoking Show", with: [1, 2].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") })
+        let third = video("***REMOVED*** Ep. 3 · ***REMOVED***")
+        XCTAssertTrue(store.addToMatchingShow(third) === show, "matched by the episodes' series, though the show was renamed")
+        XCTAssertEqual(third.showOrder, 2)
+        XCTAssertEqual(show.followSourceURL, third.sourcePageURL, "the latest episode's page is followed")
+        XCTAssertNil(store.addToMatchingShow(video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · ***REMOVED***")))
+        XCTAssertNil(store.addToMatchingShow(video("Basic Video Page")), "no episode number")
+    }
 }

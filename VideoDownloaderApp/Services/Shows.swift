@@ -88,6 +88,24 @@ enum ShowPlaylist {
         return episodes[index + 1]
     }
 
+    /// Videos started but not finished, plus the next episode of each show whose most recently
+    /// played episode was finished; most recently played first.
+    static func continueWatching(_ items: [DownloadItem]) -> [DownloadItem] {
+        let playable = items.filter { $0.status == .completed && !$0.isStreamFragment }
+        var entries = playable.filter { !$0.isWatched && ($0.playbackPosition ?? 0) > 10 }
+            .map { (item: $0, played: $0.lastPlayedAt ?? .distantPast, position: $0.playbackPosition ?? 0) }
+        var included = Set(entries.map(\.item.id))
+        for showID in Set(playable.compactMap(\.showID)) {
+            let ordered = episodes(of: showID, in: playable)
+            guard let last = ordered.filter({ $0.lastPlayedAt != nil }).max(by: { $0.lastPlayedAt! < $1.lastPlayedAt! }),
+                  last.isWatched, let following = next(after: last, in: ordered), !following.isWatched,
+                  !included.contains(following.id) else { continue }
+            entries.append((following, last.lastPlayedAt ?? .distantPast, 0))
+            included.insert(following.id)
+        }
+        return entries.sorted { ($0.played, $0.position) > ($1.played, $1.position) }.map(\.item)
+    }
+
     /// The first episode not yet watched (an in-progress one resumes); the first when all are watched.
     static func upNext(in episodes: [DownloadItem]) -> DownloadItem? {
         episodes.first { !$0.isWatched } ?? episodes.first

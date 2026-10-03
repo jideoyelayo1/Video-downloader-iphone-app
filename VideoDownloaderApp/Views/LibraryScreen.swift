@@ -52,10 +52,7 @@ struct LibraryScreen: View {
 
     private var playableCompletedCount: Int { completed.filter { !$0.isStreamFragment }.count }
     /// Started but not finished, most recently played first.
-    private var continueWatching: [DownloadItem] {
-        completed.filter { !$0.isStreamFragment && !$0.isWatched && ($0.playbackPosition ?? 0) > 10 }
-            .sorted { ($0.lastPlayedAt ?? .distantPast, $0.playbackPosition ?? 0) > ($1.lastPlayedAt ?? .distantPast, $1.playbackPosition ?? 0) }
-    }
+    private var continueWatching: [DownloadItem] { ShowPlaylist.continueWatching(completed) }
 
     var body: some View {
         // Each list is filtered once per render instead of once per use.
@@ -168,7 +165,8 @@ struct LibraryScreen: View {
                                 }
                             }
                             Text(item.downloadedText).font(.caption2).foregroundStyle(.secondary)
-                            Label("Resume", systemImage: "play.fill")
+                            Label((item.playbackPosition ?? 0) > 10 ? "Resume" : "Next Episode",
+                                  systemImage: (item.playbackPosition ?? 0) > 10 ? "play.fill" : "forward.end.fill")
                                 .font(.caption).foregroundStyle(.tint)
                         }
                         .frame(width: 174, alignment: .leading)

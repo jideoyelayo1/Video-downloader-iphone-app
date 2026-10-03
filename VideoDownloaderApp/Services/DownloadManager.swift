@@ -23,6 +23,8 @@ final class DownloadManager: NSObject, ObservableObject {
     var labelStore: LabelStore?
     /// Moves site subtitles into finished direct downloads, for Picture in Picture and AirPlay.
     var subtitleEmbedder: SubtitleEmbedder?
+    /// Puts new downloads into the show they belong to.
+    var showStore: ShowStore?
     /// Download settings; a separate store in tests.
     var preferences: UserDefaults = .standard
 
@@ -129,6 +131,7 @@ final class DownloadManager: NSObject, ObservableObject {
                                 requiresReferer: requiresReferer)
         context.insert(item)
         labelStore?.applyAutomaticLabels(to: item)
+        showStore?.addToMatchingShow(item)
         enqueue(item)
         saveSubtitles(subtitles, for: item)
         return item
