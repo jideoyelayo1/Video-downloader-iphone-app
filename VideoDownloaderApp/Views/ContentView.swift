@@ -35,7 +35,13 @@ struct ContentView: View {
             updateBrowserVisibility()
         }
         .onChange(of: selection) { updateBrowserVisibility() }
-        .onChange(of: scenePhase) { updateBrowserVisibility() }
+        .onChange(of: scenePhase) { _, phase in
+            updateBrowserVisibility()
+            if phase == .active, !LaunchOptions.isRunningUnitTests {
+                Task { await AppServices.shared.newEpisodes.checkFollowedShows() }
+            }
+            if phase == .background { NewEpisodeChecker.scheduleBackgroundCheck() }
+        }
         .onAppear { updateBrowserVisibility() }
         .alert("Unable to play video", isPresented: Binding(get: { playback.errorMessage != nil }, set: { if !$0 { playback.clearError() } })) {
             Button("OK", role: .cancel) { playback.clearError() }

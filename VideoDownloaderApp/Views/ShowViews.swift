@@ -174,6 +174,7 @@ struct ShowScreen: View {
     @State private var addingVideos: NewShowSeed?
     @State private var confirmingDelete = false
     @State private var pendingPlayback: DownloadItem?
+    @State private var checking = false
 
     var body: some View {
         let episodes = ShowPlaylist.episodes(of: show.id, in: items)
@@ -196,6 +197,30 @@ struct ShowScreen: View {
                     .accessibilityIdentifier("show.autoplay")
             } footer: {
                 Text("\(watched) of \(episodes.count) watched")
+            }
+            Section {
+                Toggle("Tell Me When the Next Episode Is Out", isOn: Binding(get: { show.notifyNewEpisodes }, set: { on in
+                    show.notifyNewEpisodes = on
+                    shows.save()
+                    if on { Task { _ = await NewEpisodeChecker.requestPermission() } }
+                }))
+                .accessibilityIdentifier("show.notify")
+                Toggle("Download It Automatically", isOn: Binding(get: { show.autoDownloadNewEpisodes }, set: { show.autoDownloadNewEpisodes = $0; shows.save() }))
+                    .accessibilityIdentifier("show.autoDownload")
+                if show.notifyNewEpisodes || show.autoDownloadNewEpisodes {
+                    Button(checking ? "Checking…" : "Check Now") {
+                        checking = true
+                        Task {
+                            await AppServices.shared.newEpisodes.check(show)
+                            checking = false
+                        }
+                    }
+                    .disabled(checking || show.followSourceURL == nil)
+                }
+            } header: {
+                Text("New Episodes")
+            } footer: {
+                Text(newEpisodesFooter)
             }
             Section("Episodes") {
                 ForEach(Array(episodes.enumerated()), id: \.element.id) { index, item in
@@ -262,6 +287,14 @@ struct ShowScreen: View {
             Button("Resume") { if let item = pendingPlayback { start(item, at: item.playbackPosition ?? 0) }; pendingPlayback = nil }
             Button("Start from Beginning") { if let item = pendingPlayback { start(item, at: 0) }; pendingPlayback = nil }
         } message: { Text("Continue where you stopped or play from the beginning?") }
+    }
+
+    private var newEpisodesFooter: String {
+        guard let page = show.followSourceURL, EpisodeURL.next(after: page) != nil else {
+            return "Works for sites whose episode pages are numbered, such as ***REMOVED*** and ***REMOVED***."
+        }
+        let checked = show.lastCheckedAt.map { " Last checked " + $0.formatted(.relative(presentation: .named)) + "." } ?? ""
+        return "Checks \(page.host ?? "the site") for the next episode when you open the app, and in the background now and then." + checked
     }
 
     /// "Ep. 10" when the title has an episode number, else the episode's place in the show.

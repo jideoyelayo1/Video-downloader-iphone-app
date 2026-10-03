@@ -23,6 +23,12 @@ struct VideoDownloaderAppApp: App {
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // iOS requires background tasks to be registered before launch finishes.
+        NewEpisodeChecker.registerBackgroundTask { await AppServices.shared.newEpisodes.checkFollowedShows() }
+        return true
+    }
+
     func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
         // The app may be launched in the background just for this, before any scene exists.
         AppServices.shared.downloads.setBackgroundCompletionHandler(completionHandler, for: identifier)
@@ -43,6 +49,7 @@ final class AppServices {
     let shows: ShowStore
     let subtitleEmbedder: SubtitleEmbedder
     let seasons: SeasonDownloader
+    let newEpisodes: NewEpisodeChecker
     /// App settings; a fresh, separate store when UI tests run with an in-memory library.
     let preferences: UserDefaults
 
@@ -68,6 +75,9 @@ final class AppServices {
         downloads.showStore = shows
         seasons = SeasonDownloader(downloads: downloads, shows: shows)
         seasons.diagnostics = diagnostics
+        newEpisodes = NewEpisodeChecker(shows: shows, downloads: downloads, preferences: preferences,
+                                        find: { [seasons] url in await seasons.findVideo(on: url) })
+        newEpisodes.diagnostics = diagnostics
         subtitleEmbedder = SubtitleEmbedder(context: context)
         subtitleEmbedder.diagnostics = diagnostics
         downloads.subtitleEmbedder = subtitleEmbedder

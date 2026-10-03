@@ -2,15 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>UIBackgroundModes</key>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>audio</string>
+		<string>com.jideoyelayo.VideoDownloaderApp.newEpisodes</string>
 	</array>
-	<!-- A general-purpose browser: pages and media hosts are chosen by the user and are often plain HTTP. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>fetch</string>
+	</array>
 </dict>
 </plist>
