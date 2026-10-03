@@ -16,6 +16,7 @@ struct VideoDownloaderAppApp: App {
                 .environmentObject(services.playback)
                 .environmentObject(services.labels)
                 .environmentObject(services.shows)
+                .environmentObject(services.seasons)
         }
         .modelContainer(services.container)
     }
@@ -41,6 +42,7 @@ final class AppServices {
     let labels: LabelStore
     let shows: ShowStore
     let subtitleEmbedder: SubtitleEmbedder
+    let seasons: SeasonDownloader
     /// App settings; a fresh, separate store when UI tests run with an in-memory library.
     let preferences: UserDefaults
 
@@ -64,6 +66,8 @@ final class AppServices {
         downloads.labelStore = labels
         downloads.preferences = preferences
         downloads.showStore = shows
+        seasons = SeasonDownloader(downloads: downloads, shows: shows)
+        seasons.diagnostics = diagnostics
         subtitleEmbedder = SubtitleEmbedder(context: context)
         subtitleEmbedder.diagnostics = diagnostics
         downloads.subtitleEmbedder = subtitleEmbedder

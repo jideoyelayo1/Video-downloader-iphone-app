@@ -94,12 +94,15 @@ final class BrowserViewModel: ObservableObject {
     private var variantURLs: Set<URL> = []
     /// Incremented on every page change so late probe results for the old page are dropped.
     private var generation = 0
+    /// Starts players muted so they reveal their streams; for the hidden browser that finds episodes.
+    private let autoplay: Bool
 
     init(initialURL: URL? = LaunchOptions.initialURL, diagnostics: DiagnosticsLog? = nil, history: BrowserHistoryStore? = nil,
-         validator: CandidateValidator = CandidateValidator(),
+         autoplay: Bool = LaunchOptions.autoplay, validator: CandidateValidator = CandidateValidator(),
          contextProvider: @escaping DownloadManager.ContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }) {
         self.diagnostics = diagnostics
         self.history = history
+        self.autoplay = autoplay
         self.validator = validator
         self.contextProvider = contextProvider
         pendingURL = initialURL
@@ -113,6 +116,20 @@ final class BrowserViewModel: ObservableObject {
 
     var readyCount: Int { statuses.values.filter(\.isReady).count }
 
+    var isChecking: Bool { candidates.contains { statuses[$0.id] == nil || statuses[$0.id] == .checking } }
+
+    /// The video Found videos lists first: a master playlist, else the longest, then largest.
+    var bestReady: (candidate: MediaCandidate, probe: ProbeResult)? {
+        let ready = candidates.compactMap { candidate -> (MediaCandidate, ProbeResult)? in
+            if case .ready(let probe)? = statuses[candidate.id] { return (candidate, probe) }
+            return nil
+        }
+        return ready.max { a, b in
+            let rank = { (probe: ProbeResult) in (probe.kind == .hls && !probe.variants.isEmpty ? 1 : 0, probe.duration ?? 0, Double(probe.expectedBytes ?? 0)) }
+            return rank(a.1) < rank(b.1)
+        }
+    }
+
     /// Returns the browser's single web view, creating and loading it on first use.
     func makeWebView() -> WKWebView {
         if let webView { return webView }
@@ -120,10 +137,10 @@ final class BrowserViewModel: ObservableObject {
         // Keep a site's player controls and external caption overlays with its
         // video. Forcing native full screen hides JW Player subtitle layers.
         configuration.allowsInlineMediaPlayback = true
-        if LaunchOptions.autoplay { configuration.mediaTypesRequiringUserActionForPlayback = [] }
+        if autoplay { configuration.mediaTypesRequiringUserActionForPlayback = [] }
         let contentController = WKUserContentController()
         contentController.add(WeakScriptMessageHandler(discovery), name: MediaDiscovery.messageName)
-        discovery.userScripts(diagnosticsEnabled: LaunchOptions.diagnosticsEnabled, autoplay: LaunchOptions.autoplay)
+        discovery.userScripts(diagnosticsEnabled: LaunchOptions.diagnosticsEnabled, autoplay: autoplay)
             .forEach(contentController.addUserScript)
         configuration.userContentController = contentController
 

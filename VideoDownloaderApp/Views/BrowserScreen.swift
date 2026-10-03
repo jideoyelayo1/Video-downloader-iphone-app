@@ -5,6 +5,7 @@ struct BrowserScreen: View {
     @ObservedObject var model: BrowserViewModel
     let showDownloads: () -> Void
     @EnvironmentObject private var downloads: DownloadManager
+    @EnvironmentObject private var seasons: SeasonDownloader
     @State private var showingCandidates = false
     @State private var showingCollections = false
     @FocusState private var addressFocused: Bool
@@ -48,13 +49,18 @@ struct BrowserScreen: View {
                 }
             }
             .sheet(isPresented: $showingCandidates) {
-                CandidateSheet(model: model) { candidate, probe, variant in
+                CandidateSheet(model: model, download: { candidate, probe, variant in
                     var candidate = candidate
                     candidate.kind = probe?.kind ?? candidate.kind
                     showingCandidates = false
                     if downloads.start(candidate, expectedBytes: probe?.expectedBytes, preferredBitrate: variant?.bandwidth,
                                        requiresReferer: probe?.requiresReferer ?? false, subtitles: model.subtitleTracks) != nil { showDownloads() }
-                }
+                }, downloadNextEpisodes: { count in
+                    guard let page = model.url else { return }
+                    showingCandidates = false
+                    seasons.start(after: page, count: count)
+                    showDownloads()
+                })
                 .presentationDetents([.medium, .large])
             }
             .sheet(isPresented: $showingCollections) {
@@ -123,7 +129,10 @@ private struct FoundVideosCount: View {
 private struct CandidateSheet: View {
     @ObservedObject var model: BrowserViewModel
     let download: (MediaCandidate, ProbeResult?, HLSVariant?) -> Void
+    var downloadNextEpisodes: (Int) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var seasons: SeasonDownloader
+    @State private var nextEpisodeCount = 3
 
     private enum Group: Int, CaseIterable {
         case ready, checking, unavailable
@@ -207,6 +216,21 @@ private struct CandidateSheet: View {
                         .accessibilityIdentifier("candidate.subtitles")
                     } footer: {
                         Text("Saved with your download. Choose them from Captions when you play it in My Videos.")
+                    }
+                }
+                if model.readyCount > 0, let page = model.url, EpisodeURL.next(after: page) != nil {
+                    Section {
+                        Stepper("Next \(nextEpisodeCount) \(nextEpisodeCount == 1 ? "episode" : "episodes")", value: $nextEpisodeCount, in: 1...24)
+                            .accessibilityIdentifier("season.count")
+                        Button {
+                            downloadNextEpisodes(nextEpisodeCount)
+                        } label: { Label("Download Next Episodes", systemImage: "square.stack.3d.down.forward") }
+                            .disabled(seasons.isRunning)
+                            .accessibilityIdentifier("season.download")
+                    } header: {
+                        Text("Season")
+                    } footer: {
+                        Text("Opens each next episode's page in the background, finds its video and downloads it. Stops at an episode that isn't out yet.")
                     }
                 }
             }

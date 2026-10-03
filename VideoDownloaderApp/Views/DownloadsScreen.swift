@@ -4,6 +4,7 @@ import SwiftUI
 struct DownloadsScreen: View {
     let openSource: (URL) -> Void
     @EnvironmentObject private var downloads: DownloadManager
+    @EnvironmentObject private var seasons: SeasonDownloader
     @Query(sort: \DownloadItem.createdAt, order: .reverse) private var items: [DownloadItem]
     @State private var searchText = ""
     @State private var showingDiagnostics = false
@@ -20,6 +21,16 @@ struct DownloadsScreen: View {
     var body: some View {
         NavigationStack {
             List {
+                if let status = seasons.status {
+                    Section {
+                        HStack(spacing: 10) {
+                            if seasons.isRunning { ProgressView() } else { Image(systemName: "square.stack.3d.down.forward").foregroundStyle(.tint) }
+                            Text(status).font(.subheadline).accessibilityIdentifier("season.status")
+                            Spacer(minLength: 0)
+                            if seasons.isRunning { Button("Cancel", action: seasons.cancel).buttonStyle(.borderless) }
+                        }
+                    } header: { Text("Next Episodes") }
+                }
                 if displayed.isEmpty {
                     ContentUnavailableView(items.isEmpty ? "No downloads" : "No matching downloads", systemImage: "arrow.down.circle",
                                            description: Text(items.isEmpty ? "Videos you download in Browse appear here." : "Try another search."))

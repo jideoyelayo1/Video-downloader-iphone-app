@@ -247,6 +247,13 @@ final class LocalMediaServer {
             if request.path.hasPrefix("/page/"), let html = Self.pages[String(request.path.dropFirst(6))] {
                 return .text(html, "text/html; charset=utf-8")
             }
+            // A three-episode series with numbered pages, for season downloads; episode 4 isn't out.
+            if let number = Self.seriesEpisode(request.path) {
+                guard (1...3).contains(number) else { return .text(Self.page("Not Found", "<p>No such episode</p>"), "text/html", status: 404) }
+                return .text(Self.page("Fixture Series Ep. \(number)", #"<video src="/series/video-\#(number).mp4" controls playsinline width="320" height="180"></video>"#),
+                             "text/html; charset=utf-8")
+            }
+            if request.path.hasPrefix("/series/video-") { return mp4 }
             if request.path.hasPrefix("/hls/"), let segment = fixtures.hlsSegments[String(request.path.dropFirst(5))] {
                 return .data(segment, Self.contentType(forExtension: (request.path as NSString).pathExtension))
             }
@@ -326,6 +333,12 @@ final class LocalMediaServer {
         let index = lines.firstIndex { $0.hasPrefix("#EXTINF") } ?? lines.count
         lines.insert(#"#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://key",KEYFORMAT="com.apple.streamingkeydelivery",KEYFORMATVERSIONS="1""#, at: index)
         return lines.joined(separator: "\n")
+    }
+
+    /// `/series/ep-2.html` → 2.
+    private static func seriesEpisode(_ path: String) -> Int? {
+        guard path.hasPrefix("/series/ep-"), path.hasSuffix(".html") else { return nil }
+        return Int(path.dropFirst("/series/ep-".count).dropLast(".html".count))
     }
 
     private static func page(_ title: String, _ body: String) -> String {

@@ -546,6 +546,22 @@ final class DownloadFlowUITests: XCTestCase {
         closePlayer()
     }
 
+    func testNextEpisodesDownloadFromFoundVideos() throws {
+        launch(at: "/series/ep-1.html")
+        waitForReadyCandidates(1).tap()
+        let download = app.buttons["season.download"]
+        XCTAssertTrue(download.waitForExistence(timeout: 5), "numbered episode pages offer the next episodes")
+        XCTAssertTrue(app.staticTexts["Next 3 episodes"].exists)
+        download.tap()
+        let status = app.staticTexts["season.status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        wait(for: status, "label BEGINSWITH 'Queued 2 episodes'", timeout: 60, status.label)
+        let statuses = app.staticTexts.matching(identifier: "download.status")
+        wait(for: statuses.element(boundBy: 1), "label BEGINSWITH 'Completed'", timeout: 30, "episode downloads complete")
+        XCTAssertTrue(app.staticTexts["Fixture Series Ep. 2"].exists)
+        XCTAssertTrue(app.staticTexts["Fixture Series Ep. 3"].exists)
+    }
+
     func testResumeSeekAndContinueWatching() throws {
         launch(at: "/page/long.html")
         downloadFirstCandidate()
