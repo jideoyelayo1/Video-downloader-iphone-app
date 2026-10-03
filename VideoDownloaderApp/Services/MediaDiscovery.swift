@@ -220,15 +220,17 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
     })();
     """#
 
-    /// Debug-only helper for the site compatibility gate: starts muted playback so players reveal their streams.
+    /// Starts muted playback so players reveal their streams: for the hidden browser that finds
+    /// episodes, and in Debug builds for site checks (`-DiagnosticsAutoplay`).
     static let autoplaySource = #"""
     (() => {
       const tryPlay = () => {
         document.querySelectorAll('video').forEach(v => { try { v.muted = true; const p = v.play(); if (p) p.catch(() => {}); } catch (_) {} });
-        const button = document.querySelector('.jw-icon-display, .jw-display-icon-container, .vjs-big-play-button, .plyr__control--overlaid, media-play-button, [aria-label="Play"], .play-button, #play');
+        // Overlay play buttons of common players, and of site templates (***REMOVED***, ***REMOVED***: #player .play).
+        const button = document.querySelector('.jw-icon-display, .jw-display-icon-container, .vjs-big-play-button, .plyr__control--overlaid, media-play-button, [aria-label="Play"], .play-button, #play, #player .play, #w-player .play, .player-wrapper .play, .btn-play, .play-btn, [class*="big-play"]');
         if (button) { try { button.click(); } catch (_) {} }
       };
-      [2000, 5000, 10000].forEach(delay => setTimeout(tryPlay, delay));
+      [2000, 5000, 10000, 20000, 30000].forEach(delay => setTimeout(tryPlay, delay));
     })();
     """#
 

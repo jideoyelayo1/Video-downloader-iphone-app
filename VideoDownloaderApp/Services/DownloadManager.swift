@@ -126,7 +126,7 @@ final class DownloadManager: NSObject, ObservableObject {
             labelStore?.applyAutomaticLabels(to: existing)
             return existing
         }
-        let title = candidate.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = EpisodeURL.title(candidate.title.trimmingCharacters(in: .whitespacesAndNewlines), numberedFrom: candidate.sourcePageURL)
         let item = DownloadItem(title: title.isEmpty ? "Video" : title, remoteURL: candidate.url, sourcePageURL: candidate.sourcePageURL,
                                 refererURL: candidate.referer, kind: candidate.kind, preferredBitrate: preferredBitrate,
                                 requiresReferer: requiresReferer)

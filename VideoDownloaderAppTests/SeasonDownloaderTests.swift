@@ -19,6 +19,15 @@ final class SeasonDownloaderTests: XCTestCase {
         XCTAssertNil(next("https://***REMOVED***.ru/play/8a3c/5f2d1e0b7a"), "no episode number in the address")
         XCTAssertEqual(EpisodeURL.number(in: URL(string: "https://www.***REMOVED***.to/watch/1/x?ep=7")!), 7)
         XCTAssertTrue(SeasonDownloader.isVerificationPage(title: "Just a moment..."))
+
+        let ***REMOVED*** = URL(string: "https://www.***REMOVED***.to/watch/W89s7g854PobER8iJIsw61vU_EkyYyOg/attack-on-titan?ep=2")!
+        XCTAssertEqual(EpisodeURL.title("Watch Attack on Titan · ***REMOVED***", numberedFrom: ***REMOVED***), "Watch Attack on Titan Ep. 2 · ***REMOVED***",
+                       "***REMOVED***'s titles don't say which episode")
+        XCTAssertEqual(ShowSuggestion.parse(DownloadItem.displayTitle("Watch Attack on Titan Ep. 2 · ***REMOVED***", host: "www.***REMOVED***.to")),
+                       .init(series: "Attack on Titan", season: nil, episode: 2))
+        let ***REMOVED*** = URL(string: "https://***REMOVED***.to/anime/x/p-9-dub")!
+        XCTAssertEqual(EpisodeURL.title("***REMOVED*** Ep. 9 · ***REMOVED***", numberedFrom: ***REMOVED***),
+                       "***REMOVED*** Ep. 9 · ***REMOVED***", "titles that have a number are left alone")
     }
 
     /// From episode 1, "the next 3 episodes" finds 2 and 3, then stops because 4 isn't out.
