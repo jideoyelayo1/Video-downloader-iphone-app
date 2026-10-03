@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import MediaPlayer
 import SwiftData
 import SwiftUI
 
@@ -46,6 +47,14 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// False in unit tests, which exercise playback without presenting view controllers.
     private let presentsPlayer: Bool
     private var subtitlesButton: UIButton?
+    /// Episode menu for videos in a show: next/previous, intro and credits marks.
+    private var showButton: UIButton?
+    /// The column of buttons beside AVKit's controls, which shows and fades with them.
+    private var sideControls: UIStackView?
+    private var skipIntroButton: UIButton?
+    private var showObserver: Any?
+    private var reachedCredits = false
+    private var skippedIntroAutomatically = false
     private var controlsSync: Timer?
     private weak var avkitCloseButton: UIView?
     private var selectionObserver: NSObjectProtocol?
@@ -173,7 +182,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         automaticSelectionWindowEnd = Date().addingTimeInterval(2)
         automaticSelectionReverts = 0
         observeSelection(of: playerItem)
-        installSubtitlesButton(for: player)
+        installSideControls()
+        observeShowPlayback(of: player)
+        applyShowSpeed()
+        configureRemoteCommands()
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 600), queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.savePosition() }
         }
@@ -328,10 +340,46 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
                            note: (index.map { captionNames[$0] } ?? (forcedSelected ? "Forced subtitles only" : "Off")) + " (player menu)")
     }
 
-    /// AVKit can't list subtitle files that aren't part of the media, so videos saved with site
-    /// subtitles get one button beside AVKit's own. It appears and fades with AVKit's controls.
-    private func installSubtitlesButton(for player: AVPlayer) {
-        guard !siteSubtitles.isEmpty, subtitlesButton == nil else { return }
+    /// Buttons AVKit has no place for, in a column beside its controls that appears and fades
+    /// with them: Subtitles for site subtitle files AVKit can't list, and an episode menu for
+    /// videos in a show.
+    private func installSideControls() {
+        guard sideControls == nil else { return }
+        var buttons: [UIButton] = []
+        if !siteSubtitles.isEmpty {
+            let button = Self.sideButton(systemImage: "captions.bubble", identifier: "player.captions", label: "Subtitles")
+            subtitlesButton = button
+            buttons.append(button)
+        }
+        if let item, shows?.show(for: item) != nil {
+            let button = Self.sideButton(systemImage: "rectangle.stack", identifier: "player.episode", label: "Episode options")
+            // Built when opened, so the times and the next episode are current.
+            button.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+                MainActor.assumeIsolated { completion(self?.episodeMenuElements() ?? []) }
+            }])
+            showButton = button
+            buttons.append(button)
+        }
+        guard !buttons.isEmpty else { return }
+        let stack = UIStackView(arrangedSubviews: buttons)
+        stack.axis = .vertical
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        controller.view.addSubview(stack)
+        let guide = controller.view.safeAreaLayoutGuide
+        NSLayoutConstraint.activate([
+            stack.centerYAnchor.constraint(equalTo: guide.centerYAnchor),
+            stack.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16)
+        ])
+        sideControls = stack
+        refreshSubtitlesMenu()
+        // AVKit doesn't report when its controls show or hide, so follow its close button.
+        controlsSync = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.matchAVKitControls() }
+        }
+    }
+
+    private static func sideButton(systemImage: String, identifier: String, label: String) -> UIButton {
         var configuration: UIButton.Configuration
         if #available(iOS 26.0, *) {
             configuration = .glass()
@@ -340,34 +388,189 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             configuration.baseBackgroundColor = UIColor(white: 0.12, alpha: 0.72)
             configuration.cornerStyle = .capsule
         }
-        configuration.image = UIImage(systemName: "captions.bubble")
+        configuration.image = UIImage(systemName: systemImage)
         configuration.baseForegroundColor = .white
         let button = UIButton(configuration: configuration)
         button.showsMenuAsPrimaryAction = true
-        button.accessibilityIdentifier = "player.captions"
-        button.accessibilityLabel = "Subtitles"
+        button.accessibilityIdentifier = identifier
+        button.accessibilityLabel = label
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 48),
+            button.heightAnchor.constraint(equalToConstant: 48)
+        ])
+        return button
+    }
+
+    private func matchAVKitControls() {
+        guard let sideControls else { return }
+        let target: CGFloat = avkitControlsVisible() == false ? 0 : 1
+        guard sideControls.alpha != target else { return }
+        UIView.animate(withDuration: 0.25) { sideControls.alpha = target }
+    }
+
+    // MARK: Shows: episodes, intro and credits, speed
+
+    private var currentShow: Show? { item.flatMap { shows?.show(for: $0) } }
+
+    private func episodeMenuElements() -> [UIMenuElement] {
+        guard let item, let show = currentShow, let shows else { return [] }
+        var episodes: [UIMenuElement] = []
+        if let next = shows.episode(1, from: item) {
+            episodes.append(UIAction(title: "Next Episode", subtitle: next.displayTitle, image: UIImage(systemName: "forward.end")) { [weak self] _ in
+                self?.playNext(next)
+            })
+        }
+        if let previous = shows.episode(-1, from: item) {
+            episodes.append(UIAction(title: "Previous Episode", subtitle: previous.displayTitle, image: UIImage(systemName: "backward.end")) { [weak self] _ in
+                self?.playNext(previous)
+            })
+        }
+        var marks: [UIMenuElement] = [
+            UIAction(title: "Intro Starts Here", subtitle: show.introStart.map(IntroSkip.timeText)) { [weak self] _ in
+                self?.markShow { show, position, _ in show.introStart = position }
+            },
+            UIAction(title: "Intro Ends Here", subtitle: show.introEnd.map(IntroSkip.timeText)) { [weak self] _ in
+                self?.markShow { show, position, _ in show.introEnd = position }
+            },
+            UIAction(title: "Credits Start Here", subtitle: show.creditsFromEnd.map { IntroSkip.timeText($0) + " before the end" }) { [weak self] _ in
+                self?.markShow { show, position, duration in
+                    if let duration, duration > position { show.creditsFromEnd = duration - position }
+                }
+            },
+            UIAction(title: "Skip Intro Automatically", state: show.autoSkipIntro ? .on : .off) { [weak self] _ in
+                show.autoSkipIntro.toggle()
+                self?.shows?.save()
+            }
+        ]
+        if show.hasIntroOrCredits {
+            marks.append(UIAction(title: "Clear Intro and Credits", attributes: .destructive) { [weak self] _ in
+                show.introStart = nil
+                show.introEnd = nil
+                show.creditsFromEnd = nil
+                self?.shows?.save()
+                self?.setSkipIntroVisible(false)
+            })
+        }
+        return [UIMenu(title: show.title, options: .displayInline, children: episodes),
+                UIMenu(title: "Intro and Credits (all episodes)", options: .displayInline, children: marks)]
+    }
+
+    private func markShow(_ change: (Show, Double, Double?) -> Void) {
+        guard let show = currentShow, let position = controller.player?.currentTime().seconds, position.isFinite else { return }
+        change(show, position, item?.duration ?? controller.player?.currentItem?.duration.seconds)
+        shows?.save()
+        diagnostics.record(event: "playback", url: item?.localURL?.absoluteString ?? "app://player",
+                           note: "Marked \(show.title): intro \(show.introStart.map(IntroSkip.timeText) ?? "–")–\(show.introEnd.map(IntroSkip.timeText) ?? "–"), credits \(show.creditsFromEnd.map(IntroSkip.timeText) ?? "–") before the end")
+    }
+
+    /// Skip Intro, the start of the credits, and the speed chosen for the show.
+    private func observeShowPlayback(of player: AVPlayer) {
+        reachedCredits = false
+        skippedIntroAutomatically = false
+        guard currentShow != nil else { return }
+        showObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 2), queue: .main) { [weak self] time in
+            MainActor.assumeIsolated { self?.showPlaybackTick(at: time.seconds) }
+        }
+    }
+
+    /// Checked twice a second while an episode of a show plays.
+    func showPlaybackTick(at position: Double) {
+        guard let item, let show = currentShow else { return }
+        let inIntro = IntroSkip.isInIntro(position, start: show.introStart, end: show.introEnd)
+        if inIntro && show.autoSkipIntro {
+            if !skippedIntroAutomatically {
+                skippedIntroAutomatically = true
+                skipIntro()
+            }
+        } else {
+            setSkipIntroVisible(inIntro)
+        }
+        if !reachedCredits, let credits = IntroSkip.creditsStart(duration: item.duration, fromEnd: show.creditsFromEnd), position >= credits {
+            reachedCredits = true
+            item.setWatched(true)
+            try? context.save()
+            // Up Next appears with the credits; in Picture in Picture the episode plays to its end.
+            if presentsPlayer, !isInPiP, upNextItem == nil, let next = shows?.autoplayNext(after: item) { showUpNext(next) }
+        }
+        rememberShowSpeed(show)
+    }
+
+    func skipIntro() {
+        guard let end = currentShow?.introEnd, let player = controller.player else { return }
+        setSkipIntroVisible(false)
+        player.seek(to: CMTime(seconds: end, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func setSkipIntroVisible(_ visible: Bool) {
+        guard presentsPlayer else { return }
+        if !visible {
+            skipIntroButton?.removeFromSuperview()
+            skipIntroButton = nil
+            return
+        }
+        guard skipIntroButton == nil else { return }
+        var configuration = UIButton.Configuration.filled()
+        configuration.title = "Skip Intro"
+        configuration.image = UIImage(systemName: "forward.fill")
+        configuration.imagePadding = 6
+        configuration.cornerStyle = .capsule
+        configuration.baseBackgroundColor = UIColor(white: 0.95, alpha: 0.92)
+        configuration.baseForegroundColor = .black
+        let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in self?.skipIntro() })
+        button.accessibilityIdentifier = "player.skipIntro"
         button.translatesAutoresizingMaskIntoConstraints = false
         controller.view.addSubview(button)
         let guide = controller.view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 48),
-            button.heightAnchor.constraint(equalToConstant: 48),
-            button.centerYAnchor.constraint(equalTo: guide.centerYAnchor),
-            button.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16)
+            button.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+            button.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -100)
         ])
-        subtitlesButton = button
-        refreshSubtitlesMenu()
-        // AVKit doesn't report when its controls show or hide, so follow its close button.
-        controlsSync = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.matchAVKitControls() }
+        skipIntroButton = button
+    }
+
+    /// AVKit's speed menu sets `selectedSpeed`; the show keeps the last one chosen.
+    private func rememberShowSpeed(_ show: Show) {
+        guard let rate = controller.selectedSpeed?.rate else { return }
+        let stored: Double? = abs(rate - 1) < 0.01 ? nil : Double(rate)
+        guard stored != show.playbackRate else { return }
+        show.playbackRate = stored
+        shows?.save()
+    }
+
+    private func applyShowSpeed() {
+        guard let rate = currentShow?.playbackRate,
+              let speed = controller.speeds.first(where: { abs(Double($0.rate) - rate) < 0.01 }) else { return }
+        controller.selectSpeed(speed)
+    }
+
+    /// Next and previous episode from the Lock Screen and Control Center.
+    private func configureRemoteCommands() {
+        // Only for the player on screen; unit tests drive `playEpisode` directly.
+        guard presentsPlayer else { return }
+        let center = MPRemoteCommandCenter.shared()
+        center.nextTrackCommand.removeTarget(nil)
+        center.previousTrackCommand.removeTarget(nil)
+        guard let item, let shows, item.showID != nil else {
+            center.nextTrackCommand.isEnabled = false
+            center.previousTrackCommand.isEnabled = false
+            return
+        }
+        center.nextTrackCommand.isEnabled = shows.episode(1, from: item) != nil
+        center.previousTrackCommand.isEnabled = shows.episode(-1, from: item) != nil
+        center.nextTrackCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated { self?.playEpisode(1) == true ? .success : .noSuchContent }
+        }
+        center.previousTrackCommand.addTarget { [weak self] _ in
+            MainActor.assumeIsolated { self?.playEpisode(-1) == true ? .success : .noSuchContent }
         }
     }
 
-    private func matchAVKitControls() {
-        guard let subtitlesButton else { return }
-        let target: CGFloat = avkitControlsVisible() == false ? 0 : 1
-        guard subtitlesButton.alpha != target else { return }
-        UIView.animate(withDuration: 0.25) { subtitlesButton.alpha = target }
+    /// Plays the next (1) or previous (-1) episode of the current show in the same player.
+    @discardableResult
+    func playEpisode(_ offset: Int) -> Bool {
+        guard let item, let episode = shows?.episode(offset, from: item) else { return false }
+        playNext(episode)
+        return true
     }
 
     /// Whether AVKit is showing its controls, judged by its close button; nil if it can't be found,
@@ -483,6 +686,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             controller.dismiss(animated: true)
         }
         item = nil
+        configureRemoteCommands()
         errorMessage = nil
         isLoading = false
         isPresented = false
@@ -511,8 +715,15 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         selectionObserver = nil
         controlsSync?.invalidate()
         controlsSync = nil
-        subtitlesButton?.removeFromSuperview()
+        if let showObserver, let player = controller.player { player.removeTimeObserver(showObserver) }
+        showObserver = nil
+        sideControls?.removeFromSuperview()
+        sideControls = nil
         subtitlesButton = nil
+        showButton = nil
+        setSkipIntroVisible(false)
+        reachedCredits = false
+        skippedIntroAutomatically = false
         hideUpNext()
         captionGroup = nil
         captionOptions = []

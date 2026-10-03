@@ -84,6 +84,21 @@ final class ShowStore: ObservableObject {
         save()
     }
 
+    func show(for item: DownloadItem) -> Show? {
+        guard let showID = item.showID else { return nil }
+        return shows.first { $0.id == showID }
+    }
+
+    /// The episode `offset` places away in the watch order (1 is next, -1 previous), if its file is there.
+    func episode(_ offset: Int, from item: DownloadItem) -> DownloadItem? {
+        guard let showID = item.showID else { return nil }
+        let episodes = ShowPlaylist.episodes(of: showID, in: videos())
+        guard let index = episodes.firstIndex(where: { $0.id == item.id }), episodes.indices.contains(index + offset) else { return nil }
+        let episode = episodes[index + offset]
+        guard let url = episode.localURL, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return episode
+    }
+
     /// The episode after this one when its show plays on automatically and the file is still there.
     func autoplayNext(after item: DownloadItem) -> DownloadItem? {
         guard let showID = item.showID, let show = shows.first(where: { $0.id == showID }), show.autoplayNext else { return nil }

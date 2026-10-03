@@ -118,6 +118,8 @@ final class DownloadItem {
     /// The show this video is an episode of, and its place in the show's watch order.
     var showID: UUID?
     var showOrder: Int?
+    /// The page's poster or preview image, used as artwork.
+    var posterURL: URL?
 
     init(id: UUID = UUID(), title: String, remoteURL: URL, sourcePageURL: URL, refererURL: URL? = nil, kind: MediaKind,
          status: DownloadStatus = .queued, createdAt: Date = Date(), preferredBitrate: Int? = nil, requiresReferer: Bool = false) {
@@ -219,6 +221,19 @@ final class Show {
     var title: String
     var autoplayNextRaw: Bool?
     var createdAt: Date
+    /// The intro, marked by the viewer in the player, in seconds from the start of an episode.
+    var introStart: Double?
+    var introEnd: Double?
+    /// Where the credits start, in seconds before the end, so it fits episodes of any length.
+    var creditsFromEnd: Double?
+    var autoSkipIntroRaw: Bool?
+    /// Playback speed chosen in the player; nil is normal speed.
+    var playbackRate: Double?
+    /// The page of the latest episode, for checking whether the next one is out.
+    var followSourceURL: URL?
+    var notifyNewEpisodesRaw: Bool?
+    var autoDownloadNewEpisodesRaw: Bool?
+    var lastCheckedAt: Date?
 
     init(id: UUID = UUID(), title: String, autoplayNext: Bool = true, createdAt: Date = Date()) {
         self.id = id
@@ -231,6 +246,23 @@ final class Show {
         get { autoplayNextRaw ?? true }
         set { autoplayNextRaw = newValue }
     }
+
+    var autoSkipIntro: Bool {
+        get { autoSkipIntroRaw ?? false }
+        set { autoSkipIntroRaw = newValue }
+    }
+
+    var notifyNewEpisodes: Bool {
+        get { notifyNewEpisodesRaw ?? false }
+        set { notifyNewEpisodesRaw = newValue }
+    }
+
+    var autoDownloadNewEpisodes: Bool {
+        get { autoDownloadNewEpisodesRaw ?? false }
+        set { autoDownloadNewEpisodesRaw = newValue }
+    }
+
+    var hasIntroOrCredits: Bool { introStart != nil || introEnd != nil || creditsFromEnd != nil }
 }
 
 @Model

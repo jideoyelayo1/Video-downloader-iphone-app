@@ -309,4 +309,37 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.title, "Fixture Show Ep. 1")
         coordinator.close()
     }
+
+    func testIntroIsSkippedCreditsCountAsWatchedAndSpeedIsKept() async throws {
+        let coordinator = makeCoordinator()
+        let shows = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "PlaybackCoordinatorTests-\(UUID().uuidString)")!)
+        coordinator.shows = shows
+        let first = try makeEpisode(1), second = try makeEpisode(2)
+        let show = shows.create(title: "Fixture Show", with: [first, second])
+        show.introStart = 1
+        show.introEnd = 3
+        show.creditsFromEnd = 1
+        show.autoSkipIntro = true
+        show.playbackRate = 1.5
+
+        coordinator.open(first, at: 0)
+        try await waitUntil("ready") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        XCTAssertEqual(coordinator.controller.selectedSpeed?.rate, 1.5, "the show's speed is applied")
+        let player = try XCTUnwrap(coordinator.controller.player)
+        player.pause()
+        coordinator.showPlaybackTick(at: 1.2)
+        try await waitUntil("skipped past the intro") { player.currentTime().seconds >= 2.9 }
+        XCTAssertFalse(first.isWatched)
+        coordinator.showPlaybackTick(at: 4.2)
+        XCTAssertTrue(first.isWatched, "the credits count as the end")
+
+        // Next and previous episode, as from the Lock Screen.
+        XCTAssertTrue(coordinator.playEpisode(1))
+        try await waitUntil("episode 2") { coordinator.title == "Fixture Show Ep. 2" && !coordinator.isLoading }
+        XCTAssertTrue(coordinator.controller.player === player)
+        XCTAssertFalse(coordinator.playEpisode(1), "no episode after the last")
+        XCTAssertTrue(coordinator.playEpisode(-1))
+        try await waitUntil("back to episode 1") { coordinator.title == "Fixture Show Ep. 1" && !coordinator.isLoading }
+        coordinator.close()
+    }
 }
