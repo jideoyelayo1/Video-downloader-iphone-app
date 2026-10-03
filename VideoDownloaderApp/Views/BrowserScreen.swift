@@ -249,6 +249,9 @@ private struct CandidateRow: View {
                 Text(headline).font(.headline).lineLimit(2)
                 Text(details).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 statusView
+                if let spaceWarning {
+                    Label(spaceWarning, systemImage: "externaldrive.badge.exclamationmark").font(.caption).foregroundStyle(.orange)
+                }
                 if masterAvailable, let probe, probe.kind == .hls, probe.variants.isEmpty {
                     Text("The master playlist above also includes every quality, audio and caption track.")
                         .font(.caption).foregroundStyle(.orange)
@@ -295,6 +298,13 @@ private struct CandidateRow: View {
         return parts.joined(separator: " · ")
     }
 
+    /// Shown before downloading when the video won't fit in the space left.
+    private var spaceWarning: String? {
+        guard let bytes = probe?.expectedBytes, let free = DownloadStorage.availableCapacity(), bytes > free else { return nil }
+        return "Needs " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) + ", but only "
+            + ByteCountFormatter.string(fromByteCount: free, countStyle: .file) + " is free."
+    }
+
     @ViewBuilder private var statusView: some View {
         switch status {
         case .checking:
@@ -318,7 +328,7 @@ private struct CandidateRow: View {
                 Button("Best quality") { download(candidate, probe, nil) }
                 // Variants can share a playlist URL (e.g. across audio groups), so rows are keyed by position.
                 ForEach(Array(probe.variants.enumerated()), id: \.offset) { _, variant in
-                    Button(variant.qualityLabel) { download(candidate, probe, variant) }
+                    Button(variant.menuTitle(duration: probe.duration)) { download(candidate, probe, variant) }
                 }
             } label: { Label("Download", systemImage: "arrow.down") }
             .buttonStyle(.borderedProminent)

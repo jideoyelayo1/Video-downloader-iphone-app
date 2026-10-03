@@ -12,6 +12,18 @@ struct HLSVariant: Equatable {
         if let bandwidth, bandwidth > 0 { return "\(bandwidth / 1000) kbps" }
         return "Auto"
     }
+
+    /// Roughly how much this quality takes for a stream of the given length (peak bandwidth, so an upper estimate).
+    func estimatedBytes(duration: Double?) -> Int64? {
+        guard let bandwidth, bandwidth > 0, let duration, duration.isFinite, duration > 0 else { return nil }
+        return Int64(Double(bandwidth) / 8 * duration)
+    }
+
+    /// "720p · about 351 MB".
+    func menuTitle(duration: Double?) -> String {
+        guard let bytes = estimatedBytes(duration: duration) else { return qualityLabel }
+        return qualityLabel + " · about " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
 }
 
 enum HLSManifest: Equatable {

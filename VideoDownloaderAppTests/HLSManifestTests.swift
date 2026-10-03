@@ -132,4 +132,12 @@ final class HLSManifestTests: XCTestCase {
         ])
         XCTAssertTrue(HLSManifest.renditionURLs(in: "#EXTM3U\n#EXTINF:4,\nseg.ts\n", baseURL: base).isEmpty)
     }
+
+    func testQualitySizesAreEstimatedFromBandwidthAndLength() {
+        let variant = HLSVariant(url: URL(string: "https://cdn.example/720.m3u8")!, bandwidth: 2_000_000, resolution: "1280x720")
+        XCTAssertEqual(variant.estimatedBytes(duration: 1_440), 360_000_000)
+        XCTAssertTrue(variant.menuTitle(duration: 1_440).hasPrefix("720p · about "), variant.menuTitle(duration: 1_440))
+        XCTAssertEqual(variant.menuTitle(duration: nil), "720p")
+        XCTAssertNil(HLSVariant(url: variant.url, bandwidth: nil, resolution: nil).estimatedBytes(duration: 100))
+    }
 }
