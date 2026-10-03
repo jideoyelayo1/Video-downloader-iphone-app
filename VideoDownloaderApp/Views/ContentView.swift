@@ -4,7 +4,8 @@ struct ContentView: View {
     @EnvironmentObject private var downloads: DownloadManager
     @EnvironmentObject private var playback: PlaybackCoordinator
     @StateObject private var browser = BrowserViewModel(diagnostics: AppServices.shared.diagnostics, history: AppServices.shared.history)
-    @State private var selection = Tab.library
+    /// A page given with `-StartURL` (tests and site checks) opens in Browse.
+    @State private var selection = LaunchOptions.value("-StartURL") != nil ? Tab.browse : Tab.library
     @Environment(\.scenePhase) private var scenePhase
 
     enum Tab { case browse, downloads, library }
