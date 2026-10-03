@@ -48,10 +48,13 @@ struct DownloadsScreen: View {
                         .accessibilityIdentifier("downloads.concurrent")
                     Toggle("Wi-Fi Only", isOn: Binding(get: { downloads.downloadsOnWiFiOnly }, set: { downloads.downloadsOnWiFiOnly = $0 }))
                         .accessibilityIdentifier("downloads.wifiOnly")
+                    Toggle("Delete Watched Videos After a Week", isOn: Binding(get: { downloads.deletesWatchedAfterAWeek },
+                                                                              set: { downloads.deletesWatchedAfterAWeek = $0 }))
+                        .accessibilityIdentifier("downloads.autoDelete")
                 } header: {
                     Text("Settings")
                 } footer: {
-                    Text("More downloads wait as Queued. With Wi-Fi Only, new downloads don't use mobile data.")
+                    Text("More downloads wait as Queued. With Wi-Fi Only, new downloads don't use mobile data. Watched videos are deleted when the app opens, a week after you watched them.")
                 }
             }
             .navigationTitle("Downloads")

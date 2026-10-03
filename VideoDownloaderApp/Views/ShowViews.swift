@@ -166,9 +166,11 @@ struct ShowScreen: View {
     @Bindable var show: Show
     @EnvironmentObject private var shows: ShowStore
     @EnvironmentObject private var playback: PlaybackCoordinator
+    @EnvironmentObject private var downloads: DownloadManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(filter: #Predicate<DownloadItem> { $0.statusRaw == "completed" }) private var items: [DownloadItem]
+    @State private var confirmingDeleteWatched = false
     @State private var renaming = false
     @State private var newTitle = ""
     @State private var addingVideos: NewShowSeed?
@@ -196,7 +198,7 @@ struct ShowScreen: View {
                 Toggle("Autoplay Next Episode", isOn: Binding(get: { show.autoplayNext }, set: { show.autoplayNext = $0; shows.save() }))
                     .accessibilityIdentifier("show.autoplay")
             } footer: {
-                Text("\(watched) of \(episodes.count) watched")
+                Text("\(watched) of \(episodes.count) watched · \(StorageCleanup.sizeText(episodes))")
             }
             Section {
                 Toggle("Tell Me When the Next Episode Is Out", isOn: Binding(get: { show.notifyNewEpisodes }, set: { on in
@@ -257,6 +259,11 @@ struct ShowScreen: View {
                     Button("Order by Episode Number", systemImage: "list.number") { shows.orderByEpisodeNumber(show) }
                     Button("Mark All Watched", systemImage: "checkmark.circle") { shows.setAllWatched(show, true) }
                     Button("Mark All Unwatched", systemImage: "circle") { shows.setAllWatched(show, false) }
+                    let watchedEpisodes = episodes.filter(\.isWatched)
+                    if !watchedEpisodes.isEmpty {
+                        Button("Delete Watched Episodes (\(watchedEpisodes.count), \(StorageCleanup.sizeText(watchedEpisodes)))",
+                               systemImage: "trash.slash", role: .destructive) { confirmingDeleteWatched = true }
+                    }
                     Divider()
                     Button("Delete Show", systemImage: "trash", role: .destructive) { confirmingDelete = true }
                 } label: { Label("Show options", systemImage: "ellipsis.circle") }
@@ -272,6 +279,11 @@ struct ShowScreen: View {
             }
             Button("Cancel", role: .cancel) { }
         }
+        .confirmationDialog("Delete the watched episodes?", isPresented: $confirmingDeleteWatched, titleVisibility: .visible) {
+            Button("Delete Watched Episodes", role: .destructive) {
+                ShowPlaylist.episodes(of: show.id, in: items).filter(\.isWatched).forEach(downloads.delete)
+            }
+        } message: { Text("Their video files are removed from this iPhone. The show keeps the rest.") }
         .confirmationDialog("Delete this show?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Show", role: .destructive) {
                 // Leave first: the screen reads the show while it animates away.

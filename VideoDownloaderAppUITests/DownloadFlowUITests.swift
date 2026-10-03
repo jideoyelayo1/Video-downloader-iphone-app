@@ -562,6 +562,22 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Fixture Series Ep. 3"].exists)
     }
 
+    func testDeleteAShowsWatchedEpisodes() throws {
+        makeTwoEpisodeShow()
+        app.buttons["library.show"].firstMatch.tap()
+        let episodes = app.buttons.matching(identifier: "show.episode")
+        wait(for: episodes.element(boundBy: 1), "exists == true", timeout: 5, "both episodes")
+        episodes.element(boundBy: 0).swipeRight()
+        app.buttons["Watched"].tap()
+        app.buttons["show.options"].tap()
+        let delete = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Delete Watched Episodes (1'")).firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        delete.tap()
+        app.buttons["Delete Watched Episodes"].tap()
+        wait(for: episodes.element(boundBy: 1), "exists == false", timeout: 5, "the watched episode is deleted")
+        XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 2"), episodes.element(boundBy: 0).label)
+    }
+
     func testResumeSeekAndContinueWatching() throws {
         launch(at: "/page/long.html")
         downloadFirstCandidate()

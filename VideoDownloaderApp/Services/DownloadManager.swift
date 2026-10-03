@@ -237,9 +237,11 @@ final class DownloadManager: NSObject, ObservableObject {
         startQueued()
     }
 
+    func allItems() -> [DownloadItem] { (try? context.fetch(FetchDescriptor<DownloadItem>())) ?? [] }
+
     /// Starts queued downloads, oldest first, while fewer than the limit are running.
     func startQueued() {
-        let items = (try? context.fetch(FetchDescriptor<DownloadItem>())) ?? []
+        let items = allItems()
         var running = items.filter { $0.status == .downloading }.count
         for item in items.filter({ $0.status == .queued }).sorted(by: { $0.createdAt < $1.createdAt }) {
             guard running < maxConcurrentDownloads else { break }

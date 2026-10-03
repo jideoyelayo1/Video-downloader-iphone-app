@@ -85,7 +85,10 @@ final class AppServices {
         playback.shows = shows
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }
         downloads.diagnostics = diagnostics
-        if !LaunchOptions.isRunningUnitTests { Task { await subtitleEmbedder.embedPending() } }
+        if !LaunchOptions.isRunningUnitTests {
+            downloads.deleteOldWatchedVideos()
+            Task { await subtitleEmbedder.embedPending() }
+        }
     }
 }
 
