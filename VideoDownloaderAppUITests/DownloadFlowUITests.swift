@@ -17,8 +17,10 @@ final class DownloadFlowUITests: XCTestCase {
         server?.stop()
     }
 
-    private func launch(at path: String) {
-        app.launchArguments = ["-UITestInMemory", "-StartURL", server.url(path).absoluteString]
+    /// `keepOverlay`: site subtitles stay drawn by the app, whose text tells where playback is,
+    /// instead of moving into the video file.
+    private func launch(at path: String, keepOverlay: Bool = true) {
+        app.launchArguments = ["-UITestInMemory", "-StartURL", server.url(path).absoluteString] + (keepOverlay ? ["-KeepSiteSubtitleOverlay"] : [])
         app.launch()
         app.tabBars.buttons["Browse"].tap()
     }
@@ -148,10 +150,8 @@ final class DownloadFlowUITests: XCTestCase {
     }
 
     private func openSubtitlesMenu() {
-        revealPlayerControls()
-        app.buttons["More Controls"].tap()
         let subtitles = app.buttons["Subtitles"]
-        XCTAssertTrue(subtitles.waitForExistence(timeout: 5))
+        tapPlayerControl(app.buttons["More Controls"], opening: subtitles)
         subtitles.tap()
         XCTAssertTrue(subtitlesOffItem.waitForExistence(timeout: 5))
     }
@@ -485,6 +485,65 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertFalse(app.buttons["player.upNext.play"].exists)
         closePlayer()
         XCTAssertTrue(app.staticTexts["2 of 2 watched"].waitForExistence(timeout: 5))
+    }
+
+    /// The intro is marked once from the player, then offered as Skip Intro on the next viewing.
+    func testIntroMarkedInThePlayerIsSkipped() throws {
+        launch(at: "/page/long.html")
+        downloadFirstCandidate()
+        app.tabBars.buttons["My Videos"].tap()
+        let item = app.buttons["library.item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        // A show of one video, made from its menu.
+        app.buttons["library.moreOptions"].firstMatch.tap()
+        app.buttons["Add to Show"].tap()
+        app.buttons["New Show…"].firstMatch.tap()
+        let name = app.textFields["newShow.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Create"].tap()
+
+        item.tap()
+        let subtitle = app.staticTexts["player.subtitle"]
+        XCTAssertTrue(subtitle.waitForExistence(timeout: 10))
+        let episode = app.buttons["player.episode"]
+        wait(for: subtitle, "label == 'Ten to twenty'", timeout: 15, subtitle.label)
+        tapPlayerControl(episode, opening: app.buttons["Intro Starts Here"])
+        app.buttons["Intro Starts Here"].tap()
+        wait(for: subtitle, "label == 'Twenty to thirty'", timeout: 15, subtitle.label)
+        tapPlayerControl(episode, opening: app.buttons["Intro Ends Here"])
+        app.buttons["Intro Ends Here"].tap()
+        closePlayer()
+
+        item.tap()
+        XCTAssertTrue(app.buttons["Start from Beginning"].waitForExistence(timeout: 5))
+        app.buttons["Start from Beginning"].tap()
+        let skip = app.buttons["player.skipIntro"]
+        XCTAssertTrue(skip.waitForExistence(timeout: 15), "Skip Intro appears once the intro starts")
+        skip.tap()
+        wait(for: subtitle, "label == 'Twenty to thirty'", timeout: 5, subtitle.label)
+        XCTAssertFalse(skip.exists)
+        closePlayer()
+    }
+
+    /// Site subtitles move into a direct download, so iOS lists them itself (and shows them in
+    /// Picture in Picture), instead of the app's separate Subtitles button.
+    func testSiteSubtitlesMoveIntoTheVideoFile() throws {
+        launch(at: "/page/tracks.html", keepOverlay: false)
+        downloadFirstCandidate()
+        app.tabBars.buttons["My Videos"].tap()
+        let item = app.buttons["library.item"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        sleep(2)
+        item.tap()
+        XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
+        sleep(1)
+        XCTAssertFalse(app.buttons["player.captions"].exists, "no separate button: the subtitles are in the video")
+        openSubtitlesMenu()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Spanish'")).firstMatch.waitForExistence(timeout: 5),
+                      "iOS lists the site's languages")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'English'")).firstMatch.exists)
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Spanish'")).firstMatch.tap()
+        closePlayer()
     }
 
     func testResumeSeekAndContinueWatching() throws {

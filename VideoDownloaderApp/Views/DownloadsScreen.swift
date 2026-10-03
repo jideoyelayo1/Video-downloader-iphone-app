@@ -31,6 +31,17 @@ struct DownloadsScreen: View {
                     LabeledContent("Downloads used", value: usedSpace ?? "Calculating…")
                     LabeledContent("Available on iPhone", value: availableSpace ?? "Calculating…")
                 }
+                Section {
+                    Stepper("At most \(downloads.maxConcurrentDownloads) at once", value: Binding(get: { downloads.maxConcurrentDownloads },
+                                                                                                set: { downloads.maxConcurrentDownloads = $0 }), in: 1...4)
+                        .accessibilityIdentifier("downloads.concurrent")
+                    Toggle("Wi-Fi Only", isOn: Binding(get: { downloads.downloadsOnWiFiOnly }, set: { downloads.downloadsOnWiFiOnly = $0 }))
+                        .accessibilityIdentifier("downloads.wifiOnly")
+                } header: {
+                    Text("Settings")
+                } footer: {
+                    Text("More downloads wait as Queued. With Wi-Fi Only, new downloads don't use mobile data.")
+                }
             }
             .navigationTitle("Downloads")
             .searchable(text: $searchText, prompt: "Search downloads")
@@ -81,6 +92,8 @@ private struct LiveProgress<Content: View>: View {
 }
 
 private struct DownloadRow: View {
+    @EnvironmentObject private var downloads: DownloadManager
+    @ObservedObject private var network = NetworkMonitor.shared
     let item: DownloadItem
     let cancel: () -> Void
     let retry: () -> Void
@@ -149,8 +162,8 @@ private struct DownloadRow: View {
     private var statusText: String {
         if item.isStreamFragment && item.status == .completed { return "Stream fragment · not a complete video" }
         switch item.status {
-        case .queued: return "Waiting"
-        case .downloading: return "Downloading"
+        case .queued: return "Queued"
+        case .downloading: return downloads.downloadsOnWiFiOnly && !network.isOnWiFi ? "Waiting for Wi-Fi" : "Downloading"
         case .completed:
             var parts = ["Completed" + (item.completedTimeText.map { " \($0)" } ?? "")]
             if let size = item.fileSize { parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) }

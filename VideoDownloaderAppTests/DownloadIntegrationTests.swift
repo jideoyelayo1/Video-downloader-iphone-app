@@ -53,6 +53,24 @@ final class DownloadIntegrationTests: XCTestCase {
 
     // MARK: Direct files
 
+    /// Downloads beyond the limit wait as queued and start as others finish.
+    func testDownloadsBeyondTheLimitWaitTheirTurn() async throws {
+        let suite = "DownloadIntegrationTests-\(UUID().uuidString)"
+        manager.preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { manager.preferences.removePersistentDomain(forName: suite) }
+        manager.maxConcurrentDownloads = 2
+        let items = try ["/slow/video.mp4?a", "/slow/video.mp4?b", "/slow/video.mp4?c"].map { path in
+            try XCTUnwrap(manager.start(MediaCandidate(url: server.url(path), sourcePageURL: server.url("/page/basic.html"),
+                                                       title: "Queued \(path.suffix(1))", kind: .video)))
+        }
+        XCTAssertEqual(items.map(\.status), [.downloading, .downloading, .queued])
+        try await waitUntil(30) { items.allSatisfy { $0.status == .completed } }
+        XCTAssertTrue(items.allSatisfy { $0.status == .completed }, items.map { $0.errorMessage ?? "" }.joined(separator: "; "))
+        XCTAssertEqual(manager.maxConcurrentDownloads, 2)
+        manager.maxConcurrentDownloads = 9
+        XCTAssertEqual(manager.maxConcurrentDownloads, 4, "at most 4")
+    }
+
     func testDirectMP4DownloadsCompletely() async throws {
         let item = try start("/video.mp4")
         try await waitForFinish(item)

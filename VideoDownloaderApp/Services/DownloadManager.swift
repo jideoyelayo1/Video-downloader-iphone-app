@@ -21,6 +21,32 @@ final class DownloadManager: NSObject, ObservableObject {
     var diagnostics: DiagnosticsLog?
     /// Adds the site and rule labels to each new download.
     var labelStore: LabelStore?
+    /// Moves site subtitles into finished direct downloads, for Picture in Picture and AirPlay.
+    var subtitleEmbedder: SubtitleEmbedder?
+    /// Download settings; a separate store in tests.
+    var preferences: UserDefaults = .standard
+
+    private static let concurrentKey = "maxConcurrentDownloads"
+    private static let wifiOnlyKey = "downloadOnWiFiOnly"
+
+    /// At most this many downloads run at once; the rest wait as queued.
+    var maxConcurrentDownloads: Int {
+        get { min(max(preferences.object(forKey: Self.concurrentKey) as? Int ?? 2, 1), 4) }
+        set {
+            objectWillChange.send()
+            preferences.set(min(max(newValue, 1), 4), forKey: Self.concurrentKey)
+            startQueued()
+        }
+    }
+
+    /// New transfers wait for Wi-Fi instead of using mobile data.
+    var downloadsOnWiFiOnly: Bool {
+        get { preferences.bool(forKey: Self.wifiOnlyKey) }
+        set {
+            objectWillChange.send()
+            preferences.set(newValue, forKey: Self.wifiOnlyKey)
+        }
+    }
     private let directConfiguration: URLSessionConfiguration
     private var directTasks: [UUID: URLSessionDownloadTask] = [:]
     private var hlsTasks: [UUID: AVAssetDownloadTask] = [:]
@@ -103,7 +129,7 @@ final class DownloadManager: NSObject, ObservableObject {
                                 requiresReferer: requiresReferer)
         context.insert(item)
         labelStore?.applyAutomaticLabels(to: item)
-        begin(item)
+        enqueue(item)
         saveSubtitles(subtitles, for: item)
         return item
     }
@@ -145,12 +171,13 @@ final class DownloadManager: NSObject, ObservableObject {
         })
         hlsTasks.removeValue(forKey: item.id)?.cancel()
         hlsProxies.removeValue(forKey: item.id)?.stop()
+        startQueued()
     }
 
     func retry(_ item: DownloadItem) {
         guard !item.isActive else { return }
         userCancelled.remove(item.id)
-        begin(item)
+        enqueue(item)
     }
 
     func restart(_ item: DownloadItem) {
@@ -160,7 +187,7 @@ final class DownloadManager: NSObject, ObservableObject {
         item.localFileName = nil
         item.progress = 0
         userCancelled.remove(item.id)
-        begin(item)
+        enqueue(item)
     }
 
     func delete(_ item: DownloadItem) {
@@ -179,6 +206,7 @@ final class DownloadManager: NSObject, ObservableObject {
         clearProgress(for: item.id)
         context.delete(item)
         save()
+        startQueued()
     }
 
     func rename(_ item: DownloadItem, to title: String) {
@@ -198,6 +226,24 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     // MARK: Starting tasks
+
+    private func enqueue(_ item: DownloadItem) {
+        item.status = .queued
+        item.errorMessage = nil
+        save()
+        startQueued()
+    }
+
+    /// Starts queued downloads, oldest first, while fewer than the limit are running.
+    func startQueued() {
+        let items = (try? context.fetch(FetchDescriptor<DownloadItem>())) ?? []
+        var running = items.filter { $0.status == .downloading }.count
+        for item in items.filter({ $0.status == .queued }).sorted(by: { $0.createdAt < $1.createdAt }) {
+            guard running < maxConcurrentDownloads else { break }
+            begin(item)
+            running += 1
+        }
+    }
 
     /// Marks the item as downloading immediately, then creates the task once the browser context is gathered.
     private func begin(_ item: DownloadItem) {
@@ -239,6 +285,7 @@ final class DownloadManager: NSObject, ObservableObject {
             task = session.downloadTask(withResumeData: resumeData)
         } else {
             var request = URLRequest(url: item.remoteURL)
+            request.allowsCellularAccess = !downloadsOnWiFiOnly
             var headers = requestContext
             headers?.cookies = []
             headers?.apply(to: &request)
@@ -274,6 +321,7 @@ final class DownloadManager: NSObject, ObservableObject {
         } else {
             assetURL = item.remoteURL
         }
+        if downloadsOnWiFiOnly { assetOptions[AVURLAssetAllowsCellularAccessKey] = false }
         let asset = AVURLAsset(url: assetURL, options: assetOptions)
         let configuration = AVAssetDownloadConfiguration(asset: asset, title: item.title)
         if let bitrate = item.preferredBitrate {
@@ -424,6 +472,8 @@ final class DownloadManager: NSObject, ObservableObject {
         clearProgress(for: item.id)
         try? FileManager.default.removeItem(at: item.resumeDataURL)
         save()
+        subtitleEmbedder?.embedIfNeeded(item)
+        startQueued()
     }
 
     private func fail(_ item: DownloadItem, _ error: DownloadError) {
@@ -434,6 +484,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if let progress = progressStore.fraction(of: item.id) { item.progress = progress }
         clearProgress(for: item.id)
         save()
+        startQueued()
     }
 
     private func clearProgress(for id: UUID) {
@@ -491,13 +542,15 @@ final class DownloadManager: NSObject, ObservableObject {
             item.status = .downloading
         }
         let active = (try? context.fetch(FetchDescriptor<DownloadItem>())) ?? []
-        for item in active where item.isActive && pendingBegins[item.id] == nil && directTasks[item.id] == nil && hlsTasks[item.id] == nil {
+        // Queued downloads never started, so they simply wait for a free slot.
+        for item in active where item.status == .downloading && pendingBegins[item.id] == nil && directTasks[item.id] == nil && hlsTasks[item.id] == nil {
             item.status = .failed
             item.errorMessage = FileManager.default.fileExists(atPath: item.resumeDataURL.path)
                 ? "Download was interrupted. Tap Retry to resume."
                 : "Download was interrupted. Tap Retry."
         }
         save()
+        startQueued()
     }
 
     // MARK: Helpers

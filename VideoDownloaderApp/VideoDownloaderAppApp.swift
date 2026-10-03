@@ -40,6 +40,7 @@ final class AppServices {
     let history: BrowserHistoryStore
     let labels: LabelStore
     let shows: ShowStore
+    let subtitleEmbedder: SubtitleEmbedder
     /// App settings; a fresh, separate store when UI tests run with an in-memory library.
     let preferences: UserDefaults
 
@@ -61,10 +62,15 @@ final class AppServices {
         shows = ShowStore(context: context, preferences: preferences)
         downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)
         downloads.labelStore = labels
+        downloads.preferences = preferences
+        subtitleEmbedder = SubtitleEmbedder(context: context)
+        subtitleEmbedder.diagnostics = diagnostics
+        downloads.subtitleEmbedder = subtitleEmbedder
         playback = PlaybackCoordinator(context: context, diagnostics: diagnostics, preferences: preferences)
         playback.shows = shows
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }
         downloads.diagnostics = diagnostics
+        if !LaunchOptions.isRunningUnitTests { Task { await subtitleEmbedder.embedPending() } }
     }
 }
 
