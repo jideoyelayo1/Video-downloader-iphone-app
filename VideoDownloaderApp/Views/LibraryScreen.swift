@@ -29,6 +29,8 @@ struct LibraryScreen: View {
     @State private var newLabelName = ""
     @State private var newShowSeed: NewShowSeed?
     @State private var openedShow: Show?
+    @State private var importingBackup = false
+    @State private var restoreMessage: String?
     @AppStorage("librarySort", store: AppServices.shared.preferences) private var sortRaw = LibraryQuery.Sort.newest.rawValue
     @AppStorage("libraryStatus", store: AppServices.shared.preferences) private var statusRaw = LibraryQuery.Status.all.rawValue
     @AppStorage("libraryLabels", store: AppServices.shared.preferences) private var labelFilterRaw = ""
@@ -91,6 +93,12 @@ struct LibraryScreen: View {
                         Button("New Folder", systemImage: "folder.badge.plus") { newFolderTitle = ""; showingNewFolder = true }
                         Button("Manage Folders", systemImage: "folder") { showingManageFolders = true }
                         Button("Manage Labels", systemImage: "tag") { showingManageLabels = true }
+                        Divider()
+                        ShareLink(item: LibraryBackupFile(backup: LibraryBackup.make(from: modelContext)),
+                                  preview: SharePreview("Video Downloader Library")) {
+                            Label("Back Up Library", systemImage: "square.and.arrow.up")
+                        }
+                        Button("Restore from Backup…", systemImage: "square.and.arrow.down") { importingBackup = true }
                     } label: { Label("Folders", systemImage: "folder") }
                         .accessibilityIdentifier("library.folders")
                 }
@@ -98,6 +106,10 @@ struct LibraryScreen: View {
             .sheet(isPresented: $showingManageFolders) { ManageFoldersSheet() }
             .sheet(isPresented: $showingManageLabels) { ManageLabelsSheet() }
             .sheet(item: $newShowSeed) { NewShowSheet(seed: $0) }
+            .fileImporter(isPresented: $importingBackup, allowedContentTypes: [.json]) { result in restore(result) }
+            .alert("Library restored", isPresented: Binding(get: { restoreMessage != nil }, set: { if !$0 { restoreMessage = nil } })) {
+                Button("OK", role: .cancel) { restoreMessage = nil }
+            } message: { Text(restoreMessage ?? "") }
             .navigationDestination(item: $openedShow) { ShowScreen(show: $0) }
             .alert("New Label", isPresented: Binding(get: { labelingItem != nil }, set: { if !$0 { labelingItem = nil } })) {
                 TextField("Label name", text: $newLabelName)
@@ -356,6 +368,19 @@ struct LibraryScreen: View {
     private func setWatched(_ item: DownloadItem, _ watched: Bool) {
         item.setWatched(watched)
         try? modelContext.save()
+    }
+
+    /// Backups hold the library's records, not the videos themselves.
+    private func restore(_ result: Result<URL, Error>) {
+        do {
+            let url = try result.get()
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let summary = try LibraryBackup.decode(Data(contentsOf: url)).restore(into: modelContext)
+            restoreMessage = summary.text
+        } catch {
+            restoreMessage = "That file isn't a Video Downloader library backup."
+        }
     }
 
     private func beginRename(_ item: DownloadItem) {
