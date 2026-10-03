@@ -66,10 +66,31 @@ final class ShowStore: ObservableObject {
         return show
     }
 
-    /// The page of the highest-numbered episode, from which the next one is looked for.
+    /// The page of the highest-numbered episode, from which the next one is looked for. The
+    /// number comes from the page's address, else the title; episodes without one don't count,
+    /// so an unnumbered older download can't send the checker back to an earlier episode.
     private func updateFollowedPage(_ show: Show) {
-        let latest = ShowSuggestion.inEpisodeOrder(episodes(of: show)).last
-        if let latest { show.followSourceURL = latest.sourcePageURL }
+        show.followSourceURL = Self.latestEpisodePage(in: episodes(of: show))
+    }
+
+    static func latestEpisodePage(in episodes: [DownloadItem]) -> URL? {
+        let numbered = episodes.compactMap { item -> (Int, URL)? in
+            guard let number = EpisodeURL.number(in: item.sourcePageURL) ?? ShowSuggestion.parse(item.displayTitle).episode else { return nil }
+            return (number, item.sourcePageURL)
+        }
+        return numbered.max { $0.0 < $1.0 }?.1
+    }
+
+    /// Shows made before new-episode checks existed have no followed page yet.
+    func fillMissingFollowedPages() {
+        var changed = false
+        for show in shows where show.followSourceURL == nil {
+            if let page = Self.latestEpisodePage(in: episodes(of: show)) {
+                show.followSourceURL = page
+                changed = true
+            }
+        }
+        if changed { save() }
     }
 
     /// Takes the video out of its show; the video stays in the library.
@@ -83,6 +104,7 @@ final class ShowStore: ObservableObject {
         item.showID = nil
         item.showOrder = nil
         renumber(episodes(of: show))
+        updateFollowedPage(show)
     }
 
     func move(in show: Show, from source: IndexSet, to destination: Int) {

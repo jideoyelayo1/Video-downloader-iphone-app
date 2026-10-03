@@ -33,7 +33,7 @@ extension DownloadManager {
         let days = preferences.integer(forKey: StorageCleanup.autoDeleteKey)
         guard days > 0 else { return 0 }
         let old = StorageCleanup.watched(allItems(), olderThan: days, now: now)
-        old.forEach(delete)
+        delete(old)
         if !old.isEmpty { diagnostics?.record(event: "storage", url: "app://cleanup", note: "Deleted \(old.count) videos watched over \(days) days ago") }
         return old.count
     }

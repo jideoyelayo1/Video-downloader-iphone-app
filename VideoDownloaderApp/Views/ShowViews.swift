@@ -281,7 +281,7 @@ struct ShowScreen: View {
         }
         .confirmationDialog("Delete the watched episodes?", isPresented: $confirmingDeleteWatched, titleVisibility: .visible) {
             Button("Delete Watched Episodes", role: .destructive) {
-                ShowPlaylist.episodes(of: show.id, in: items).filter(\.isWatched).forEach(downloads.delete)
+                downloads.delete(ShowPlaylist.episodes(of: show.id, in: items).filter(\.isWatched))
             }
         } message: { Text("Their video files are removed from this iPhone. The show keeps the rest.") }
         .confirmationDialog("Delete this show?", isPresented: $confirmingDelete, titleVisibility: .visible) {

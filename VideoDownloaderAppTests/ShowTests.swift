@@ -127,4 +127,27 @@ final class ShowTests: XCTestCase {
         XCTAssertNil(store.addToMatchingShow(video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · ***REMOVED***")))
         XCTAssertNil(store.addToMatchingShow(video("Basic Video Page")), "no episode number")
     }
+
+    /// Older downloads without an episode number can't send the new-episode check back to an
+    /// earlier episode, and shows made before checks existed get their followed page.
+    func testTheFollowedPageIsTheHighestNumberedEpisode() {
+        let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
+        func episode(_ title: String, _ page: String) -> DownloadItem {
+            let item = DownloadItem(title: title, remoteURL: URL(string: "https://cdn.example/\(UUID().uuidString).m3u8")!,
+                                    sourcePageURL: URL(string: page)!, kind: .hls, status: .completed)
+            container.mainContext.insert(item)
+            return item
+        }
+        let seventh = episode("Watch Attack on Titan · ***REMOVED***", "https://www.***REMOVED***.to/watch/abc/attack-on-titan?ep=7")
+        let unnumbered = episode("Attack on Titan special", "https://www.***REMOVED***.to/info/abc/attack-on-titan")
+        let third = episode("Watch Attack on Titan · ***REMOVED***", "https://www.***REMOVED***.to/watch/abc/attack-on-titan?ep=3")
+        let show = store.create(title: "Attack on Titan", with: [third, unnumbered, seventh])
+        XCTAssertEqual(show.followSourceURL, seventh.sourcePageURL, "episode 7, from its address")
+
+        show.followSourceURL = nil
+        store.fillMissingFollowedPages()
+        XCTAssertEqual(show.followSourceURL, seventh.sourcePageURL)
+        store.remove(seventh)
+        XCTAssertEqual(show.followSourceURL, third.sourcePageURL, "removing the latest follows the one before")
+    }
 }

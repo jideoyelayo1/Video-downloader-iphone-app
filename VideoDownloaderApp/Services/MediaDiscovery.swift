@@ -225,7 +225,10 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
     static let autoplaySource = #"""
     (() => {
       const tryPlay = () => {
-        document.querySelectorAll('video').forEach(v => { try { v.muted = true; const p = v.play(); if (p) p.catch(() => {}); } catch (_) {} });
+        // A player that is already going is left alone: some overlays toggle play and pause.
+        const videos = Array.from(document.querySelectorAll('video'));
+        if (videos.some(v => !v.paused && v.currentTime > 0)) return;
+        videos.forEach(v => { try { v.muted = true; const p = v.play(); if (p) p.catch(() => {}); } catch (_) {} });
         // Overlay play buttons of common players, and of site templates (***REMOVED***, ***REMOVED***: #player .play).
         const button = document.querySelector('.jw-icon-display, .jw-display-icon-container, .vjs-big-play-button, .plyr__control--overlaid, media-play-button, [aria-label="Play"], .play-button, #play, #player .play, #w-player .play, .player-wrapper .play, .btn-play, .play-btn, [class*="big-play"]');
         if (button) { try { button.click(); } catch (_) {} }

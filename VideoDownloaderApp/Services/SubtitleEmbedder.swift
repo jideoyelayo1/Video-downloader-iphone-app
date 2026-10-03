@@ -64,6 +64,9 @@ final class SubtitleEmbedder {
                 record(item, "The video with subtitles didn't check out; the app keeps drawing them")
                 return false
             }
+            // Deleted (by the viewer or a cleanup) while the copy was being written.
+            guard item.modelContext != nil, !item.isDeleted, item.localFileName == fileName,
+                  FileManager.default.fileExists(atPath: source.path) else { return false }
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: temporary, to: destination)
             if destination != source { try? FileManager.default.removeItem(at: source) }

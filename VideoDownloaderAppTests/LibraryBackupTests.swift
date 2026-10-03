@@ -53,4 +53,26 @@ final class LibraryBackupTests: XCTestCase {
         XCTAssertEqual(again.updated, 2)
         XCTAssertThrowsError(try LibraryBackup.decode(Data("{}".utf8)))
     }
+
+    func testFailedVideosAreBackedUpAndDownloadsInProgressAreLeftAlone() throws {
+        let container = try LibrarySchema.container(inMemory: true)
+        let context = container.mainContext
+        let failed = DownloadItem(title: "To download again", remoteURL: URL(string: "https://cdn.example/a.mp4")!,
+                                  sourcePageURL: URL(string: "https://site.example/a")!, kind: .video, status: .failed)
+        let downloading = DownloadItem(title: "Downloading", remoteURL: URL(string: "https://cdn.example/b.mp4")!,
+                                       sourcePageURL: URL(string: "https://site.example/b")!, kind: .video, status: .downloading)
+        context.insert(failed)
+        context.insert(downloading)
+        try context.save()
+        var backup = LibraryBackup.make(from: context)
+        XCTAssertEqual(backup.videos.map(\.title), ["To download again"], "kept for a later restore; transfers aren't")
+
+        backup.videos.append(.init(id: downloading.id, title: "Downloading", remoteURL: downloading.remoteURL, sourcePageURL: downloading.sourcePageURL,
+                                   refererURL: nil, kind: "video", localFileName: nil, createdAt: Date(), completedAt: Date(), fileSize: nil,
+                                   playbackPosition: 42, folderID: nil, watchedAt: nil, lastPlayedAt: nil, duration: nil, labelIDs: nil,
+                                   showID: nil, showOrder: nil, posterURL: nil, requiresReferer: nil))
+        _ = backup.restore(into: context)
+        XCTAssertEqual(downloading.status, .downloading, "its transfer carries on")
+        XCTAssertEqual(downloading.playbackPosition, 42)
+    }
 }

@@ -44,7 +44,7 @@ extension EpisodeURL {
     /// name: ***REMOVED*** titles every episode "Watch Attack on Titan · ***REMOVED***", so episode 2 becomes
     /// "Watch Attack on Titan Ep. 2 · ***REMOVED***".
     static func title(_ title: String, numberedFrom page: URL) -> String {
-        guard ShowSuggestion.parse(DownloadItem.displayTitle(title, host: page.host)).episode == nil,
+        guard !title.isEmpty, ShowSuggestion.parse(DownloadItem.displayTitle(title, host: page.host)).episode == nil,
               let number = number(in: page) else { return title }
         let base = DownloadItem.displayTitle(title, host: page.host)
         return base + " Ep. \(number)" + title.dropFirst(base.count)

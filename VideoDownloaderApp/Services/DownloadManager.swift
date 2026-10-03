@@ -69,6 +69,9 @@ final class DownloadManager: NSObject, ObservableObject {
     private var pendingBegins: [UUID: UUID] = [:]
     private var backgroundCompletionHandlers: [String: () -> Void] = [:]
     private var lastProgressSave: [UUID: Date] = [:]
+    /// Direct transfers continued from resume data, whose original request may allow mobile data.
+    private var resumedTransfers: Set<UUID> = []
+    private var networkObservation: AnyCancellable?
     private var progressSamples: [UUID: (date: Date, progress: Double)] = [:]
 
     private lazy var session = URLSession(configuration: directConfiguration, delegate: self, delegateQueue: .main)
@@ -90,6 +93,8 @@ final class DownloadManager: NSObject, ObservableObject {
             return configuration
         }()
         super.init()
+        networkObservation = NetworkMonitor.shared.$isOnWiFi.removeDuplicates().dropFirst()
+            .sink { [weak self] _ in Task { @MainActor [weak self] in self?.networkChanged() } }
         if restore { Task { await restoreTasks() } }
     }
 
@@ -107,11 +112,12 @@ final class DownloadManager: NSObject, ObservableObject {
             startError = error.message
             return nil
         }
+        let title = EpisodeURL.title(candidate.title.trimmingCharacters(in: .whitespacesAndNewlines), numberedFrom: candidate.sourcePageURL)
         // A fresh tap on the same source should repair its existing row rather than
-        // create another identical failure in Downloads.
-        let prior = (try? context.fetch(FetchDescriptor<DownloadItem>()))?.first {
+        // create another identical failure in Downloads. Rows are saved under the numbered title.
+        let prior = allItems().first {
             ($0.status == .failed || $0.status == .cancelled) &&
-            ($0.remoteURL == candidate.url || ($0.sourcePageURL == candidate.sourcePageURL && $0.title == candidate.title))
+            ($0.remoteURL == candidate.url || ($0.sourcePageURL == candidate.sourcePageURL && ($0.title == title || $0.title == candidate.title)))
         }
         if let existing = prior {
             existing.remoteURL = candidate.url
@@ -126,7 +132,6 @@ final class DownloadManager: NSObject, ObservableObject {
             labelStore?.applyAutomaticLabels(to: existing)
             return existing
         }
-        let title = EpisodeURL.title(candidate.title.trimmingCharacters(in: .whitespacesAndNewlines), numberedFrom: candidate.sourcePageURL)
         let item = DownloadItem(title: title.isEmpty ? "Video" : title, remoteURL: candidate.url, sourcePageURL: candidate.sourcePageURL,
                                 refererURL: candidate.referer, kind: candidate.kind, preferredBitrate: preferredBitrate,
                                 requiresReferer: requiresReferer)
@@ -213,6 +218,17 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     func delete(_ item: DownloadItem) {
+        delete(item, thenStartQueued: true)
+    }
+
+    /// Deleting many at once starts the queue only after the last.
+    func delete(_ items: [DownloadItem]) {
+        items.forEach { delete($0, thenStartQueued: false) }
+        startQueued()
+    }
+
+    private func delete(_ item: DownloadItem, thenStartQueued: Bool) {
+        resumedTransfers.remove(item.id)
         attemptIDs[item.id] = nil
         cancelledAttempts[item.id] = nil
         userCancelled.insert(item.id)
@@ -228,7 +244,7 @@ final class DownloadManager: NSObject, ObservableObject {
         clearProgress(for: item.id)
         context.delete(item)
         save()
-        startQueued()
+        if thenStartQueued { startQueued() }
     }
 
     func rename(_ item: DownloadItem, to title: String) {
@@ -258,11 +274,45 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func allItems() -> [DownloadItem] { (try? context.fetch(FetchDescriptor<DownloadItem>())) ?? [] }
 
+    /// A video already saved, or on its way, from this episode page, so a season run or a
+    /// followed show doesn't download it again.
+    func savedOrActiveEpisode(atPage page: URL) -> DownloadItem? {
+        let key = MediaDiscovery.normalizedURL(page)
+        return allItems().first { ($0.status == .completed || $0.isActive) && MediaDiscovery.normalizedURL($0.sourcePageURL) == key }
+    }
+
+    /// Resumed transfers keep the request they began with, which may allow mobile data, so with
+    /// Wi-Fi Only they wait for Wi-Fi and are paused if the iPhone leaves it.
+    private func mustWaitForWiFi(_ item: DownloadItem) -> Bool {
+        downloadsOnWiFiOnly && !NetworkMonitor.shared.isOnWiFi && item.kind != .hls
+            && FileManager.default.fileExists(atPath: item.resumeDataURL.path)
+    }
+
+    private func networkChanged() {
+        if downloadsOnWiFiOnly && !NetworkMonitor.shared.isOnWiFi {
+            for id in resumedTransfers {
+                guard let item = item(id), item.status == .downloading, let task = directTasks.removeValue(forKey: id) else { continue }
+                attemptIDs[id] = nil
+                pendingBegins[id] = nil
+                item.status = .queued
+                let resumeURL = item.resumeDataURL
+                task.cancel(byProducingResumeData: { data in
+                    guard let data else { return }
+                    try? data.write(to: resumeURL)
+                })
+                diagnostics?.record(event: "download", url: item.remoteURL.absoluteString, note: "Paused until Wi-Fi")
+            }
+            resumedTransfers.removeAll()
+            save()
+        }
+        startQueued()
+    }
+
     /// Starts queued downloads, oldest first, while fewer than the limit are running.
     func startQueued() {
         let items = allItems()
         var running = items.filter { $0.status == .downloading }.count
-        for item in items.filter({ $0.status == .queued }).sorted(by: { $0.createdAt < $1.createdAt }) {
+        for item in items.filter({ $0.status == .queued }).sorted(by: { $0.createdAt < $1.createdAt }) where !mustWaitForWiFi(item) {
             guard running < maxConcurrentDownloads else { break }
             begin(item)
             running += 1
@@ -307,6 +357,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if let resumeData = try? Data(contentsOf: item.resumeDataURL) {
             try? FileManager.default.removeItem(at: item.resumeDataURL)
             task = session.downloadTask(withResumeData: resumeData)
+            resumedTransfers.insert(item.id)
         } else {
             var request = URLRequest(url: item.remoteURL)
             request.allowsCellularAccess = !downloadsOnWiFiOnly
@@ -488,6 +539,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func markCompleted(_ item: DownloadItem, size: Int64?) {
+        resumedTransfers.remove(item.id)
         item.status = .completed
         item.progress = 1
         item.fileSize = size
@@ -501,6 +553,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func fail(_ item: DownloadItem, _ error: DownloadError) {
+        resumedTransfers.remove(item.id)
         diagnostics?.record(event: "download-error", url: item.remoteURL.absoluteString,
                             note: "\(error.message) item=\(item.id.uuidString)")
         item.status = error == .cancelled ? .cancelled : .failed

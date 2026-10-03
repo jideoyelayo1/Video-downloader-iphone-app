@@ -410,7 +410,16 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     // MARK: Shows: episodes, intro and credits, speed
 
-    private var currentShow: Show? { item.flatMap { shows?.show(for: $0) } }
+    /// The show of the video playing. Read twice a second during playback, so it's looked up
+    /// once per video rather than fetching every show each time.
+    private var currentShow: Show? {
+        guard let item, let shows else { return nil }
+        if let cached = cachedShow, cached.itemID == item.id { return cached.show }
+        let show = shows.show(for: item)
+        cachedShow = (item.id, show)
+        return show
+    }
+    private var cachedShow: (itemID: UUID, show: Show?)?
 
     private func episodeMenuElements() -> [UIMenuElement] {
         guard let item, let show = currentShow, let shows else { return [] }
@@ -719,6 +728,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         showObserver = nil
         sideControls?.removeFromSuperview()
         sideControls = nil
+        cachedShow = nil
         subtitlesButton = nil
         showButton = nil
         setSkipIntroVisible(false)

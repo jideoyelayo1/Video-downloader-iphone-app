@@ -17,6 +17,7 @@ final class SeasonDownloaderTests: XCTestCase {
         XCTAssertEqual(next("https://site.example/show-s01e09.html"), "https://site.example/show-s01e10.html")
         XCTAssertEqual(next("https://site.example/watch/one-piece/ep-1099"), "https://site.example/watch/one-piece/ep-1100")
         XCTAssertNil(next("https://***REMOVED***.ru/play/8a3c/5f2d1e0b7a"), "no episode number in the address")
+        XCTAssertEqual(EpisodeURL.title("", numberedFrom: URL(string: "https://***REMOVED***.to/anime/x/p-9-dub")!), "", "an empty title stays empty")
         XCTAssertEqual(EpisodeURL.number(in: URL(string: "https://www.***REMOVED***.to/watch/1/x?ep=7")!), 7)
         XCTAssertTrue(SeasonDownloader.isVerificationPage(title: "Just a moment..."))
 
@@ -28,6 +29,31 @@ final class SeasonDownloaderTests: XCTestCase {
         let ***REMOVED*** = URL(string: "https://***REMOVED***.to/anime/x/p-9-dub")!
         XCTAssertEqual(EpisodeURL.title("***REMOVED*** Ep. 9 · ***REMOVED***", numberedFrom: ***REMOVED***),
                        "***REMOVED*** Ep. 9 · ***REMOVED***", "titles that have a number are left alone")
+    }
+
+    func testEpisodesAlreadyInTheLibraryAreSkipped() async throws {
+        let server = try LocalMediaServer()
+        try server.start()
+        defer { server.stop() }
+        let container = try LibrarySchema.container(inMemory: true)
+        let manager = DownloadManager(context: container.mainContext, directConfiguration: .ephemeral, restore: false)
+        manager.requestContextProvider = { _, _ in nil }
+        let shows = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "SeasonDownloaderTests-\(UUID().uuidString)")!)
+        let saved = DownloadItem(title: "Fixture Series Ep. 2", remoteURL: server.url("/series/video-2.mp4"),
+                                 sourcePageURL: server.url("/series/ep-2.html"), kind: .video, status: .completed)
+        container.mainContext.insert(saved)
+        let downloader = SeasonDownloader(downloads: manager, shows: shows)
+        downloader.pageTimeout = 15
+        downloader.start(after: server.url("/series/ep-1.html"), count: 2)
+        let deadline = Date().addingTimeInterval(60)
+        while downloader.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(200)) }
+        let titles = try container.mainContext.fetch(FetchDescriptor<DownloadItem>()).map(\.title).sorted()
+        XCTAssertEqual(titles, ["Fixture Series Ep. 2", "Fixture Series Ep. 3"], "episode 2 isn't downloaded again")
+        XCTAssertEqual(downloader.status, "Queued 1 episode.")
+        for item in try container.mainContext.fetch(FetchDescriptor<DownloadItem>()) where item.id != saved.id {
+            while item.isActive, Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+            manager.delete(item)
+        }
     }
 
     /// From episode 1, "the next 3 episodes" finds 2 and 3, then stops because 4 isn't out.

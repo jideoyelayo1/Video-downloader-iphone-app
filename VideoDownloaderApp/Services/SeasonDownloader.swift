@@ -18,7 +18,6 @@ final class SeasonDownloader: ObservableObject {
     /// How long a page may take to offer a ready video.
     var pageTimeout: TimeInterval = 30
     private var task: Task<Void, Never>?
-    private var window: UIWindow?
 
     init(downloads: DownloadManager, shows: ShowStore) {
         self.downloads = downloads
@@ -61,35 +60,44 @@ final class SeasonDownloader: ObservableObject {
         for index in 1...max(count, 1) {
             guard !Task.isCancelled else { return }
             guard let next = EpisodeURL.next(after: current) else {
-                finish(queued == 0 ? "This site's episode addresses can't be followed." : "Queued \(queued) episodes.")
+                finish(queued == 0 ? "This site's episode addresses can't be followed." : "Queued \(Self.episodes(queued)).")
                 return
             }
             current = next
+            // Already in the library (or downloading): nothing to fetch for this one.
+            if downloads.savedOrActiveEpisode(atPage: next) != nil { continue }
             status = "Finding episode \(index) of \(count)…"
-            switch await findVideo(on: next) {
-            case .found(var candidate, let probe, let subtitles, let title, let poster):
-                guard !Task.isCancelled else { return }
-                candidate.kind = probe.kind
-                if !title.isEmpty { candidate.title = title }
-                if downloads.start(candidate, expectedBytes: probe.expectedBytes, preferredBitrate: nil,
-                                   requiresReferer: probe.requiresReferer, subtitles: subtitles, poster: poster) != nil {
-                    queued += 1
-                }
+            let result = await findVideo(on: next)
+            guard !Task.isCancelled else { return }
+            switch result {
+            case .found:
+                if download(result) != nil { queued += 1 }
             case .verification:
                 finish("Stopped at episode \(index): the site wants you to verify in Browse first. Queued \(queued).")
                 return
             case .noVideo, .unsupported:
-                finish(queued == 0 ? "No video found for the next episode. It may not be out yet." : "Queued \(queued) episodes; no video found for the next one.")
+                finish(queued == 0 ? "No video found for the next episode. It may not be out yet." : "Queued \(Self.episodes(queued)); no video found for the next one.")
                 return
             }
         }
-        finish("Queued \(queued) episodes.")
+        finish("Queued \(Self.episodes(queued)).")
     }
+
+    /// Downloads a found page's video under the page's title, with its subtitles and poster.
+    @discardableResult
+    func download(_ result: PageResult) -> DownloadItem? {
+        guard case .found(var candidate, let probe, let subtitles, let title, let poster) = result else { return nil }
+        candidate.kind = probe.kind
+        if !title.isEmpty { candidate.title = title }
+        return downloads.start(candidate, expectedBytes: probe.expectedBytes, preferredBitrate: nil,
+                               requiresReferer: probe.requiresReferer, subtitles: subtitles, poster: poster)
+    }
+
+    private static func episodes(_ count: Int) -> String { count == 1 ? "1 episode" : "\(count) episodes" }
 
     private func finish(_ message: String) {
         status = message
         isRunning = false
-        tearDownWindow()
         diagnostics?.record(event: "season", url: "app://season", note: message)
     }
 
@@ -99,10 +107,15 @@ final class SeasonDownloader: ObservableObject {
     func findVideo(on page: URL) async -> PageResult {
         let model = BrowserViewModel(initialURL: page, diagnostics: diagnostics, history: nil, autoplay: true)
         let webView = model.makeWebView()
-        host(webView)
+        // Each search has its own window, so a season run and a new-episode check can't remove
+        // each other's, and nothing stays on screen afterwards.
+        let window = Self.hostingWindow()
+        webView.frame = window.bounds
+        window.rootViewController?.view.addSubview(webView)
         defer {
             webView.stopLoading()
             webView.removeFromSuperview()
+            window.isHidden = true
         }
         let deadline = Date().addingTimeInterval(pageTimeout)
         var readySince: Date?
@@ -124,26 +137,17 @@ final class SeasonDownloader: ObservableObject {
         return lower.contains("just a moment") || lower.contains("attention required") || lower.contains("verify you are human")
     }
 
-    /// A web view runs its page and players only while it's in a window.
-    private func host(_ webView: WKWebView) {
-        let window = self.window ?? {
-            let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-            let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
-            window.frame = CGRect(x: 0, y: 0, width: 320, height: 240)
-            window.windowLevel = .normal - 1
-            window.isUserInteractionEnabled = false
-            window.alpha = 0.01
-            window.rootViewController = UIViewController()
-            window.isHidden = false
-            self.window = window
-            return window
-        }()
-        webView.frame = window.bounds
-        window.rootViewController?.view.addSubview(webView)
-    }
-
-    private func tearDownWindow() {
-        window?.isHidden = true
-        window = nil
+    /// A web view runs its page and players only while it's in a window, behind the app's own.
+    private static func hostingWindow() -> UIWindow {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 240)
+        window.windowLevel = .normal - 1
+        window.isUserInteractionEnabled = false
+        window.alpha = 0.01
+        window.rootViewController = UIViewController()
+        window.isHidden = false
+        return window
     }
 }

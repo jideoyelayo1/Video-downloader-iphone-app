@@ -40,7 +40,8 @@ struct LibraryBackup: Codable {
     static func make(from context: ModelContext) -> LibraryBackup {
         var backup = LibraryBackup()
         let items = (try? context.fetch(FetchDescriptor<DownloadItem>())) ?? []
-        backup.videos = items.filter { $0.status == .completed }.map {
+        // Every video not on its way, including ones a restore left to download again.
+        backup.videos = items.filter { !$0.isActive }.map {
             Video(id: $0.id, title: $0.title, remoteURL: $0.remoteURL, sourcePageURL: $0.sourcePageURL, refererURL: $0.refererURL, kind: $0.kindRaw,
                   localFileName: $0.localFileName, createdAt: $0.createdAt, completedAt: $0.completedAt, fileSize: $0.fileSize,
                   playbackPosition: $0.playbackPosition, folderID: $0.folderID, watchedAt: $0.watchedAt, lastPlayedAt: $0.lastPlayedAt,
@@ -115,7 +116,8 @@ struct LibraryBackup: Codable {
                 context.insert(item)
                 summary.added += 1
             }
-            item.playbackPosition = video.playbackPosition
+            // A video downloading right now keeps its transfer; only its library details change.
+            let downloading = item.isActive
             item.folderID = video.folderID
             item.watchedAt = video.watchedAt
             item.lastPlayedAt = video.lastPlayedAt
@@ -123,8 +125,9 @@ struct LibraryBackup: Codable {
             item.labelIDs = video.labelIDs
             item.showID = video.showID
             item.showOrder = video.showOrder
+            item.playbackPosition = video.playbackPosition
             item.posterURL = video.posterURL ?? item.posterURL
-            if !(item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false) {
+            if !downloading, !(item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false) {
                 item.status = .failed
                 item.errorMessage = "Restored from a backup. The video file isn't on this iPhone: tap Open Page to download it again."
                 summary.missingFiles += 1
@@ -135,15 +138,16 @@ struct LibraryBackup: Codable {
     }
 }
 
-/// The backup as a file to share or save, written only when shared.
+/// The backup as a file to share or save, made only when shared.
 struct LibraryBackupFile: Transferable {
-    let backup: LibraryBackup
+    let make: @MainActor () -> LibraryBackup
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(exportedContentType: .json) { file in
-            let name = "Video Downloader Library \(file.backup.createdAt.formatted(.iso8601.year().month().day())).json"
+            let backup = await MainActor.run { file.make() }
+            let name = "Video Downloader Library \(backup.createdAt.formatted(.iso8601.year().month().day())).json"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-            try file.backup.encoded().write(to: url, options: .atomic)
+            try backup.encoded().write(to: url, options: .atomic)
             return SentTransferredFile(url)
         }
     }

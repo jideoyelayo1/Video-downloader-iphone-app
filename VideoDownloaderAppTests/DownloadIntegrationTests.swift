@@ -82,6 +82,18 @@ final class DownloadIntegrationTests: XCTestCase {
         try await waitForFinish(item)
     }
 
+    /// Rows are saved under the numbered title, so a retry with a fresh link still finds the failed row.
+    func testAFailedNumberedEpisodeIsRepairedNotDuplicated() async throws {
+        let page = server.url("/page/watch?ep=5")
+        let failed = DownloadItem(title: "Watch Fixture Ep. 5", remoteURL: server.url("/expired/old-link.mp4"), sourcePageURL: page,
+                                  kind: .video, status: .failed)
+        container.mainContext.insert(failed)
+        let again = manager.start(MediaCandidate(url: server.url("/video.mp4"), sourcePageURL: page, title: "Watch Fixture", kind: .video))
+        XCTAssertTrue(again === failed)
+        XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<DownloadItem>()).count, 1)
+        try await waitForFinish(failed)
+    }
+
     func testDirectMP4DownloadsCompletely() async throws {
         let item = try start("/video.mp4")
         try await waitForFinish(item)

@@ -94,7 +94,7 @@ struct LibraryScreen: View {
                         Button("Manage Folders", systemImage: "folder") { showingManageFolders = true }
                         Button("Manage Labels", systemImage: "tag") { showingManageLabels = true }
                         Divider()
-                        ShareLink(item: LibraryBackupFile(backup: LibraryBackup.make(from: modelContext)),
+                        ShareLink(item: LibraryBackupFile { [modelContext] in LibraryBackup.make(from: modelContext) },
                                   preview: SharePreview("Video Downloader Library")) {
                             Label("Back Up Library", systemImage: "square.and.arrow.up")
                         }

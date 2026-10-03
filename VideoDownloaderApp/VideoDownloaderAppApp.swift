@@ -76,7 +76,8 @@ final class AppServices {
         seasons = SeasonDownloader(downloads: downloads, shows: shows)
         seasons.diagnostics = diagnostics
         newEpisodes = NewEpisodeChecker(shows: shows, downloads: downloads, preferences: preferences,
-                                        find: { [seasons] url in await seasons.findVideo(on: url) })
+                                        find: { [seasons] url in await seasons.findVideo(on: url) },
+                                        download: { [seasons] result in seasons.download(result) })
         newEpisodes.diagnostics = diagnostics
         subtitleEmbedder = SubtitleEmbedder(context: context)
         subtitleEmbedder.diagnostics = diagnostics
@@ -85,6 +86,7 @@ final class AppServices {
         playback.shows = shows
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }
         downloads.diagnostics = diagnostics
+        shows.fillMissingFollowedPages()
         if !LaunchOptions.isRunningUnitTests {
             downloads.deleteOldWatchedVideos()
             Task { await subtitleEmbedder.embedPending() }

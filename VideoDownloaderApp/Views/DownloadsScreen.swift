@@ -176,7 +176,7 @@ private struct DownloadRow: View {
     private var statusText: String {
         if item.isStreamFragment && item.status == .completed { return "Stream fragment · not a complete video" }
         switch item.status {
-        case .queued: return "Queued"
+        case .queued: return downloads.downloadsOnWiFiOnly && !network.isOnWiFi ? "Waiting for Wi-Fi" : "Queued"
         case .downloading: return downloads.downloadsOnWiFiOnly && !network.isOnWiFi ? "Waiting for Wi-Fi" : "Downloading"
         case .completed:
             var parts = ["Completed" + (item.completedTimeText.map { " \($0)" } ?? "")]

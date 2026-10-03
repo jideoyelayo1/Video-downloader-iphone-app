@@ -10,7 +10,8 @@ final class NetworkMonitor: ObservableObject {
 
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
-            let wifi = path.status == .satisfied && !path.isExpensive
+            // A personal hotspot reached over Wi-Fi counts: it isn't this iPhone's mobile data.
+            let wifi = path.status == .satisfied && (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet))
             Task { @MainActor [weak self] in self?.isOnWiFi = wifi }
         }
         monitor.start(queue: DispatchQueue(label: "NetworkMonitor"))

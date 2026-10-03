@@ -15,6 +15,8 @@ final class NewEpisodeChecker {
     private let downloads: DownloadManager
     private let preferences: UserDefaults
     private let find: (URL) async -> SeasonDownloader.PageResult
+    /// Downloads a found episode (`SeasonDownloader.download`).
+    private let download: (SeasonDownloader.PageResult) -> DownloadItem?
     private let notify: (String, String) async -> Void
     var diagnostics: DiagnosticsLog?
     /// A show isn't checked again sooner than this, unless asked.
@@ -23,11 +25,13 @@ final class NewEpisodeChecker {
 
     init(shows: ShowStore, downloads: DownloadManager, preferences: UserDefaults,
          find: @escaping (URL) async -> SeasonDownloader.PageResult,
+         download: @escaping (SeasonDownloader.PageResult) -> DownloadItem?,
          notify: @escaping (String, String) async -> Void = NewEpisodeChecker.postNotification) {
         self.shows = shows
         self.downloads = downloads
         self.preferences = preferences
         self.find = find
+        self.download = download
         self.notify = notify
     }
 
@@ -48,21 +52,24 @@ final class NewEpisodeChecker {
     @discardableResult
     func check(_ show: Show, now: Date = Date()) async -> Bool {
         guard let latest = show.followSourceURL, let next = EpisodeURL.next(after: latest) else { return false }
+        // Already downloaded (from Browse, say): follow on from it without announcing it.
+        if let saved = downloads.savedOrActiveEpisode(atPage: next) {
+            if saved.showID != show.id { shows.add([saved], to: show) } else { show.followSourceURL = next; shows.save() }
+            return false
+        }
+        let result = await find(next)
+        // A background refresh that iOS cut short didn't really look: check again next time.
+        guard !Task.isCancelled else { return false }
         show.lastCheckedAt = now
         shows.save()
-        guard case .found(var candidate, let probe, let subtitles, let title, let poster) = await find(next) else {
+        guard case .found = result else {
             diagnostics?.record(event: "new-episode", url: next.absoluteString, note: "\(show.title): not out yet")
             return false
         }
         var notified = Set(preferences.stringArray(forKey: Self.notifiedKey) ?? [])
         let episode = EpisodeURL.number(in: next).map { "Episode \($0)" } ?? "The next episode"
-        if show.autoDownloadNewEpisodes {
-            candidate.kind = probe.kind
-            if !title.isEmpty { candidate.title = title }
-            if let item = downloads.start(candidate, expectedBytes: probe.expectedBytes, preferredBitrate: nil,
-                                          requiresReferer: probe.requiresReferer, subtitles: subtitles, poster: poster), item.showID != show.id {
-                shows.add([item], to: show)
-            }
+        if show.autoDownloadNewEpisodes, let item = download(result), item.showID != show.id {
+            shows.add([item], to: show)
         }
         if !notified.contains(next.absoluteString) {
             notified.insert(next.absoluteString)
