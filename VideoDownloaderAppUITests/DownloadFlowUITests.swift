@@ -108,15 +108,26 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["library.show"].firstMatch.waitForExistence(timeout: 5))
     }
 
+    /// Whether a player control is on screen. Since Xcode 27, AVKit's hidden controls stay in the
+    /// tree with an infinite frame, and asking one for `isHittable` fails the test instead of
+    /// returning false, so the frame is checked first.
+    private func isShowing(_ element: XCUIElement) -> Bool {
+        guard element.exists else { return false }
+        let frame = element.frame
+        guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { return false }
+        return element.isHittable
+    }
+
     /// AVKit toggles its controls on a tap, so tap until they are showing.
     private func revealPlayerControls() {
         let close = app.buttons["Close"]
+        let showing = NSPredicate { [unowned self] _, _ in isShowing(close) }
         for _ in 0..<4 {
-            if close.exists && close.isHittable { return }
+            if isShowing(close) { return }
             app.otherElements["player.video"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
-            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: close)], timeout: 2)
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: showing, object: nil)], timeout: 2)
         }
-        XCTAssertTrue(close.isHittable, "AVKit's controls should appear after a tap")
+        XCTAssertTrue(isShowing(close), "AVKit's controls should appear after a tap")
     }
 
     /// Taps a control that shows and hides with AVKit's (they hide about 2 s after appearing),
@@ -126,7 +137,7 @@ final class DownloadFlowUITests: XCTestCase {
             revealPlayerControls()
             // A tap at its position, not on the element: if the controls hide first, the tap only
             // shows them again instead of failing the test.
-            if control.exists && control.isHittable {
+            if isShowing(control) {
                 let frame = control.frame
                 app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
             }
@@ -135,11 +146,20 @@ final class DownloadFlowUITests: XCTestCase {
         XCTFail("\(control) didn't open \(result)")
     }
 
-    /// Closes the player with AVKit's own close button, the only way out.
+    /// Closes the player with AVKit's own close button, the only way out. Like
+    /// `tapPlayerControl`, it taps the button's position and tries again if the controls hid first.
     private func closePlayer() {
-        revealPlayerControls()
-        app.buttons["Close"].tap()
-        wait(for: app.otherElements["player.video"], "exists == false", timeout: 5, "the player should close")
+        let close = app.buttons["Close"]
+        let video = app.otherElements["player.video"]
+        for _ in 0..<3 {
+            revealPlayerControls()
+            if isShowing(close) {
+                let frame = close.frame
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+            }
+            if video.waitForNonExistence(timeout: 3) { return }
+        }
+        XCTFail("the player should close")
     }
 
     /// AVKit's Off item: identified on iOS 26 (beside On (Language)), labelled on iOS 18
@@ -280,8 +300,9 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'HLS stream'")).firstMatch.exists)
         // HLS offline downloads need a physical device; here we only check the quality menu.
         download.tap()
-        XCTAssertTrue(app.buttons["360p"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["180p"].exists)
+        // Each quality carries its estimated size: "360p · about 563 KB".
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '360p · about '")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '180p · about '")).firstMatch.exists)
     }
 
     func testSeparateAudioPlaylistIsNotOfferedAsAVideo() throws {
@@ -484,7 +505,8 @@ final class DownloadFlowUITests: XCTestCase {
         sleep(7)
         XCTAssertFalse(app.buttons["player.upNext.play"].exists)
         closePlayer()
-        XCTAssertTrue(app.staticTexts["2 of 2 watched"].waitForExistence(timeout: 5))
+        // "2 of 2 watched · 460 KB".
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '2 of 2 watched'")).firstMatch.waitForExistence(timeout: 5))
     }
 
     /// The intro is marked once from the player, then offered as Skip Intro on the next viewing.
@@ -518,7 +540,9 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Start from Beginning"].waitForExistence(timeout: 5))
         app.buttons["Start from Beginning"].tap()
         let skip = app.buttons["player.skipIntro"]
-        XCTAssertTrue(skip.waitForExistence(timeout: 15), "Skip Intro appears once the intro starts")
+        // The intro was marked a few seconds after 0:10 (opening the menu takes a moment), and
+        // always before 0:20.
+        XCTAssertTrue(skip.waitForExistence(timeout: 30), "Skip Intro appears once the intro starts")
         skip.tap()
         wait(for: subtitle, "label == 'Twenty to thirty'", timeout: 5, subtitle.label)
         XCTAssertFalse(skip.exists)
@@ -539,6 +563,9 @@ final class DownloadFlowUITests: XCTestCase {
         sleep(1)
         XCTAssertFalse(app.buttons["player.captions"].exists, "no separate button: the subtitles are in the video")
         openSubtitlesMenu()
+        // iOS 26 lists the languages under Language; iOS 18 lists them beside Off.
+        let languages = app.buttons["AVLanguagesMenu"]
+        if languages.exists { languages.tap() }
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Spanish'")).firstMatch.waitForExistence(timeout: 5),
                       "iOS lists the site's languages")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'English'")).firstMatch.exists)
