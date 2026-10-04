@@ -43,7 +43,26 @@ if [[ $force != --now ]] && (( now - last_install < INTERVAL_DAYS * 86400 && exp
     exit 0
 fi
 
-if ! xcrun devicectl list devices 2>/dev/null | grep "$DEVICE" | grep -Eq "available|connected"; then
+# Reads devicectl's JSON rather than its table, whose columns changed in Xcode 27 (the table now
+# shows the hardware UDID instead of the CoreDevice identifier that setup.sh may have saved).
+device_reachable() {
+    local json=$(mktemp) i=0 id udid tunnel
+    xcrun devicectl list devices --json-output "$json" >/dev/null 2>&1 || { rm -f "$json"; return 1 }
+    while id=$(plutil -extract "result.devices.$i.identifier" raw -o - "$json" 2>/dev/null); do
+        udid=$(plutil -extract "result.devices.$i.hardwareProperties.udid" raw -o - "$json" 2>/dev/null)
+        if [[ $id == $DEVICE || $udid == $DEVICE ]]; then
+            tunnel=$(plutil -extract "result.devices.$i.connectionProperties.tunnelState" raw -o - "$json" 2>/dev/null)
+            rm -f "$json"
+            [[ -n $tunnel && $tunnel != unavailable ]]
+            return
+        fi
+        (( i++ ))
+    done
+    rm -f "$json"
+    return 1
+}
+
+if ! device_reachable; then
     log "The iPhone isn't reachable (it needs to be on the same Wi-Fi as this Mac); trying again later."
     exit 0
 fi

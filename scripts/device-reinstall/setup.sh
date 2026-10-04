@@ -28,7 +28,7 @@ if [[ ${1:-} == --uninstall ]]; then
 fi
 
 DEVICE=${1:-$(xcrun devicectl list devices 2>/dev/null | grep -E "iPhone" | grep -E "available|connected" | head -1 |
-                awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9A-F]{8}-[0-9A-F]{4}-/) { print $i; exit } }')}
+                awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9A-F]{8}-[0-9A-F]{4}/) { print $i; exit } }')}
 if [[ -z $DEVICE ]]; then
     print "No reachable iPhone. Connect it (or put it on the same Wi-Fi), unlock it, and try again." >&2
     exit 1
