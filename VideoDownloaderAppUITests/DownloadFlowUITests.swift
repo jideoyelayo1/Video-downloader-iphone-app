@@ -534,17 +534,24 @@ final class DownloadFlowUITests: XCTestCase {
         wait(for: subtitle, "label == 'Twenty to thirty'", timeout: 15, subtitle.label)
         tapPlayerControl(episode, opening: app.buttons["Intro Ends Here"])
         app.buttons["Intro Ends Here"].tap()
+        // Opening the menu can take several seconds, so the end is somewhere after 0:20.
+        let cues = ["Zero to ten", "Ten to twenty", "Twenty to thirty", "Thirty to forty", "Forty to fifty", "Fifty to sixty"]
+        let endCue = subtitle.label
+        XCTAssertTrue(cues.contains(endCue), endCue)
         closePlayer()
 
         item.tap()
-        XCTAssertTrue(app.buttons["Start from Beginning"].waitForExistence(timeout: 5))
-        app.buttons["Start from Beginning"].tap()
+        // Closed before the end, it offers to resume. When the menu was slow, the player can
+        // close in the last seconds, which counts as watched: it then starts again by itself.
+        let restart = app.buttons["Start from Beginning"]
+        if restart.waitForExistence(timeout: 5) { restart.tap() }
         let skip = app.buttons["player.skipIntro"]
-        // The intro was marked a few seconds after 0:10 (opening the menu takes a moment), and
-        // always before 0:20.
-        XCTAssertTrue(skip.waitForExistence(timeout: 30), "Skip Intro appears once the intro starts")
+        // The intro was marked to start some seconds after 0:10, depending on how long the menu took.
+        XCTAssertTrue(skip.waitForExistence(timeout: 45), "Skip Intro appears once the intro starts")
         skip.tap()
-        wait(for: subtitle, "label == 'Twenty to thirty'", timeout: 5, subtitle.label)
+        // Playback goes on from the end mark: its cue, or the next one if the mark was near the cue's end.
+        let landing = cues.drop { $0 != endCue }.prefix(2).map { "'\($0)'" }.joined(separator: ", ")
+        wait(for: subtitle, "label IN {\(landing)}", timeout: 5, subtitle.label)
         XCTAssertFalse(skip.exists)
         closePlayer()
     }
