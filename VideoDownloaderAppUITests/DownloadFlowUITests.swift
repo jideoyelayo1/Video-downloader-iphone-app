@@ -108,26 +108,31 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["library.show"].firstMatch.waitForExistence(timeout: 5))
     }
 
-    /// Whether a player control is on screen. Since Xcode 27, AVKit's hidden controls stay in the
-    /// tree with an infinite frame, and asking one for `isHittable` fails the test instead of
-    /// returning false, so the frame is checked first.
-    private func isShowing(_ element: XCUIElement) -> Bool {
-        guard element.exists else { return false }
-        let frame = element.frame
-        guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { return false }
-        return element.isHittable
+    /// Where a player control is, if it's showing. AVKit's controls fade in and out, and reading a
+    /// vanished control's `frame` or `isHittable` fails the test, while a snapshot only throws.
+    /// Since Xcode 27, hidden controls can also stay in the tree with an infinite frame.
+    private func shownFrame(of element: XCUIElement) -> CGRect? {
+        guard let frame = try? element.snapshot().frame,
+              frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { return nil }
+        return frame
+    }
+
+    /// A tap at a control's position, not on the element: if the controls hid first, the tap only
+    /// shows them again instead of failing the test.
+    private func tap(at frame: CGRect) {
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
     }
 
     /// AVKit toggles its controls on a tap, so tap until they are showing.
     private func revealPlayerControls() {
         let close = app.buttons["Close"]
-        let showing = NSPredicate { [unowned self] _, _ in isShowing(close) }
+        let showing = NSPredicate { [unowned self] _, _ in shownFrame(of: close) != nil }
         for _ in 0..<4 {
-            if isShowing(close) { return }
+            if shownFrame(of: close) != nil { return }
             app.otherElements["player.video"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
             _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: showing, object: nil)], timeout: 2)
         }
-        XCTAssertTrue(isShowing(close), "AVKit's controls should appear after a tap")
+        XCTAssertNotNil(shownFrame(of: close), "AVKit's controls should appear after a tap")
     }
 
     /// Taps a control that shows and hides with AVKit's (they hide about 2 s after appearing),
@@ -135,28 +140,18 @@ final class DownloadFlowUITests: XCTestCase {
     private func tapPlayerControl(_ control: XCUIElement, opening result: XCUIElement) {
         for _ in 0..<3 {
             revealPlayerControls()
-            // A tap at its position, not on the element: if the controls hide first, the tap only
-            // shows them again instead of failing the test.
-            if isShowing(control) {
-                let frame = control.frame
-                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
-            }
+            if let frame = shownFrame(of: control) { tap(at: frame) }
             if result.waitForExistence(timeout: 2) { return }
         }
         XCTFail("\(control) didn't open \(result)")
     }
 
-    /// Closes the player with AVKit's own close button, the only way out. Like
-    /// `tapPlayerControl`, it taps the button's position and tries again if the controls hid first.
+    /// Closes the player with AVKit's own close button, the only way out, the same way.
     private func closePlayer() {
-        let close = app.buttons["Close"]
         let video = app.otherElements["player.video"]
         for _ in 0..<3 {
             revealPlayerControls()
-            if isShowing(close) {
-                let frame = close.frame
-                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
-            }
+            if let frame = shownFrame(of: app.buttons["Close"]) { tap(at: frame) }
             if video.waitForNonExistence(timeout: 3) { return }
         }
         XCTFail("the player should close")
