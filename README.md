@@ -99,6 +99,8 @@ python3 portable_tests.py   # Foundation-only checks + the discovery script unde
 - Integration tests run the real download and validation code against `LocalMediaServer`, a localhost HTTP server in `VideoDownloaderAppTests/Support/` with MP4/HLS fixtures and routes for cookies, Referer, redirects, expiry, dropped connections, and slow transfers.
 - UI tests (`VideoDownloaderAppUITests/`) drive browse → detect → download → library → play → export → rename → delete against the same server, plus watched, labels, Sort & Filter, a show made from its suggestion (drag to reorder) and the Up Next countdown.
 
+Keep the Mac's display on while UI tests run, for example by starting them with `caffeinate -dimsu xcodebuild …`. While the display is off, video in the simulator doesn't advance, and the playback tests fail.
+
 Don't pass `CODE_SIGNING_ALLOWED=NO` when running tests: background `URLSession` downloads fail with `NSURLErrorUnknown` in an unsigned app. The simulator's default "Sign to Run Locally" is enough.
 
 The simulator can't download HLS for offline use (an Apple limitation), so HLS downloads, background transfers with the app suspended, and airplane-mode playback have to be checked on a physical iPhone. See `TEST_REPORT.md`.
