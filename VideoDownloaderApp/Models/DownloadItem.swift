@@ -287,6 +287,24 @@ final class Bookmark {
         ("***REMOVED***", URL(string: "https://***REMOVED***.com/")!)
     ]
 
+    /// Sites whose episode pages gave a video the app can download in the 2026-10-03 survey
+    /// (TEST_REPORT.md). ***REMOVED*** and My***REMOVED*** first need their Cloudflare check passed in
+    /// Browse; ***REMOVED*** and ***REMOVED*** need a tap on their play button.
+    static let testedSites: [(String, URL)] = [
+        ("***REMOVED***", URL(string: "https://www.***REMOVED***.to/")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.to/anime")!),
+        ("My***REMOVED***", URL(string: "https://my***REMOVED***.lol/home/")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.one/home")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.ru/home")!),
+        ("***REMOVED***", URL(string: "https://www.***REMOVED***.com/")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.com.lv/")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***tv.to/home")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.ws/")!)
+    ]
+
+    /// Every site the app ships a bookmark for, with its display name.
+    static var knownSites: [(String, URL)] { starters + testedSites }
+
     static let oldStarterURLs: Set<String> = [
         "https://my***REMOVED***.lol/watch/tv/95350-free-lanterns-hd/season-1/episode-1/",
         "https://www.***REMOVED***.tv/watch/178789/mushoku-tensei-iii-isekai-ittara-honki-dasu?ep=13"

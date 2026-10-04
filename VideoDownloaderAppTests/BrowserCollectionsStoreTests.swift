@@ -25,12 +25,45 @@ final class BrowserCollectionsStoreTests: XCTestCase {
         StarterBookmarks.install(in: context, preferences: preferences)
 
         let bookmarks = try context.fetch(FetchDescriptor<Bookmark>())
-        XCTAssertEqual(bookmarks.count, Bookmark.starters.count + 1)
+        let testedElsewhere = Bookmark.testedSites.filter { tested in
+            !Bookmark.starters.contains { SiteMatch.matches(host: $0.1.host!, site: tested.1.host!) }
+        }
+        XCTAssertEqual(bookmarks.count, Bookmark.starters.count + testedElsewhere.count + 1)
         XCTAssertTrue(bookmarks.contains { $0.url == personal && $0.title == "My show" })
         XCTAssertFalse(bookmarks.contains { Bookmark.oldStarterURLs.contains($0.url.absoluteString) })
         for (_, url) in Bookmark.starters { XCTAssertTrue(bookmarks.contains { $0.url == url }) }
         StarterBookmarks.install(in: context, preferences: preferences)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Bookmark>()), bookmarks.count)
+    }
+
+    /// A library with its own bookmarks gets each tested site once, unless a bookmark already
+    /// opens that site; nothing is removed, and it happens only once.
+    func testTestedSitesAreAddedOnceBesideExistingBookmarks() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let own = ["https://www.google.com/", "https://www.***REMOVED***.tv/", "https://my***REMOVED***.lol/home/", "https://***REMOVED***.to/anime?tr=dub"]
+        for url in own { context.insert(Bookmark(title: "Mine", url: URL(string: url)!)) }
+        try context.save()
+
+        let suiteName = "BrowserCollectionsStoreTests-\(UUID().uuidString)"
+        let preferences = UserDefaults(suiteName: suiteName)!
+        defer { preferences.removePersistentDomain(forName: suiteName) }
+        // Set up by an earlier version, whose starters weren't added to a library with bookmarks.
+        preferences.set(true, forKey: "starterBookmarksV2")
+        preferences.set(true, forKey: "seededBookmarks")
+        StarterBookmarks.install(in: context, preferences: preferences)
+
+        let bookmarks = try context.fetch(FetchDescriptor<Bookmark>())
+        let added = bookmarks.filter { $0.title != "Mine" }.map(\.title).sorted()
+        // ***REMOVED*** moved to ***REMOVED***.to, a different site from the bookmarked ***REMOVED***.tv.
+        XCTAssertEqual(added, ["***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***"])
+        XCTAssertEqual(bookmarks.filter { $0.title == "Mine" }.count, own.count)
+
+        bookmarks.first { $0.title == "***REMOVED***" }.map(context.delete)
+        try context.save()
+        StarterBookmarks.install(in: context, preferences: preferences)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Bookmark>()), bookmarks.count - 1, "a deleted site stays deleted")
+        XCTAssertEqual(SiteNames.name(for: "www.***REMOVED***.com"), "***REMOVED***")
     }
 
     func testHistoryKeepsLatestVisitPerPageAndCanBeCleared() throws {

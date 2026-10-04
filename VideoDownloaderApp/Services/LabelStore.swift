@@ -106,9 +106,9 @@ final class LabelStore: ObservableObject {
         save()
     }
 
-    /// Sites to offer in a label's rules: the starter bookmarks and every site in the library.
+    /// Sites to offer in a label's rules: the sites the app ships bookmarks for and every site in the library.
     var knownSites: [String] {
-        let starters = Bookmark.starters.compactMap { $0.1.host.map(SiteNames.normalized) }
+        let starters = Bookmark.knownSites.compactMap { $0.1.host.map(SiteNames.normalized) }
         let library = videos().compactMap { $0.sourcePageURL.host.map(SiteNames.normalized) }
         return Array(Set(starters + library)).sorted()
     }

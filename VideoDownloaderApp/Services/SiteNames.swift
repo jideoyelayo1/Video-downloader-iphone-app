@@ -5,11 +5,11 @@ enum SiteNames {
     /// Display names for sites whose domain doesn't read well on its own.
     private static let knownNames = ["my***REMOVED***": "My***REMOVED***", "***REMOVED***": "***REMOVED***", "***REMOVED***": "***REMOVED***"]
 
-    /// "***REMOVED***.to" → "***REMOVED***" (from the starter bookmarks), "***REMOVED***.ws" → "***REMOVED***",
+    /// "***REMOVED***.to" → "***REMOVED***" (from the bookmarks the app ships), "***REMOVED***.ws" → "***REMOVED***",
     /// "tools.***REMOVED***.rsvp" → "***REMOVED***".
     static func name(for host: String) -> String {
         let site = normalized(host)
-        if let starter = Bookmark.starters.first(where: { $0.1.host.map(normalized).map { SiteMatch.matches(host: site, site: $0) } ?? false }) {
+        if let starter = Bookmark.knownSites.first(where: { $0.1.host.map(normalized).map { SiteMatch.matches(host: site, site: $0) } ?? false }) {
             return starter.0
         }
         let parts = site.split(separator: ".").map(String.init)

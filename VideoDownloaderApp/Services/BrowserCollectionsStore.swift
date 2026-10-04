@@ -11,15 +11,30 @@ enum StarterBookmarks {
             return
         }
 
-        guard !preferences.bool(forKey: "starterBookmarksV2") else { return }
-        let old = existing.filter { Bookmark.oldStarterURLs.contains($0.url.absoluteString) }
-        old.forEach(context.delete)
-        if !old.isEmpty || (existing.isEmpty && !preferences.bool(forKey: "seededBookmarks")) {
-            addMissing(in: context, existing: existing.filter { bookmark in !old.contains(where: { $0 === bookmark }) })
+        if !preferences.bool(forKey: "starterBookmarksV2") {
+            let old = existing.filter { Bookmark.oldStarterURLs.contains($0.url.absoluteString) }
+            old.forEach(context.delete)
+            if !old.isEmpty || (existing.isEmpty && !preferences.bool(forKey: "seededBookmarks")) {
+                addMissing(in: context, existing: existing.filter { bookmark in !old.contains(where: { $0 === bookmark }) })
+            }
+            try? context.save()
+            preferences.set(true, forKey: "starterBookmarksV2")
+            preferences.set(true, forKey: "seededBookmarks")
+        }
+
+        // Once, for everyone: the sites tested to work, unless a bookmark already opens that site.
+        guard !preferences.bool(forKey: "testedSiteBookmarksV3") else { return }
+        addMissingSites(in: context)
+        preferences.set(true, forKey: "testedSiteBookmarksV3")
+    }
+
+    private static func addMissingSites(in context: ModelContext) {
+        let hosts = ((try? context.fetch(FetchDescriptor<Bookmark>())) ?? []).compactMap(\.url.host)
+        for (title, url) in Bookmark.testedSites {
+            guard let site = url.host, !hosts.contains(where: { SiteMatch.matches(host: $0, site: site) }) else { continue }
+            context.insert(Bookmark(title: title, url: url))
         }
         try? context.save()
-        preferences.set(true, forKey: "starterBookmarksV2")
-        preferences.set(true, forKey: "seededBookmarks")
     }
 
     private static func addMissing(in context: ModelContext, existing: [Bookmark]) {
