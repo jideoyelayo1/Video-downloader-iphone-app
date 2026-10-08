@@ -18,6 +18,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 STATE="$SUPPORT/state"
 WORK="$SUPPORT/work"
 APP="$WORK/build/DerivedData/Build/Products/Debug-iphoneos/VideoDownloaderApp.app"
+BUNDLE_ID=com.jideoyelayo.VideoDownloaderApp
 force=${1:-}
 
 log() { print -r -- "$(date '+%Y-%m-%d %H:%M:%S') $*" }
@@ -84,6 +85,21 @@ git -C "$WORK" fetch -q origin "$BRANCH" && git -C "$WORK" checkout -q --detach 
     fail "Couldn't update the project copy for the automatic update."
 building=$(git -C "$WORK" rev-parse --short HEAD)
 log "Building $building ($BRANCH)…"
+
+# Xcode signs with a cached profile until it expires, so one for this app that ends within 5 days
+# is moved aside (kept in $SUPPORT/old-profiles) and Xcode makes a fresh 7-day profile.
+PROFILES="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+for cached in "$PROFILES"/*.mobileprovision(N); do
+    decoded=$(mktemp)
+    security cms -D -i "$cached" > "$decoded" 2>/dev/null
+    app_id=$(plutil -extract Entitlements.application-identifier raw -o - "$decoded" 2>/dev/null)
+    ends=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$(plutil -extract ExpirationDate raw -o - "$decoded" 2>/dev/null)" +%s 2>/dev/null || print 0)
+    rm -f "$decoded"
+    if [[ $app_id == *.$BUNDLE_ID ]] && (( ends > 0 && ends - now < 5 * 86400 )); then
+        mkdir -p "$SUPPORT/old-profiles" && mv "$cached" "$SUPPORT/old-profiles/" &&
+            log "Moved aside the signing profile that ends $(date -r $ends '+%a %e %b at %H:%M'), for a fresh one."
+    fi
+done
 
 # A free account only makes a new profile for a build aimed at a particular iPhone ("Your team
 # has no devices…" for a generic build), which also registers the phone again.
