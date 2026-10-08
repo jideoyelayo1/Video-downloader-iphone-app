@@ -45,12 +45,15 @@ fi
 
 # Reads devicectl's JSON rather than its table, whose columns changed in Xcode 27 (the table now
 # shows the hardware UDID instead of the CoreDevice identifier that setup.sh may have saved).
+# Also sets DEVICE_UDID, which xcodebuild needs to sign for this iPhone.
+DEVICE_UDID=""
 device_reachable() {
     local json=$(mktemp) i=0 id udid tunnel
     xcrun devicectl list devices --json-output "$json" >/dev/null 2>&1 || { rm -f "$json"; return 1 }
     while id=$(plutil -extract "result.devices.$i.identifier" raw -o - "$json" 2>/dev/null); do
         udid=$(plutil -extract "result.devices.$i.hardwareProperties.udid" raw -o - "$json" 2>/dev/null)
         if [[ $id == $DEVICE || $udid == $DEVICE ]]; then
+            DEVICE_UDID=$udid
             tunnel=$(plutil -extract "result.devices.$i.connectionProperties.tunnelState" raw -o - "$json" 2>/dev/null)
             rm -f "$json"
             [[ -n $tunnel && $tunnel != unavailable ]]
@@ -82,11 +85,19 @@ git -C "$WORK" fetch -q origin "$BRANCH" && git -C "$WORK" checkout -q --detach 
 building=$(git -C "$WORK" rev-parse --short HEAD)
 log "Building $building ($BRANCH)…"
 
+# A free account only makes a new profile for a build aimed at a particular iPhone ("Your team
+# has no devices…" for a generic build), which also registers the phone again.
+destination='generic/platform=iOS'
+[[ -n $DEVICE_UDID ]] && destination="platform=iOS,id=$DEVICE_UDID"
 if ! xcodebuild -project "$WORK/VideoDownloaderApp.xcodeproj" -scheme VideoDownloaderApp -configuration Debug \
-       -destination 'generic/platform=iOS' -derivedDataPath "$WORK/build/DerivedData" -allowProvisioningUpdates build \
-       > "$SUPPORT/last-build.log" 2>&1; then
+       -destination "$destination" -destination-timeout 300 -derivedDataPath "$WORK/build/DerivedData" \
+       -allowProvisioningUpdates build > "$SUPPORT/last-build.log" 2>&1; then
     if grep -q "No Accounts" "$SUPPORT/last-build.log"; then
         fail "Can't re-sign the app: sign in to Xcode under Settings → Accounts."
+    fi
+    if grep -q "Timed out waiting for all destinations" "$SUPPORT/last-build.log"; then
+        log "Xcode couldn't connect to the iPhone (it may be locked or asleep); trying again later."
+        exit 0
     fi
     fail "The automatic update failed to build. See $SUPPORT/last-build.log."
 fi
