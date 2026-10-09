@@ -142,12 +142,20 @@ final class BrowserViewModelStateTests: XCTestCase {
             let webView = model.makeWebView()
             let coordinator = BrowserView.Coordinator(model: model)
             webView.navigationDelegate = coordinator
+            // Hosted in a window, as the app does, so its content process isn't suspended. The first
+            // web view of a run can take a while to start on a freshly booted simulator, such as CI's.
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+            webView.frame = window.bounds
+            window.addSubview(webView)
+            window.isHidden = false
             webView.loadHTMLString("<title>Release</title><p>x</p>", baseURL: URL(string: "https://release.example/"))
-            try await waitUntil("page loaded") { model.pageTitle == "Release" }
+            try await waitUntil("page loaded", timeout: 30) { model.pageTitle == "Release" }
             weakModel = model
             weakWebView = webView
             weakDiscovery = model.discovery
             webView.navigationDelegate = nil
+            webView.removeFromSuperview()
+            window.isHidden = true
         }
         try await waitUntil("model, web view and discovery released") { weakModel == nil && weakWebView == nil && weakDiscovery == nil }
     }
