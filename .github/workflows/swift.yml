@@ -1,22 +1,69 @@
-# This workflow will build a Swift project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-swift
+# Builds the app and its tests with Xcode, then runs the unit tests in an iPhone simulator.
+# The UI tests take about half an hour and need a display that stays awake, so they run on the
+# Mac instead (see README → Testing); they are still compiled here.
 
-name: Swift
+name: Tests
 
 on:
   push:
     branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
+  workflow_dispatch:
+
+# A newer push replaces a run still going: macOS minutes count ten times on a private repository.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-
+    name: Build and unit tests
     runs-on: macos-latest
+    timeout-minutes: 45
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
+
+    - name: Xcode version
+      run: xcodebuild -version
+
+    - name: Portable checks
+      run: python3 portable_tests.py
+
+    # The newest iOS runtime's first iPhone, so the job doesn't depend on one simulator's name.
+    - name: Pick a simulator
+      id: simulator
+      run: |
+        udid=$(xcrun simctl list devices available --json | python3 -c '
+        import json, sys
+        devices = json.load(sys.stdin)["devices"]
+        def version(runtime): return [int(part) for part in runtime.rsplit(".iOS-", 1)[1].split("-")]
+        for runtime in sorted((r for r in devices if ".iOS-" in r), key=version, reverse=True):
+            phones = [d for d in devices[runtime] if d["name"].startswith("iPhone")]
+            if phones:
+                print(phones[0]["udid"])
+                break
+        ')
+        test -n "$udid" || { echo "No iPhone simulator available"; xcrun simctl list devices available; exit 1; }
+        xcrun simctl list devices available | grep "$udid"
+        echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
     - name: Build
-      run: swift build -v
-    - name: Run tests
-      run: swift test -v
+      run: |
+        xcodebuild build-for-testing -project VideoDownloaderApp.xcodeproj -scheme VideoDownloaderApp \
+          -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" -derivedDataPath DerivedData
+
+    - name: Unit tests
+      run: |
+        xcodebuild test-without-building -project VideoDownloaderApp.xcodeproj -scheme VideoDownloaderApp \
+          -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" -derivedDataPath DerivedData \
+          -only-testing:VideoDownloaderAppTests -resultBundlePath TestResults.xcresult
+
+    - name: Keep the results of a failed run
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: TestResults
+        path: TestResults.xcresult
+        retention-days: 7

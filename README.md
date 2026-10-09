@@ -100,6 +100,8 @@ python3 portable_tests.py   # Foundation-only checks + the discovery script unde
 - Integration tests run the real download and validation code against `LocalMediaServer`, a localhost HTTP server in `VideoDownloaderAppTests/Support/` with MP4/HLS fixtures and routes for cookies, Referer, redirects, expiry, dropped connections, and slow transfers.
 - UI tests (`VideoDownloaderAppUITests/`) drive browse → detect → download → library → play → export → rename → delete against the same server, plus watched, labels, Sort & Filter, a show made from its suggestion (drag to reorder), the Up Next countdown, the Ask First question before it, and deleting a show with its episodes.
 
+GitHub Actions (`.github/workflows/swift.yml`) runs the portable checks, builds the app and both test targets, and runs the unit tests in the runner's newest iPhone simulator, on every push to `master` and every pull request to it. The UI tests run on the Mac: they take about half an hour, which costs ten times as many Actions minutes on a private repository.
+
 Keep the Mac's display on while UI tests run, for example by starting them with `caffeinate -dimsu xcodebuild …`. While the display is off, video in the simulator doesn't advance, and the playback tests fail.
 
 Don't pass `CODE_SIGNING_ALLOWED=NO` when running tests: background `URLSession` downloads fail with `NSURLErrorUnknown` in an unsigned app. The simulator's default "Sign to Run Locally" is enough.
