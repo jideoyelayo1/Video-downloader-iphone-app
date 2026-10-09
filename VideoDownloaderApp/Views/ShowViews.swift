@@ -174,7 +174,7 @@ struct ShowScreen: View {
     @State private var renaming = false
     @State private var newTitle = ""
     @State private var addingVideos: NewShowSeed?
-    @State private var confirmingDelete = false
+    @State private var deleting: Show?
     @State private var pendingPlayback: DownloadItem?
     @State private var checking = false
 
@@ -265,7 +265,7 @@ struct ShowScreen: View {
                                systemImage: "trash.slash", role: .destructive) { confirmingDeleteWatched = true }
                     }
                     Divider()
-                    Button("Delete Show", systemImage: "trash", role: .destructive) { confirmingDelete = true }
+                    Button("Delete Show…", systemImage: "trash", role: .destructive) { deleting = show }
                 } label: { Label("Show options", systemImage: "ellipsis.circle") }
                     .accessibilityIdentifier("show.options")
             }
@@ -284,17 +284,8 @@ struct ShowScreen: View {
                 downloads.delete(ShowPlaylist.episodes(of: show.id, in: items).filter(\.isWatched))
             }
         } message: { Text("Their video files are removed from this iPhone. The show keeps the rest.") }
-        .confirmationDialog("Delete this show?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete Show", role: .destructive) {
-                // Leave first: the screen reads the show while it animates away.
-                let show = show
-                dismiss()
-                Task {
-                    try? await Task.sleep(for: .milliseconds(500))
-                    shows.delete(show)
-                }
-            }
-        } message: { Text("The videos stay in My Videos.") }
+        // Leave first: the screen reads the show while it animates away.
+        .modifier(DeleteShowDialog(show: $deleting, leave: { dismiss() }))
         .confirmationDialog("Play video", isPresented: Binding(get: { pendingPlayback != nil }, set: { if !$0 { pendingPlayback = nil } })) {
             Button("Resume") { if let item = pendingPlayback { start(item, at: item.playbackPosition ?? 0) }; pendingPlayback = nil }
             Button("Start from Beginning") { if let item = pendingPlayback { start(item, at: 0) }; pendingPlayback = nil }
@@ -333,6 +324,42 @@ struct ShowScreen: View {
     private func start(_ item: DownloadItem, at position: Double) {
         if position == 0 { item.playbackPosition = 0; try? modelContext.save() }
         playback.open(item, at: position)
+    }
+}
+
+/// Deletes a show with its episodes' videos, or leaves the videos in My Videos.
+struct DeleteShowDialog: ViewModifier {
+    @Binding var show: Show?
+    /// Leaves a screen that shows the show, before it is deleted.
+    var leave: (() -> Void)?
+    @EnvironmentObject private var shows: ShowStore
+    @EnvironmentObject private var downloads: DownloadManager
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog("Delete this show?", isPresented: Binding(get: { show != nil }, set: { if !$0 { show = nil } }),
+                                   titleVisibility: .visible, presenting: show) { show in
+            if !shows.episodes(of: show).isEmpty {
+                Button("Delete Show and Episodes", role: .destructive) { delete(show, withEpisodes: true) }
+            }
+            Button("Delete Show Only", role: .destructive) { delete(show, withEpisodes: false) }
+        } message: { show in
+            let episodes = shows.episodes(of: show)
+            if episodes.isEmpty {
+                Text("It has no episodes.")
+            } else {
+                Text("Deleting its episodes removes \(episodes.count == 1 ? "1 video" : "\(episodes.count) videos") (\(StorageCleanup.sizeText(episodes))) from this iPhone. With Delete Show Only, they stay in My Videos.")
+            }
+        }
+    }
+
+    private func delete(_ show: Show, withEpisodes: Bool) {
+        let delete = { withEpisodes ? downloads.deleteShowAndEpisodes(show) : shows.delete(show) }
+        guard let leave else { return delete() }
+        leave()
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            delete()
+        }
     }
 }
 

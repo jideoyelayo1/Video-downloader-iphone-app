@@ -84,6 +84,7 @@ final class AppServices {
         downloads.subtitleEmbedder = subtitleEmbedder
         playback = PlaybackCoordinator(context: context, diagnostics: diagnostics, preferences: preferences)
         playback.shows = shows
+        playback.downloads = downloads
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }
         downloads.diagnostics = diagnostics
         shows.fillMissingFollowedPages()

@@ -117,6 +117,39 @@ final class ShowTests: XCTestCase {
         XCTAssertEqual(ShowPlaylist.continueWatching([other] + episodes).map(\.id), [episodes[1].id, other.id], "now in progress, listed once")
     }
 
+    /// Delete Finished Episodes removes the episode Continue Watching follows on from; the show remembers it.
+    func testContinueWatchingOffersTheEpisodeAfterADeletedOne() throws {
+        let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
+        let downloads = DownloadManager(context: container.mainContext, directConfiguration: .ephemeral, restore: false)
+        downloads.showStore = store
+        let episodes = [1, 2, 3].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") }
+        let show = store.create(title: "***REMOVED***", with: episodes)
+        let other = video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · ***REMOVED***")
+        other.playbackPosition = 300
+        other.lastPlayedAt = Date(timeIntervalSince1970: 1_000)
+        func listed() -> [UUID] { ShowPlaylist.continueWatching(store.episodes(of: show) + [other], shows: store.shows).map(\.id) }
+        let (second, third) = (episodes[1].id, episodes[2].id)
+
+        episodes[0].lastPlayedAt = Date(timeIntervalSince1970: 2_000)
+        episodes[0].setWatched(true)
+        downloads.delete(episodes[0])
+        XCTAssertEqual(show.deletedEpisodePlayedAt, Date(timeIntervalSince1970: 2_000))
+        XCTAssertEqual(listed(), [second, other.id], "episode 2 follows the deleted episode 1, most recent first")
+
+        episodes[1].lastPlayedAt = Date(timeIntervalSince1970: 3_000)
+        episodes[1].playbackPosition = 120
+        XCTAssertEqual(listed(), [second, other.id], "now in progress, listed once")
+
+        episodes[1].setWatched(true)
+        downloads.delete(episodes[1])
+        XCTAssertEqual(listed(), [third, other.id])
+
+        // An unwatched episode leaves no mark.
+        downloads.delete(episodes[2])
+        XCTAssertEqual(show.deletedEpisodePlayedAt, Date(timeIntervalSince1970: 3_000))
+        XCTAssertEqual(listed(), [other.id])
+    }
+
     func testNewEpisodesJoinTheirShow() {
         let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
         let show = store.create(title: "My Smoking Show", with: [1, 2].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") })

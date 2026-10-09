@@ -89,18 +89,25 @@ enum ShowPlaylist {
     }
 
     /// Videos started but not finished, plus the next episode of each show whose most recently
-    /// played episode was finished; most recently played first.
-    static func continueWatching(_ items: [DownloadItem]) -> [DownloadItem] {
+    /// played episode was finished, even if that episode was deleted since; most recently played first.
+    static func continueWatching(_ items: [DownloadItem], shows: [Show] = []) -> [DownloadItem] {
         let playable = items.filter { $0.status == .completed && !$0.isStreamFragment }
         var entries = playable.filter { !$0.isWatched && ($0.playbackPosition ?? 0) > 10 }
             .map { (item: $0, played: $0.lastPlayedAt ?? .distantPast, position: $0.playbackPosition ?? 0) }
         var included = Set(entries.map(\.item.id))
+        let deletedPlays = Dictionary(shows.compactMap { show in show.deletedEpisodePlayedAt.map { (show.id, $0) } }, uniquingKeysWith: max)
         for showID in Set(playable.compactMap(\.showID)) {
             let ordered = episodes(of: showID, in: playable)
-            guard let last = ordered.filter({ $0.lastPlayedAt != nil }).max(by: { $0.lastPlayedAt! < $1.lastPlayedAt! }),
-                  last.isWatched, let following = next(after: last, in: ordered), !following.isWatched,
-                  !included.contains(following.id) else { continue }
-            entries.append((following, last.lastPlayedAt ?? .distantPast, 0))
+            let last = ordered.filter { $0.lastPlayedAt != nil }.max { $0.lastPlayedAt! < $1.lastPlayedAt! }
+            let following: DownloadItem?, played: Date
+            if let deleted = deletedPlays[showID], deleted > last?.lastPlayedAt ?? .distantPast {
+                // The episode played last was deleted once watched; the first one not watched follows it.
+                (following, played) = (ordered.first { !$0.isWatched }, deleted)
+            } else if let last, last.isWatched {
+                (following, played) = (next(after: last, in: ordered), last.lastPlayedAt ?? .distantPast)
+            } else { continue }
+            guard let following, !following.isWatched, !included.contains(following.id) else { continue }
+            entries.append((following, played, 0))
             included.insert(following.id)
         }
         return entries.sorted { ($0.played, $0.position) > ($1.played, $1.position) }.map(\.item)

@@ -310,6 +310,113 @@ final class PlaybackCoordinatorTests: XCTestCase {
         coordinator.close()
     }
 
+    /// A show of two episodes, with Delete Finished Episodes set as given.
+    private func makeShow(deleting setting: FinishedEpisodes, for coordinator: PlaybackCoordinator) throws -> (ShowStore, Show, DownloadItem, DownloadItem) {
+        let suite = "PlaybackCoordinatorTests-\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let shows = ShowStore(context: container.mainContext, preferences: preferences)
+        let downloads = DownloadManager(context: container.mainContext, directConfiguration: .ephemeral, restore: false)
+        downloads.preferences = preferences
+        downloads.showStore = shows
+        downloads.finishedEpisodes = setting
+        coordinator.shows = shows
+        coordinator.downloads = downloads
+        let first = try makeEpisode(1), second = try makeEpisode(2)
+        return (shows, shows.create(title: "Fixture Show", with: [first, second]), first, second)
+    }
+
+    private func closeNearTheEnd(_ coordinator: PlaybackCoordinator, at position: Double = 4.7) async throws {
+        let player = try XCTUnwrap(coordinator.controller.player)
+        player.pause()
+        await player.seek(to: CMTime(seconds: position, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        coordinator.close()
+    }
+
+    private func exists(_ item: DownloadItem) throws -> Bool {
+        FileManager.default.fileExists(atPath: try XCTUnwrap(item.localURL).path)
+    }
+
+    /// Delete Finished Episodes → Automatically: a finished episode is deleted once the player has
+    /// moved on from it; videos outside a show are kept.
+    func testFinishedEpisodesAreDeletedOnceThePlayerMovesOn() async throws {
+        let coordinator = makeCoordinator()
+        let (shows, show, first, second) = try makeShow(deleting: .delete, for: coordinator)
+        let firstFile = try XCTUnwrap(first.localURL), secondFile = try XCTUnwrap(second.localURL)
+
+        coordinator.open(first, at: 0)
+        try await waitUntil("episode 1 ready") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: coordinator.controller.player?.currentItem)
+        try await waitUntil("episode 2 playing") { coordinator.title == "Fixture Show Ep. 2" && !coordinator.isLoading }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstFile.path), "deleted once episode 2 took its place")
+        XCTAssertEqual(shows.episodes(of: show).map(\.title), ["Fixture Show Ep. 2"])
+        XCTAssertNotNil(show.deletedEpisodePlayedAt, "for Continue Watching")
+
+        // Closed in its last 10%, the last episode goes too; the show stays, to follow new episodes.
+        try await closeNearTheEnd(coordinator)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondFile.path))
+        XCTAssertTrue(shows.episodes(of: show).isEmpty)
+        XCTAssertEqual(shows.shows.map(\.title), ["Fixture Show"])
+
+        let video = makeItem(in: container.mainContext)
+        coordinator.open(video, at: 0)
+        try await waitUntil("video ready") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        try await closeNearTheEnd(coordinator)
+        XCTAssertTrue(video.isWatched)
+        XCTAssertTrue(try exists(video), "not an episode of a show")
+    }
+
+    /// A finished episode marked for deletion and opened again stays.
+    func testAFinishedEpisodeOpenedAgainIsKept() async throws {
+        let coordinator = makeCoordinator()
+        let (_, show, first, _) = try makeShow(deleting: .delete, for: coordinator)
+        show.autoplayNext = false
+
+        coordinator.open(first, at: 0)
+        try await waitUntil("ready") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: coordinator.controller.player?.currentItem)
+        try await waitUntil("watched") { first.isWatched }
+        coordinator.open(first, at: 0)
+        try await waitUntil("ready again") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        XCTAssertNil(coordinator.errorMessage)
+        try await closeNearTheEnd(coordinator, at: 2.5)
+        XCTAssertTrue(try exists(first), "closed halfway the second time")
+    }
+
+    /// Ask First: the player asks where Up Next appears. Off screen, as in Picture in Picture, it
+    /// can't, so the episode stays and the next one plays; one closed in its last 10% is asked
+    /// about once the player has gone.
+    func testAskFirstKeepsUnansweredEpisodesAndAsksAfterClosing() async throws {
+        let coordinator = makeCoordinator()
+        let (_, _, first, second) = try makeShow(deleting: .ask, for: coordinator)
+
+        coordinator.open(first, at: 0)
+        try await waitUntil("episode 1 ready") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: coordinator.controller.player?.currentItem)
+        try await waitUntil("episode 2 playing") { coordinator.title == "Fixture Show Ep. 2" && !coordinator.isLoading }
+        XCTAssertTrue(try exists(first))
+        XCTAssertNil(coordinator.finishedEpisode)
+
+        try await closeNearTheEnd(coordinator)
+        XCTAssertTrue(coordinator.finishedEpisode === second)
+        coordinator.answerFinishedEpisode(delete: false)
+        XCTAssertNil(coordinator.finishedEpisode)
+        XCTAssertTrue(try exists(second))
+
+        coordinator.open(first, at: 0)
+        try await waitUntil("episode 1 ready again") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        try await closeNearTheEnd(coordinator, at: 2.5)
+        XCTAssertNil(coordinator.finishedEpisode, "closed halfway")
+
+        coordinator.open(second, at: 0)
+        try await waitUntil("episode 2 ready again") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
+        try await closeNearTheEnd(coordinator)
+        let secondFile = try XCTUnwrap(second.localURL)
+        coordinator.answerFinishedEpisode(delete: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondFile.path))
+        XCTAssertTrue(try exists(first))
+    }
+
     func testIntroIsSkippedCreditsCountAsWatchedAndSpeedIsKept() async throws {
         let coordinator = makeCoordinator()
         let shows = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "PlaybackCoordinatorTests-\(UUID().uuidString)")!)

@@ -130,6 +130,13 @@ final class ShowStore: ObservableObject {
         save()
     }
 
+    /// A watched episode is about to be deleted; its show remembers when it was played, for
+    /// Continue Watching. The caller saves.
+    func episodeDeleted(_ item: DownloadItem) {
+        guard item.isWatched, let played = item.lastPlayedAt, let show = show(for: item) else { return }
+        if show.deletedEpisodePlayedAt.map({ $0 < played }) ?? true { show.deletedEpisodePlayedAt = played }
+    }
+
     func show(for item: DownloadItem) -> Show? {
         guard let showID = item.showID else { return nil }
         return shows.first { $0.id == showID }

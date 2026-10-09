@@ -234,6 +234,9 @@ final class Show {
     var notifyNewEpisodesRaw: Bool?
     var autoDownloadNewEpisodesRaw: Bool?
     var lastCheckedAt: Date?
+    /// When the most recently played of its deleted, watched episodes was played, so Continue
+    /// Watching still offers the episode after it.
+    var deletedEpisodePlayedAt: Date?
 
     init(id: UUID = UUID(), title: String, autoplayNext: Bool = true, createdAt: Date = Date()) {
         self.id = id

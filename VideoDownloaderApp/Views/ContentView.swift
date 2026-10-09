@@ -47,6 +47,15 @@ struct ContentView: View {
         .alert("Unable to play video", isPresented: Binding(get: { playback.errorMessage != nil }, set: { if !$0 { playback.clearError() } })) {
             Button("OK", role: .cancel) { playback.clearError() }
         } message: { Text(playback.errorMessage ?? "") }
+        // Delete Finished Episodes → Ask First, for an episode closed in its last 10%. It waits
+        // while another video plays.
+        .confirmationDialog("Delete this episode?",
+                            isPresented: Binding(get: { playback.finishedEpisode != nil && !playback.isPresented },
+                                                 set: { if !$0 { playback.answerFinishedEpisode(delete: false) } }),
+                            titleVisibility: .visible, presenting: playback.finishedEpisode) { _ in
+            Button("Delete Episode", role: .destructive) { playback.answerFinishedEpisode(delete: true) }
+            Button("Keep", role: .cancel) { playback.answerFinishedEpisode(delete: false) }
+        } message: { episode in Text("You finished \(episode.displayTitle). \(StorageCleanup.freedText(episode))") }
         .alert("Can't start download", isPresented: Binding(get: { downloads.startError != nil }, set: { if !$0 { downloads.startError = nil } })) {
             Button("OK", role: .cancel) { downloads.startError = nil }
         } message: { Text(downloads.startError ?? "") }

@@ -242,6 +242,7 @@ final class DownloadManager: NSObject, ObservableObject {
         ThumbnailCache.shared.evict(item.id)
         releaseCookies(for: item.id)
         clearProgress(for: item.id)
+        showStore?.episodeDeleted(item)
         context.delete(item)
         save()
         if thenStartQueued { startQueued() }

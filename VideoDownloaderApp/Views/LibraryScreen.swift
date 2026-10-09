@@ -29,6 +29,7 @@ struct LibraryScreen: View {
     @State private var newLabelName = ""
     @State private var newShowSeed: NewShowSeed?
     @State private var openedShow: Show?
+    @State private var deletingShow: Show?
     @State private var importingBackup = false
     @State private var restoreMessage: String?
     @AppStorage("librarySort", store: AppServices.shared.preferences) private var sortRaw = LibraryQuery.Sort.newest.rawValue
@@ -54,7 +55,7 @@ struct LibraryScreen: View {
 
     private var playableCompletedCount: Int { completed.filter { !$0.isStreamFragment }.count }
     /// Started but not finished, most recently played first.
-    private var continueWatching: [DownloadItem] { ShowPlaylist.continueWatching(completed) }
+    private var continueWatching: [DownloadItem] { ShowPlaylist.continueWatching(completed, shows: shows) }
 
     var body: some View {
         // Each list is filtered once per render instead of once per use.
@@ -111,6 +112,7 @@ struct LibraryScreen: View {
                 Button("OK", role: .cancel) { restoreMessage = nil }
             } message: { Text(restoreMessage ?? "") }
             .navigationDestination(item: $openedShow) { ShowScreen(show: $0) }
+            .modifier(DeleteShowDialog(show: $deletingShow))
             .alert("New Label", isPresented: Binding(get: { labelingItem != nil }, set: { if !$0 { labelingItem = nil } })) {
                 TextField("Label name", text: $newLabelName)
                 Button("Add") {
@@ -213,6 +215,13 @@ struct LibraryScreen: View {
                             .buttonStyle(.borderless)
                             .accessibilityLabel("Play \(show.title)")
                         }
+                    }
+                    .contextMenu {
+                        Button("Delete Show…", systemImage: "trash", role: .destructive) { deletingShow = show }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        // Not a destructive role: the row stays until the dialog's answer.
+                        Button("Delete", systemImage: "trash") { deletingShow = show }.tint(.red)
                     }
                 }
             }

@@ -607,6 +607,77 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 2"), episodes.element(boundBy: 0).label)
     }
 
+    /// A show's menu, or a swipe on it in My Videos, deletes it with or without its episodes.
+    /// (iOS 26's dialogs have no Cancel button, so each one is answered.)
+    func testDeleteAShowAndItsEpisodes() throws {
+        makeTwoEpisodeShow()
+        let show = app.buttons["library.show"].firstMatch
+        show.tap()
+        app.buttons["show.options"].tap()
+        app.buttons["Delete Show…"].tap()
+        let deleteAll = app.buttons["Delete Show and Episodes"]
+        XCTAssertTrue(deleteAll.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Deleting its episodes removes 2 videos'")).firstMatch.exists)
+        app.buttons["Delete Show Only"].tap()
+        let items = app.buttons.matching(identifier: "library.item")
+        wait(for: items.element(boundBy: 1), "exists == true", timeout: 5, "back in My Videos, with both videos kept")
+        XCTAssertFalse(show.exists)
+
+        // The videos are offered as a show again; made into one, a swipe deletes it with them.
+        let create = app.buttons["Create Show"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        create.tap()
+        XCTAssertTrue(app.textFields["newShow.name"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Create"].tap()
+        XCTAssertTrue(show.waitForExistence(timeout: 5))
+        show.swipeLeft()
+        app.buttons["Delete"].tap()
+        XCTAssertTrue(deleteAll.waitForExistence(timeout: 5))
+        deleteAll.tap()
+        XCTAssertTrue(app.staticTexts["Your library is empty"].waitForExistence(timeout: 5), "the episodes went with the show")
+        XCTAssertFalse(show.exists)
+    }
+
+    /// Downloads → Delete Finished Episodes → Ask First: the player asks when an episode ends,
+    /// before Up Next, and an episode deleted there leaves the show.
+    func testFinishedEpisodeIsDeletedWhenAskedBeforeTheNextOne() throws {
+        makeTwoEpisodeShow()
+        app.tabBars.buttons["Downloads"].tap()
+        let setting = app.buttons["downloads.finishedEpisodes"]
+        for _ in 0..<4 where !(setting.exists && setting.isHittable) { app.swipeUp() }
+        setting.tap()
+        let askFirst = app.buttons["Ask First"]
+        XCTAssertTrue(askFirst.waitForExistence(timeout: 5))
+        askFirst.tap()
+        wait(for: setting, "label CONTAINS 'Ask First' OR value CONTAINS 'Ask First'", timeout: 5, setting.debugDescription)
+
+        app.tabBars.buttons["My Videos"].tap()
+        app.buttons["library.show"].firstMatch.tap()
+        app.buttons["show.playNext"].tap()
+        XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
+
+        // Episode 1 (5 s) ends: the question comes first, and Up Next waits for the answer.
+        let delete = app.buttons["player.deleteEpisode.delete"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 15), "asked when episode 1 ends")
+        XCTAssertTrue(app.staticTexts["Fixture Show Ep. 1"].exists)
+        XCTAssertFalse(app.buttons["player.upNext.play"].exists, "Up Next waits for the answer")
+        delete.tap()
+        let playNow = app.buttons["player.upNext.play"]
+        XCTAssertTrue(playNow.waitForExistence(timeout: 5), "Up Next follows the answer")
+        wait(for: playNow, "exists == false", timeout: 8, "the countdown starts episode 2")
+
+        // Episode 2, the last, ends: kept.
+        let keep = app.buttons["player.deleteEpisode.keep"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 15), "asked when episode 2 ends")
+        keep.tap()
+        XCTAssertFalse(app.buttons["player.upNext.play"].exists, "nothing follows the last episode")
+        closePlayer()
+        let episodes = app.buttons.matching(identifier: "show.episode")
+        wait(for: episodes.element(boundBy: 1), "exists == false", timeout: 5, "episode 1 was deleted")
+        XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 2"), episodes.element(boundBy: 0).label)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '1 of 1 watched'")).firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testResumeSeekAndContinueWatching() throws {
         launch(at: "/page/long.html")
         downloadFirstCandidate()

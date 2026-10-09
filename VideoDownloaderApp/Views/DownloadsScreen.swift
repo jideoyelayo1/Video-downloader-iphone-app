@@ -48,13 +48,23 @@ struct DownloadsScreen: View {
                         .accessibilityIdentifier("downloads.concurrent")
                     Toggle("Wi-Fi Only", isOn: Binding(get: { downloads.downloadsOnWiFiOnly }, set: { downloads.downloadsOnWiFiOnly = $0 }))
                         .accessibilityIdentifier("downloads.wifiOnly")
+                } header: {
+                    Text("Settings")
+                } footer: {
+                    Text("More downloads wait as Queued. With Wi-Fi Only, new downloads don't use mobile data.")
+                }
+                Section {
+                    Picker("Delete Finished Episodes", selection: Binding(get: { downloads.finishedEpisodes }, set: { downloads.finishedEpisodes = $0 })) {
+                        ForEach(FinishedEpisodes.allCases) { Text($0.name).tag($0) }
+                    }
+                    .accessibilityIdentifier("downloads.finishedEpisodes")
                     Toggle("Delete Watched Videos After a Week", isOn: Binding(get: { downloads.deletesWatchedAfterAWeek },
                                                                               set: { downloads.deletesWatchedAfterAWeek = $0 }))
                         .accessibilityIdentifier("downloads.autoDelete")
                 } header: {
-                    Text("Settings")
+                    Text("Watched Videos")
                 } footer: {
-                    Text("More downloads wait as Queued. With Wi-Fi Only, new downloads don't use mobile data. Watched videos are deleted when the app opens, a week after you watched them.")
+                    Text("An episode of a show is finished when it plays to the end or its credits, or you close it near the end. Ask First asks before the next episode plays. Watched videos are deleted when the app opens, a week after you watched them.")
                 }
             }
             .navigationTitle("Downloads")
