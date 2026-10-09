@@ -4,11 +4,14 @@
 
 name: Tests
 
+# Changes to documentation alone (such as TEST_REPORT.md) don't need a run.
 on:
   push:
     branches: [ "master" ]
+    paths-ignore: [ "**.md" ]
   pull_request:
     branches: [ "master" ]
+    paths-ignore: [ "**.md" ]
   workflow_dispatch:
 
 # A newer push replaces a run still going: macOS minutes count ten times on a private repository.
