@@ -70,6 +70,30 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(DownloadStorage.storedURL("video.mp4"), DownloadStorage.libraryDirectory.appendingPathComponent("video.mp4"))
     }
 
+    /// iOS 27 reports an HLS package under /.nofollow/private/var/…, and every install moves the app's
+    /// container. A path saved on the iPhone that way (2026-10-09) finds the package in this install's container.
+    func testHLSPackagesAreFoundAfterAnInstallMovesTheContainer() throws {
+        let package = "com.apple.UserManagedAssets.5BGDwz/Aniwave%20-%20Code%20Geass:%20Lelouch%20of%20the%20Rebellion%20R2.movpkg"
+        let reported = "/.nofollow/private/var/mobile/Containers/Data/Application/E51660F9-E96F-4CDB-8E9B-D64DA8A449F2/Library/" + package
+        XCTAssertEqual(DownloadStorage.managedPath(for: URL(fileURLWithPath: reported)), "@managed/" + package)
+        XCTAssertEqual(DownloadStorage.storedURL(reported), DownloadStorage.containerRoot.appendingPathComponent(package),
+                       "an absolute path saved by an earlier install")
+
+        let file = DownloadStorage.containerRoot.appendingPathComponent("com.apple.UserManagedAssets.Test/Episode \(UUID().uuidString).movpkg")
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let item = DownloadItem(title: "Episode", remoteURL: URL(string: "https://cdn.example/master.m3u8")!,
+                                sourcePageURL: URL(string: "https://site.example/watch")!, kind: .hls, status: .completed)
+        item.localFileName = "/private/var/mobile/Containers/Data/Application/00000000-0000-0000-0000-000000000000/Library/com.apple.UserManagedAssets.Test/"
+            + file.lastPathComponent
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(item.localURL).path), "so it plays instead of 'file is missing'")
+
+        // Paths outside the app's container stay as they are.
+        XCTAssertEqual(DownloadStorage.storedURL("/tmp/video.mp4").path, "/tmp/video.mp4")
+        let shared = "/var/mobile/Containers/Shared/AppGroup/E51660F9-E96F-4CDB-8E9B-D64DA8A449F2/Library/video.mp4"
+        XCTAssertEqual(DownloadStorage.storedURL(shared).path, shared)
+    }
+
     func testOldSegmentDownloadIsRecognisedAsAFragment() {
         let item = DownloadItem(title: "Episode", remoteURL: URL(string: "https://***REMOVED***.top/vd/episode/seg-57-s1080p-v1-a1.m4s")!,
                                 sourcePageURL: URL(string: "https://example.com/watch")!, kind: .video)

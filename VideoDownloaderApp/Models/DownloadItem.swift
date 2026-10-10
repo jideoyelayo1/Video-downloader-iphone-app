@@ -32,15 +32,33 @@ enum DownloadStorage {
 
     static func storedURL(_ path: String) -> URL {
         if path.hasPrefix("@managed/") { return containerRoot.appendingPathComponent(String(path.dropFirst("@managed/".count))) }
-        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
+        // HLS packages saved before 2026-10-10 have absolute paths, into the container of the install that saved them.
+        if path.hasPrefix("/") { return pathInContainer(path).map { containerRoot.appendingPathComponent($0) } ?? URL(fileURLWithPath: path) }
         return libraryDirectory.appendingPathComponent(path)
     }
 
     /// The app container path changes between installs, so system-managed HLS packages are stored relative to it.
     static func managedPath(for location: URL) -> String {
-        let root = containerRoot.path.hasSuffix("/") ? containerRoot.path : containerRoot.path + "/"
-        if location.path.hasPrefix(root) { return "@managed/" + String(location.path.dropFirst(root.count)) }
-        return location.path
+        pathInContainer(location.path).map { "@managed/" + $0 } ?? location.path
+    }
+
+    /// The part of `path` below `containerRoot`, in this install's container or an earlier one's. iOS 27
+    /// reports HLS packages under /.nofollow/private/var/mobile/…, the same place as /var/mobile/….
+    static func pathInContainer(_ path: String) -> String? {
+        guard let inside = afterContainer(path), let rootInside = afterContainer(containerRoot.path) else {
+            let root = containerRoot.path.hasSuffix("/") ? containerRoot.path : containerRoot.path + "/"
+            return path.hasPrefix(root) ? String(path.dropFirst(root.count)) : nil
+        }
+        let prefix = rootInside.hasSuffix("/") ? rootInside : rootInside + "/"
+        return inside.hasPrefix(prefix) ? String(inside.dropFirst(prefix.count)) : nil
+    }
+
+    /// "Library/…" from "…/Containers/Data/Application/<container>/Library/…".
+    private static func afterContainer(_ path: String) -> Substring? {
+        guard let marker = path.range(of: "/Containers/Data/Application/") else { return nil }
+        let rest = path[marker.upperBound...]
+        guard let slash = rest.firstIndex(of: "/") else { return nil }
+        return rest[rest.index(after: slash)...]
     }
 
     static func availableCapacity() -> Int64? {
