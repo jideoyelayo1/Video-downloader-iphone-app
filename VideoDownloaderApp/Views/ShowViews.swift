@@ -175,6 +175,7 @@ struct ShowScreen: View {
     @State private var newTitle = ""
     @State private var addingVideos: NewShowSeed?
     @State private var deleting: Show?
+    @State private var deletingEpisode: DownloadItem?
     @State private var pendingPlayback: DownloadItem?
     @State private var checking = false
 
@@ -226,23 +227,36 @@ struct ShowScreen: View {
             }
             Section("Episodes") {
                 ForEach(Array(episodes.enumerated()), id: \.element.id) { index, item in
-                    Button { open(item) } label: { EpisodeRow(number: index + 1, item: item) }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("show.episode")
-                        .swipeActions(edge: .leading) {
-                            Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
-                                item.setWatched(!item.isWatched)
-                                shows.save()
+                    // A row button and a separate Delete button: a button inside another's label takes its taps on iOS 18.
+                    HStack(spacing: 4) {
+                        Button { open(item) } label: { EpisodeRow(number: index + 1, item: item) }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("show.episode")
+                        if item.isWatched {
+                            Button { deletingEpisode = item } label: {
+                                Image(systemName: "trash").font(.title3).foregroundStyle(.red).frame(minWidth: 44, minHeight: 44)
                             }
-                            .tint(.green)
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Delete \(item.displayTitle)")
+                            .accessibilityIdentifier("show.deleteEpisode")
                         }
-                        .contextMenu {
-                            Button(item.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
-                                item.setWatched(!item.isWatched)
-                                shows.save()
-                            }
-                            Button("Remove from Show", systemImage: "rectangle.stack.badge.minus") { shows.remove(item) }
+                    }
+                    .swipeActions(edge: .leading) {
+                        Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
+                            item.setWatched(!item.isWatched)
+                            shows.save()
                         }
+                        .tint(.green)
+                    }
+                    .contextMenu {
+                        Button(item.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
+                            item.setWatched(!item.isWatched)
+                            shows.save()
+                        }
+                        Button("Remove from Show", systemImage: "rectangle.stack.badge.minus") { shows.remove(item) }
+                        Button("Delete Episode…", systemImage: "trash", role: .destructive) { deletingEpisode = item }
+                    }
                 }
                 .onMove { shows.move(in: show, from: $0, to: $1) }
                 .onDelete { offsets in offsets.map { episodes[$0] }.forEach(shows.remove) }
@@ -286,6 +300,12 @@ struct ShowScreen: View {
         } message: { Text("Their video files are removed from this iPhone. The show keeps the rest.") }
         // Leave first: the screen reads the show while it animates away.
         .modifier(DeleteShowDialog(show: $deleting, leave: { dismiss() }))
+        // An alert, so iOS 26 shows Cancel too (its action sheets have none).
+        .alert("Delete this episode?", isPresented: Binding(get: { deletingEpisode != nil }, set: { if !$0 { deletingEpisode = nil } }),
+               presenting: deletingEpisode) { item in
+            Button("Delete", role: .destructive) { downloads.delete(item) }
+            Button("Cancel", role: .cancel) { }
+        } message: { item in Text("\(item.displayTitle)\n\(StorageCleanup.freedText(item))") }
         .confirmationDialog("Play video", isPresented: Binding(get: { pendingPlayback != nil }, set: { if !$0 { pendingPlayback = nil } })) {
             Button("Resume") { if let item = pendingPlayback { start(item, at: item.playbackPosition ?? 0) }; pendingPlayback = nil }
             Button("Start from Beginning") { if let item = pendingPlayback { start(item, at: 0) }; pendingPlayback = nil }

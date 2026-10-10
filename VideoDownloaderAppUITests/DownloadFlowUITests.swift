@@ -607,6 +607,42 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 2"), episodes.element(boundBy: 0).label)
     }
 
+    /// A watched episode has its own Delete button, which asks first; any episode's menu can delete it too.
+    func testDeleteOneEpisodeAfterConfirming() throws {
+        makeTwoEpisodeShow()
+        app.buttons["library.show"].firstMatch.tap()
+        let episodes = app.buttons.matching(identifier: "show.episode")
+        wait(for: episodes.element(boundBy: 1), "exists == true", timeout: 5, "both episodes")
+        let delete = app.buttons.matching(identifier: "show.deleteEpisode")
+        XCTAssertEqual(delete.count, 0, "only watched episodes have the button")
+        episodes.element(boundBy: 0).swipeRight()
+        app.buttons["Watched"].tap()
+        XCTAssertTrue(delete.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(delete.count, 1)
+
+        delete.firstMatch.tap()
+        let alert = app.alerts["Delete this episode?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "it asks first")
+        alert.buttons["Cancel"].tap()
+        wait(for: alert, "exists == false", timeout: 5, "cancelled")
+        XCTAssertEqual(episodes.count, 2, "nothing deleted")
+
+        delete.firstMatch.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["Delete"].tap()
+        wait(for: episodes.element(boundBy: 1), "exists == false", timeout: 5, "episode 1 deleted")
+        XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 2"), episodes.element(boundBy: 0).label)
+
+        // An unwatched episode, from its menu.
+        episodes.element(boundBy: 0).press(forDuration: 1.2)
+        app.buttons["Delete Episode…"].tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["Delete"].tap()
+        wait(for: episodes.element(boundBy: 0), "exists == false", timeout: 5, "episode 2 deleted")
+        app.navigationBars.buttons["My Videos"].tap()
+        XCTAssertTrue(app.staticTexts["Your library is empty"].waitForExistence(timeout: 5), "the videos are gone from My Videos too")
+    }
+
     /// A show's menu, or a swipe on it in My Videos, deletes it with or without its episodes.
     /// (iOS 26's dialogs have no Cancel button, so each one is answered.)
     func testDeleteAShowAndItsEpisodes() throws {
