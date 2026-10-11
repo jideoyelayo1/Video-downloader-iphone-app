@@ -674,12 +674,12 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertFalse(show.exists)
     }
 
-    /// Downloads → Delete Finished Episodes → Ask First: the player asks when an episode ends,
+    /// Settings → Delete Finished Episodes → Ask First: the player asks when an episode ends,
     /// before Up Next, and an episode deleted there leaves the show.
     func testFinishedEpisodeIsDeletedWhenAskedBeforeTheNextOne() throws {
         makeTwoEpisodeShow()
-        app.tabBars.buttons["Downloads"].tap()
-        let setting = app.buttons["downloads.finishedEpisodes"]
+        app.tabBars.buttons["Settings"].tap()
+        let setting = app.buttons["settings.finishedEpisodes"]
         for _ in 0..<4 where !(setting.exists && setting.isHittable) { app.swipeUp() }
         setting.tap()
         let askFirst = app.buttons["Ask First"]
@@ -712,6 +712,48 @@ final class DownloadFlowUITests: XCTestCase {
         wait(for: episodes.element(boundBy: 1), "exists == false", timeout: 5, "episode 1 was deleted")
         XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 2"), episodes.element(boundBy: 0).label)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '1 of 1 watched'")).firstMatch.waitForExistence(timeout: 5))
+    }
+
+    /// Settings sums up the library, deletes watched videos when asked, and keeps the cleanup period.
+    func testSettingsSumUpTheLibrary() throws {
+        downloadBasicAndCaptioned()
+        app.buttons.matching(identifier: "library.moreOptions").element(boundBy: 0).tap()
+        app.buttons["Mark as Watched"].tap()
+
+        app.tabBars.buttons["Settings"].tap()
+        let videos = app.descendants(matching: .any).matching(identifier: "settings.stat.videos").firstMatch
+        let watched = app.descendants(matching: .any).matching(identifier: "settings.stat.watched").firstMatch
+        XCTAssertTrue(videos.waitForExistence(timeout: 5))
+        XCTAssertTrue(videos.label.contains("Videos, 2, 1 unwatched"), videos.label)
+        XCTAssertTrue(watched.label.hasPrefix("Watched, 1,"), watched.label)
+        let bar = app.descendants(matching: .any).matching(identifier: "settings.storageBar").firstMatch
+        XCTAssertTrue(bar.label.contains("Unwatched") && bar.label.contains("Free on iPhone"), bar.label)
+
+        app.buttons["settings.moreStatistics"].tap()
+        let site = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH '127.0.0.1,'")).firstMatch
+        XCTAssertTrue(site.waitForExistence(timeout: 5), "the videos are listed under their site")
+        XCTAssertTrue(site.label.hasSuffix("2 videos"), site.label)
+        app.navigationBars.buttons["Settings"].tap()
+
+        // The cleanup period is a choice of days.
+        let period = app.buttons["settings.deleteWatched"]
+        for _ in 0..<4 where !(period.exists && period.isHittable) { app.swipeUp() }
+        period.tap()
+        let threeDays = app.buttons["After 3 Days"]
+        XCTAssertTrue(threeDays.waitForExistence(timeout: 5))
+        threeDays.tap()
+        wait(for: period, "label CONTAINS 'After 3 Days' OR value CONTAINS 'After 3 Days'", timeout: 5, period.debugDescription)
+
+        let deleteWatched = app.buttons["settings.deleteAllWatched"]
+        XCTAssertTrue(deleteWatched.label.hasPrefix("Delete All Watched Videos (1,"), deleteWatched.label)
+        deleteWatched.tap()
+        app.alerts.buttons["Delete"].tap()
+        wait(for: deleteWatched, "isEnabled == false", timeout: 5, "nothing watched is left")
+        for _ in 0..<4 where !videos.exists { app.swipeDown() }
+        wait(for: videos, "label CONTAINS 'Videos, 1, 1 unwatched'", timeout: 5, videos.label)
+
+        app.tabBars.buttons["My Videos"].tap()
+        XCTAssertEqual(libraryTitles, ["Basic Video Page"], "the watched video was deleted")
     }
 
     func testResumeSeekAndContinueWatching() throws {

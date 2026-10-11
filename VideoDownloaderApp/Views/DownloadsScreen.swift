@@ -42,30 +42,6 @@ struct DownloadsScreen: View {
                     LabeledContent("Downloads used", value: usedSpace ?? "Calculating…")
                     LabeledContent("Available on iPhone", value: availableSpace ?? "Calculating…")
                 }
-                Section {
-                    Stepper("At most \(downloads.maxConcurrentDownloads) at once", value: Binding(get: { downloads.maxConcurrentDownloads },
-                                                                                                set: { downloads.maxConcurrentDownloads = $0 }), in: 1...4)
-                        .accessibilityIdentifier("downloads.concurrent")
-                    Toggle("Wi-Fi Only", isOn: Binding(get: { downloads.downloadsOnWiFiOnly }, set: { downloads.downloadsOnWiFiOnly = $0 }))
-                        .accessibilityIdentifier("downloads.wifiOnly")
-                } header: {
-                    Text("Settings")
-                } footer: {
-                    Text("More downloads wait as Queued. With Wi-Fi Only, new downloads don't use mobile data.")
-                }
-                Section {
-                    Picker("Delete Finished Episodes", selection: Binding(get: { downloads.finishedEpisodes }, set: { downloads.finishedEpisodes = $0 })) {
-                        ForEach(FinishedEpisodes.allCases) { Text($0.name).tag($0) }
-                    }
-                    .accessibilityIdentifier("downloads.finishedEpisodes")
-                    Toggle("Delete Watched Videos After a Week", isOn: Binding(get: { downloads.deletesWatchedAfterAWeek },
-                                                                              set: { downloads.deletesWatchedAfterAWeek = $0 }))
-                        .accessibilityIdentifier("downloads.autoDelete")
-                } header: {
-                    Text("Watched Videos")
-                } footer: {
-                    Text("An episode of a show is finished when it plays to the end or its credits, or you close it near the end. Ask First asks before the next episode plays. Watched videos are deleted when the app opens, a week after you watched them.")
-                }
             }
             .navigationTitle("Downloads")
             .searchable(text: $searchText, prompt: "Search downloads")

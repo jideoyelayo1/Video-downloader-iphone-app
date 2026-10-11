@@ -1,13 +1,14 @@
 import XCTest
 
 final class LaunchTests: XCTestCase {
-    func testLaunchShowsThreeTabs() {
+    func testLaunchShowsFourTabs() {
         let app = XCUIApplication()
         app.launchArguments = ["-NoInitialLoad", "-UITestInMemory"]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Browse"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.tabBars.buttons["Downloads"].exists)
         XCTAssertTrue(app.tabBars.buttons["My Videos"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Settings"].exists)
         XCTAssertFalse(app.staticTexts["library.expiryWarning"].exists, "simulator builds have no expiry")
     }
 

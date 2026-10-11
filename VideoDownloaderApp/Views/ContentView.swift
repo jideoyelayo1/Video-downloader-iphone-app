@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var selection = LaunchOptions.value("-StartURL") != nil ? Tab.browse : Tab.library
     @Environment(\.scenePhase) private var scenePhase
 
-    enum Tab { case browse, downloads, library }
+    enum Tab { case browse, downloads, library, settings }
 
     var body: some View {
         TabView(selection: $selection) {
@@ -21,6 +21,9 @@ struct ContentView: View {
             DownloadsScreen(openSource: { url in browser.navigate(to: url.absoluteString); selection = .browse })
                 .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
                 .tag(Tab.downloads)
+            SettingsScreen()
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(Tab.settings)
         }
         .tint(.cyan)
         .preferredColorScheme(.dark)
