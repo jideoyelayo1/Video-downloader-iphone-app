@@ -321,6 +321,15 @@ final class Bookmark {
         ("***REMOVED***", URL(string: "https://***REMOVED***.com.lv/")!),
         ("***REMOVED***", URL(string: "https://***REMOVED***tv.to/home")!),
         ("***REMOVED***", URL(string: "https://***REMOVED***.ws/")!)
+    ] + addedTestedSites
+
+    /// Sites found by the 2026-10-14 survey of a ***REMOVED***-alternatives list: the other 13 were
+    /// down, blocked in the UK, spam redirects or live-only. Each gave a finite HLS master marked
+    /// Ready after its play button was tapped. They are added once to libraries that already had
+    /// the earlier tested sites.
+    static let addedTestedSites: [(String, URL)] = [
+        ("***REMOVED***", URL(string: "https://***REMOVED***.onl/home")!),
+        ("***REMOVED***", URL(string: "https://***REMOVED***.day/")!)
     ]
 
     /// Every site the app ships a bookmark for, with its display name.

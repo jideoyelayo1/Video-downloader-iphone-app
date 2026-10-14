@@ -23,14 +23,20 @@ enum StarterBookmarks {
         }
 
         // Once, for everyone: the sites tested to work, unless a bookmark already opens that site.
-        guard !preferences.bool(forKey: "testedSiteBookmarksV3") else { return }
-        addMissingSites(in: context)
-        preferences.set(true, forKey: "testedSiteBookmarksV3")
+        // A later survey's sites are added the same way, so sites deleted since aren't added back.
+        if !preferences.bool(forKey: "testedSiteBookmarksV3") {
+            addMissingSites(Bookmark.testedSites, in: context)
+            preferences.set(true, forKey: "testedSiteBookmarksV3")
+            preferences.set(true, forKey: "testedSiteBookmarksV4")
+        } else if !preferences.bool(forKey: "testedSiteBookmarksV4") {
+            addMissingSites(Bookmark.addedTestedSites, in: context)
+            preferences.set(true, forKey: "testedSiteBookmarksV4")
+        }
     }
 
-    private static func addMissingSites(in context: ModelContext) {
+    private static func addMissingSites(_ sites: [(String, URL)], in context: ModelContext) {
         let hosts = ((try? context.fetch(FetchDescriptor<Bookmark>())) ?? []).compactMap(\.url.host)
-        for (title, url) in Bookmark.testedSites {
+        for (title, url) in sites {
             guard let site = url.host, !hosts.contains(where: { SiteMatch.matches(host: $0, site: site) }) else { continue }
             context.insert(Bookmark(title: title, url: url))
         }
