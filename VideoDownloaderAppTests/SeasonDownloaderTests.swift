@@ -19,6 +19,9 @@ final class SeasonDownloaderTests: XCTestCase {
         XCTAssertNil(next("https://***REMOVED***.ru/play/8a3c/5f2d1e0b7a"), "no episode number in the address")
         XCTAssertEqual(EpisodeURL.title("", numberedFrom: URL(string: "https://***REMOVED***.to/anime/x/p-9-dub")!), "", "an empty title stays empty")
         XCTAssertEqual(EpisodeURL.number(in: URL(string: "https://www.***REMOVED***.to/watch/1/x?ep=7")!), 7)
+        XCTAssertEqual(next("https://***REMOVED***.su/watch/tv/213375/1/2"), "https://***REMOVED***.su/watch/tv/213375/1/3", "the last number is the episode")
+        XCTAssertEqual(EpisodeURL.number(in: URL(string: "https://***REMOVED***.su/watch/tv/213375/1/9")!), 9)
+        XCTAssertNil(next("https://***REMOVED***.su/watch/movie/213375"))
         XCTAssertTrue(SeasonDownloader.isVerificationPage(title: "Just a moment..."))
 
         let ***REMOVED*** = URL(string: "https://www.***REMOVED***.to/watch/W89s7g854PobER8iJIsw61vU_EkyYyOg/attack-on-titan?ep=2")!
