@@ -28,9 +28,16 @@ enum StarterBookmarks {
             addMissingSites(Bookmark.testedSites, in: context)
             preferences.set(true, forKey: "testedSiteBookmarksV3")
             preferences.set(true, forKey: "testedSiteBookmarksV4")
-        } else if !preferences.bool(forKey: "testedSiteBookmarksV4") {
-            addMissingSites(Bookmark.addedTestedSites, in: context)
-            preferences.set(true, forKey: "testedSiteBookmarksV4")
+            preferences.set(true, forKey: "testedSiteBookmarksV5")
+        } else {
+            if !preferences.bool(forKey: "testedSiteBookmarksV4") {
+                addMissingSites(Bookmark.addedTestedSites, in: context)
+                preferences.set(true, forKey: "testedSiteBookmarksV4")
+            }
+            if !preferences.bool(forKey: "testedSiteBookmarksV5") {
+                addMissingSites(Bookmark.laterTestedSites, in: context)
+                preferences.set(true, forKey: "testedSiteBookmarksV5")
+            }
         }
     }
 

@@ -46,15 +46,15 @@ final class BrowserCollectionsStoreTests: XCTestCase {
         let suiteName = "BrowserCollectionsStoreTests-\(UUID().uuidString)"
         let preferences = UserDefaults(suiteName: suiteName)!
         defer { preferences.removePersistentDomain(forName: suiteName) }
-        for key in ["starterBookmarksV2", "seededBookmarks", "testedSiteBookmarksV3"] { preferences.set(true, forKey: key) }
+        for key in ["starterBookmarksV2", "seededBookmarks", "testedSiteBookmarksV3", "testedSiteBookmarksV4"] { preferences.set(true, forKey: key) }
 
         StarterBookmarks.install(in: context, preferences: preferences)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Bookmark>()).map(\.title).sorted(), ["***REMOVED***", "Mine", "***REMOVED***"])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Bookmark>()).map(\.title).sorted(), ["***REMOVED***", "***REMOVED***", "Mine", "***REMOVED***", "***REMOVED***s"])
 
         try context.fetch(FetchDescriptor<Bookmark>()).filter { $0.title == "***REMOVED***" }.forEach(context.delete)
         try context.save()
         StarterBookmarks.install(in: context, preferences: preferences)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Bookmark>()).map(\.title).sorted(), ["***REMOVED***", "Mine"])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Bookmark>()).map(\.title).sorted(), ["***REMOVED***", "Mine", "***REMOVED***", "***REMOVED***s"])
     }
 
     /// A library with its own bookmarks gets each tested site once, unless a bookmark already
@@ -77,7 +77,7 @@ final class BrowserCollectionsStoreTests: XCTestCase {
         let bookmarks = try context.fetch(FetchDescriptor<Bookmark>())
         let added = bookmarks.filter { $0.title != "Mine" }.map(\.title).sorted()
         // ***REMOVED*** moved to ***REMOVED***.to, a different site from the bookmarked ***REMOVED***.tv.
-        XCTAssertEqual(added, ["***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***"])
+        XCTAssertEqual(added, ["***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***s"])
         XCTAssertEqual(bookmarks.filter { $0.title == "Mine" }.count, own.count)
 
         bookmarks.first { $0.title == "***REMOVED***" }.map(context.delete)
