@@ -169,7 +169,9 @@ struct ShowScreen: View {
     @EnvironmentObject private var downloads: DownloadManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Query(filter: #Predicate<DownloadItem> { $0.statusRaw == "completed" }) private var items: [DownloadItem]
+    @Query(filter: #Predicate<DownloadItem> { $0.statusRaw == "completed" }) private var queriedItems: [DownloadItem]
+    /// A just-deleted episode can still be in the query for one more render; reading it then crashes.
+    private var items: [DownloadItem] { queriedItems.filter { !$0.isDeleted && $0.modelContext != nil } }
     @State private var confirmingDeleteWatched = false
     @State private var renaming = false
     @State private var newTitle = ""
@@ -182,50 +184,38 @@ struct ShowScreen: View {
     var body: some View {
         let episodes = ShowPlaylist.episodes(of: show.id, in: items)
         let watched = episodes.filter(\.isWatched).count
+        let next = ShowPlaylist.upNext(in: episodes)
         List {
+            // Netflix's title page: artwork, the title, then a full-width Play.
             Section {
-                if let next = ShowPlaylist.upNext(in: episodes) {
-                    Button { play(next) } label: {
-                        HStack(spacing: 12) {
-                            VideoThumbnailView(item: next, width: 112, height: 63)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Label(playLabel(next, all: episodes), systemImage: "play.fill").font(.headline).foregroundStyle(.tint)
-                                Text(next.displayTitle).font(.caption).foregroundStyle(Color.secondary).lineLimit(2).truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 10) {
+                    if let art = next ?? episodes.first {
+                        VideoThumbnailView(item: art, width: nil, height: 170, cornerRadius: 0, showsWatchedBadge: false)
+                            .overlay { LinearGradient(colors: [.clear, .black], startPoint: .center, endPoint: .bottom) }
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(show.title).font(.title2.weight(.heavy)).lineLimit(3)
+                        Text("\(watched) of \(episodes.count) watched · \(StorageCleanup.sizeText(episodes))")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if let next {
+                            Button { play(next) } label: {
+                                Label(playLabel(next, all: episodes), systemImage: "play.fill").font(.headline).frame(maxWidth: .infinity)
                             }
+                            .buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black).controlSize(.large)
+                            .accessibilityIdentifier("show.playNext")
+                            Text(next.displayTitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                         }
                     }
-                    .accessibilityIdentifier("show.playNext")
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
                 }
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.black)
                 Toggle("Autoplay Next Episode", isOn: Binding(get: { show.autoplayNext }, set: { show.autoplayNext = $0; shows.save() }))
                     .accessibilityIdentifier("show.autoplay")
-            } footer: {
-                Text("\(watched) of \(episodes.count) watched · \(StorageCleanup.sizeText(episodes))")
             }
             Section {
-                Toggle("Tell Me When the Next Episode Is Out", isOn: Binding(get: { show.notifyNewEpisodes }, set: { on in
-                    show.notifyNewEpisodes = on
-                    shows.save()
-                    if on { Task { _ = await NewEpisodeChecker.requestPermission() } }
-                }))
-                .accessibilityIdentifier("show.notify")
-                Toggle("Download It Automatically", isOn: Binding(get: { show.autoDownloadNewEpisodes }, set: { show.autoDownloadNewEpisodes = $0; shows.save() }))
-                    .accessibilityIdentifier("show.autoDownload")
-                if show.notifyNewEpisodes || show.autoDownloadNewEpisodes {
-                    Button(checking ? "Checking…" : "Check Now") {
-                        checking = true
-                        Task {
-                            await AppServices.shared.newEpisodes.check(show)
-                            checking = false
-                        }
-                    }
-                    .disabled(checking || show.followSourceURL == nil)
-                }
-            } header: {
-                Text("New Episodes")
-            } footer: {
-                Text(newEpisodesFooter)
-            }
-            Section("Episodes") {
                 ForEach(Array(episodes.enumerated()), id: \.element.id) { index, item in
                     // A row button and a separate Delete button: a button inside another's label takes its taps on iOS 18.
                     HStack(spacing: 4) {
@@ -260,8 +250,35 @@ struct ShowScreen: View {
                 }
                 .onMove { shows.move(in: show, from: $0, to: $1) }
                 .onDelete { offsets in offsets.map { episodes[$0] }.forEach(shows.remove) }
+            } header: { Text("Episodes").font(.title3.bold()).foregroundStyle(.white).textCase(nil) }
+            Section {
+                Toggle("Tell Me When the Next Episode Is Out", isOn: Binding(get: { show.notifyNewEpisodes }, set: { on in
+                    show.notifyNewEpisodes = on
+                    shows.save()
+                    if on { Task { _ = await NewEpisodeChecker.requestPermission() } }
+                }))
+                .accessibilityIdentifier("show.notify")
+                Toggle("Download It Automatically", isOn: Binding(get: { show.autoDownloadNewEpisodes }, set: { show.autoDownloadNewEpisodes = $0; shows.save() }))
+                    .accessibilityIdentifier("show.autoDownload")
+                if show.notifyNewEpisodes || show.autoDownloadNewEpisodes {
+                    Button(checking ? "Checking…" : "Check Now") {
+                        checking = true
+                        Task {
+                            await AppServices.shared.newEpisodes.check(show)
+                            checking = false
+                        }
+                    }
+                    .disabled(checking || show.followSourceURL == nil)
+                }
+            } header: {
+                Text("New Episodes")
+            } footer: {
+                Text(newEpisodesFooter)
             }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color.black)
         .navigationTitle(show.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -383,25 +400,32 @@ struct DeleteShowDialog: ViewModifier {
     }
 }
 
+/// Netflix's episode row: a 16:9 still with a play mark and progress bar, then "1. Title" and its length.
 private struct EpisodeRow: View {
     let number: Int
     let item: DownloadItem
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("\(number)").font(.subheadline.monospacedDigit().bold()).foregroundStyle(.secondary).frame(minWidth: 22)
-            VideoThumbnailView(item: item, width: 88, height: 50)
+            VideoThumbnailView(item: item, width: 124, height: 70)
+                .overlay { Image(systemName: "play.circle").font(.title).foregroundStyle(.white).shadow(radius: 3) }
+                .overlay(alignment: .bottom) { PlaybackProgressBar(item: item) }
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.displayTitle).font(.subheadline).foregroundStyle(.primary).lineLimit(2).truncationMode(.middle)
+                Text("\(number). \(item.displayTitle)").font(.subheadline.bold()).foregroundStyle(.primary).lineLimit(2).truncationMode(.middle)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
                 if item.isWatched {
                     Label("Watched", systemImage: "checkmark.circle.fill").font(.caption2).foregroundStyle(.green)
-                } else if let duration = item.duration, duration > 0, (item.playbackPosition ?? 0) > 10 {
-                    ProgressView(value: min((item.playbackPosition ?? 0) / duration, 1)).tint(.cyan)
-                        .accessibilityLabel("Playback progress")
                 }
             }
             Spacer(minLength: 0)
         }
+        .opacity(item.isWatched ? 0.6 : 1)
         .contentShape(Rectangle())
+    }
+
+    private var detail: String {
+        [item.duration.flatMap { $0 > 0 ? Duration.seconds($0).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)) : nil },
+         item.fileSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 }

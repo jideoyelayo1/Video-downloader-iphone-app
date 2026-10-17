@@ -130,6 +130,15 @@ enum LaunchOptions {
         return defaults
     }
 
+    /// Debug-only: `-UpNextSeconds <n>` lengthens the end card's countdown, for UI tests on a slow Mac.
+    static var upNextSeconds: Int? {
+        #if DEBUG
+        return value("-UpNextSeconds").flatMap(Int.init)
+        #else
+        return nil
+        #endif
+    }
+
     static var diagnosticsEnabled: Bool {
         #if DEBUG
         return flag("-VerboseBrowserDiagnostics")

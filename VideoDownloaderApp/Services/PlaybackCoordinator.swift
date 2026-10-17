@@ -70,15 +70,20 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     var shows: ShowStore?
     private var upNextItem: DownloadItem?
     private var upNextPanel: UIView?
-    private var upNextCountdownLabel: UILabel?
+    private var upNextButton: UIButton?
+    /// The white fill that sweeps across Next Episode as it counts down.
+    private var upNextFill: NSLayoutConstraint?
     private var upNextTimer: Timer?
     private var upNextCountdown = 0
+    private var upNextTotal = 0
     /// Deletes finished episodes, as the Delete Finished Episodes setting asks.
     var downloads: DownloadManager?
     /// A finished episode, deleted once the player has let go of it.
     private var episodeToDelete: DownloadItem?
-    /// The finished episode the player is asking about, and the episode to play after the answer.
-    private var deleteQuestion: (episode: DownloadItem, next: DownloadItem?)?
+    /// The finished episode the end card offers to delete, and whether its box is ticked.
+    private var cardEpisode: DownloadItem?
+    private var deleteTicked = false
+    private var deleteToggle: UIButton?
     /// Each episode is asked about once.
     private var askedAboutDeleting = false
 
@@ -703,8 +708,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         loadID = UUID()
         let finished = savePosition(closing: true) || playbackEnded || reachedCredits
         if finished, let item, item.id != kept?.id { closedFinished(item, presented: presented) }
-        if let kept, episodeToDelete?.id == kept.id { episodeToDelete = nil }
         resetItemState()
+        if let kept, episodeToDelete?.id == kept.id { episodeToDelete = nil }
         controller.player?.pause()
         controller.player = nil
         deleteFinishedEpisode()
@@ -804,32 +809,37 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     // MARK: Finished episodes
 
     /// The end of an episode, or the start of its marked credits. The Delete Finished Episodes
-    /// setting deletes it, or asks first, before Up Next counts down to the next episode.
+    /// setting deletes it, or (Ask First) puts a tick box on the end card beside Next Episode.
     private func episodeFinished(_ item: DownloadItem, atCredits: Bool) {
         // Nothing can be shown in Picture in Picture or the background.
         let onScreen = presentsPlayer && !isInPiP && UIApplication.shared.applicationState == .active
         let next = shows?.autoplayNext(after: item)
+        var offer: DownloadItem?
         switch finishedEpisodeSetting(for: item) {
         case .delete:
             episodeToDelete = item
         case .ask where onScreen && !askedAboutDeleting:
-            askToDelete(item, then: next)
+            askedAboutDeleting = true
+            offer = item
         default:
             break
         }
-        // Up Next waits for the answer. Off screen, the next episode starts at once at the end;
-        // from the credits, the episode plays on to its end first.
-        guard deleteQuestion == nil, let next else { return }
-        if onScreen { showUpNext(next) } else if !atCredits { playNext(next) }
+        // Off screen, the next episode starts at once at the end; from the credits, the episode
+        // plays on to its end first.
+        guard onScreen else {
+            if let next, !atCredits { playNext(next) }
+            return
+        }
+        if next != nil || offer != nil { showEndCard(next: next, offering: offer) }
     }
 
-    /// An episode closed once watched. Ask First asks once the player has gone, unless the player asked already.
+    /// An episode closed once watched. Ask First asks once the player has gone, unless the end card offered already.
     private func closedFinished(_ episode: DownloadItem, presented: Bool) {
         switch finishedEpisodeSetting(for: episode) {
         case .delete:
             episodeToDelete = episode
         case .ask where !askedAboutDeleting:
-            // A question can't appear over a player that is still closing.
+            // The banner waits for the player to finish closing.
             if presented {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.finishedEpisode = episode }
             } else {
@@ -845,28 +855,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         item.showID == nil ? .keep : downloads?.finishedEpisodes ?? .keep
     }
 
-    /// Asks over the finished episode whether to delete it; Up Next follows the answer.
-    private func askToDelete(_ episode: DownloadItem, then next: DownloadItem?) {
-        hideUpNext()
-        askedAboutDeleting = true
-        deleteQuestion = (episode, next)
-        showPanel(makeDeleteQuestionPanel(for: episode))
-    }
-
-    /// The answer in the player. A deleted episode goes once the player has let go of it.
-    func answerDeleteQuestion(delete: Bool) {
-        guard let question = deleteQuestion else { return }
-        hideUpNext()
-        if delete { episodeToDelete = question.episode }
-        if let next = question.next {
-            showUpNext(next)
-        } else if delete && playbackEnded {
-            // Nothing follows the episode, and it isn't being kept.
-            close()
-        }
-    }
-
-    /// The answer to the question asked after the player closed.
+    /// The answer to the banner shown after the player closed.
     func answerFinishedEpisode(delete: Bool) {
         guard let episode = finishedEpisode else { return }
         finishedEpisode = nil
@@ -886,15 +875,23 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         downloads.delete(episode)
     }
 
-    // MARK: Up next
+    // MARK: End card
 
-    /// A short countdown over the finished episode, with Play Now and Cancel.
-    private func showUpNext(_ next: DownloadItem) {
+    /// Netflix-style: Watch Credits and a Next Episode button that fills as it counts down, and
+    /// with Ask First a tick box to delete the finished episode. The box's state is applied
+    /// however the card goes (Next Episode, the countdown, Watch Credits, Done or closing),
+    /// once the player has let go of the episode.
+    private func showEndCard(next: DownloadItem?, offering episode: DownloadItem?) {
         hideUpNext()
         upNextItem = next
-        upNextCountdown = 5
-        showPanel(makeUpNextPanel(title: next.displayTitle))
+        cardEpisode = episode
+        showPanel(makeEndCard(next: next, offering: episode))
+        guard next != nil else { return }
+        // Longer when there's a box to tick, so there's time to decide.
+        upNextCountdown = LaunchOptions.upNextSeconds ?? (episode == nil ? 5 : 10)
+        upNextTotal = upNextCountdown
         updateUpNextCountdown()
+        animateFill()
         upNextTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tickUpNext() }
         }
@@ -902,31 +899,41 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     private func tickUpNext() {
         upNextCountdown -= 1
-        if upNextCountdown <= 0, let next = upNextItem { playNext(next) } else { updateUpNextCountdown() }
+        if upNextCountdown <= 0, let next = upNextItem { playNext(next) } else { updateUpNextCountdown(); animateFill() }
+    }
+
+    /// Moves the fill to the next second's mark. Short steps rather than one long animation, so
+    /// the app is idle in between (UI tests snapshot an animating card without its buttons).
+    private func animateFill() {
+        guard let fill = upNextFill, let track = upNextButton?.superview, upNextTotal > 0 else { return }
+        track.superview?.layoutIfNeeded()
+        fill.constant = track.bounds.width * CGFloat(upNextTotal - upNextCountdown + 1) / CGFloat(upNextTotal)
+        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseOut) { track.layoutIfNeeded() }
     }
 
     private func updateUpNextCountdown() {
-        upNextCountdownLabel?.text = "Playing in \(upNextCountdown)"
+        upNextButton?.accessibilityValue = "Playing in \(upNextCountdown)"
     }
 
-    /// Removes the countdown or the question about deleting.
+    /// Removes the end card, applying its tick box.
     private func hideUpNext() {
+        if deleteTicked, let cardEpisode { episodeToDelete = cardEpisode }
+        cardEpisode = nil
+        deleteTicked = false
+        deleteToggle = nil
         upNextTimer?.invalidate()
         upNextTimer = nil
         upNextPanel?.removeFromSuperview()
         upNextPanel = nil
-        upNextCountdownLabel = nil
+        upNextButton = nil
+        upNextFill = nil
         upNextItem = nil
-        deleteQuestion = nil
     }
 
     private func showPanel(_ panel: UIView) {
         controller.view.addSubview(panel)
         let guide = controller.view.safeAreaLayoutGuide
-        let width = panel.widthAnchor.constraint(equalToConstant: 300)
-        width.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            width,
             panel.widthAnchor.constraint(lessThanOrEqualTo: guide.widthAnchor, constant: -32),
             panel.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
             // Clear of AVKit's scrubber and transport controls.
@@ -935,81 +942,122 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         upNextPanel = panel
     }
 
-    private func makeUpNextPanel(title: String) -> UIView {
-        let play = Self.panelButton("Play Now", systemImage: "play.fill", prominent: true, identifier: "player.upNext.play") { [weak self] in
-            guard let self, let next = self.upNextItem else { return }
-            self.playNext(next)
-        }
-        let cancel = Self.panelButton("Cancel", identifier: "player.upNext.cancel") { [weak self] in self?.hideUpNext() }
-        let (panel, countdown) = Self.makePanel(identifier: "player.upNext", heading: "Up Next", title: title, buttons: [play, cancel])
-        upNextCountdownLabel = countdown
-        return panel
+    private func toggleDelete() {
+        deleteTicked.toggle()
+        guard let deleteToggle else { return }
+        deleteToggle.configuration?.image = UIImage(systemName: deleteTicked ? "checkmark.square.fill" : "square")
+        deleteToggle.accessibilityValue = deleteTicked ? "1" : "0"
     }
 
-    private func makeDeleteQuestionPanel(for episode: DownloadItem) -> UIView {
-        let delete = Self.panelButton("Delete", systemImage: "trash", prominent: true, color: .systemRed,
-                                      identifier: "player.deleteEpisode.delete") { [weak self] in self?.answerDeleteQuestion(delete: true) }
-        let keep = Self.panelButton("Keep", identifier: "player.deleteEpisode.keep") { [weak self] in self?.answerDeleteQuestion(delete: false) }
-        let (panel, detail) = Self.makePanel(identifier: "player.deleteEpisode", heading: "Delete This Episode?", title: episode.displayTitle,
-                                             buttons: [delete, keep])
-        detail.text = StorageCleanup.freedText(episode)
-        detail.numberOfLines = 2
-        return panel
+    private static func deleteToggleConfiguration(for episode: DownloadItem, ticked: Bool) -> UIButton.Configuration {
+        var configuration = UIButton.Configuration.plain()
+        let size = episode.fileSize.map { " · " + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? ""
+        configuration.title = "Delete this episode\(size)"
+        configuration.image = UIImage(systemName: ticked ? "checkmark.square.fill" : "square")
+        configuration.imagePadding = 8
+        configuration.baseForegroundColor = .white
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0)
+        return configuration
     }
 
-    private static func panelButton(_ title: String, systemImage: String? = nil, prominent: Bool = false, color: UIColor? = nil,
-                                    identifier: String, action: @escaping @MainActor () -> Void) -> UIButton {
-        var configuration = prominent ? UIButton.Configuration.filled() : .gray()
-        configuration.title = title
-        configuration.image = systemImage.flatMap { UIImage(systemName: $0) }
-        configuration.imagePadding = 6
-        configuration.cornerStyle = .capsule
-        if let color { configuration.baseBackgroundColor = color }
-        let button = UIButton(configuration: configuration, primaryAction: UIAction { _ in action() })
-        button.accessibilityIdentifier = identifier
-        return button
-    }
-
-    /// A small heading, the episode's name, a line of detail and two buttons, on dark glass.
-    private static func makePanel(identifier: String, heading headingText: String, title: String, buttons: [UIButton]) -> (UIView, detail: UILabel) {
-        let panel = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
-        panel.layer.cornerRadius = 18
-        panel.layer.cornerCurve = .continuous
-        panel.clipsToBounds = true
-        panel.translatesAutoresizingMaskIntoConstraints = false
-        panel.accessibilityIdentifier = identifier
-
+    private func makeEndCard(next: DownloadItem?, offering episode: DownloadItem?) -> UIView {
         let heading = UILabel()
-        heading.text = headingText
-        heading.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .semibold)
+        heading.text = next == nil ? "Finished" : "Up Next"
+        heading.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .bold)
         heading.textColor = UIColor(white: 1, alpha: 0.7)
         let name = UILabel()
-        name.text = title
+        name.text = (next ?? episode)?.displayTitle
         name.font = .preferredFont(forTextStyle: .headline)
         name.textColor = .white
         name.numberOfLines = 2
         name.lineBreakMode = .byTruncatingMiddle
-        let detail = UILabel()
-        detail.font = .monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .regular)
-        detail.textColor = UIColor(white: 1, alpha: 0.8)
+        name.textAlignment = .right
+        var rows: [UIView] = [heading, name]
 
+        if let episode {
+            let toggle = UIButton(configuration: Self.deleteToggleConfiguration(for: episode, ticked: deleteTicked),
+                                  primaryAction: UIAction { [weak self] _ in self?.toggleDelete() })
+            toggle.accessibilityIdentifier = "player.deleteEpisode.toggle"
+            toggle.accessibilityValue = deleteTicked ? "1" : "0"
+            deleteToggle = toggle
+            rows.append(toggle)
+        }
+
+        let buttons: [UIView]
+        if next != nil {
+            let credits = Self.cardButton("Watch Credits", identifier: "player.upNext.cancel") { [weak self] in self?.hideUpNext() }
+            buttons = [credits, makeNextEpisodeButton()]
+        } else {
+            buttons = [Self.cardButton("Done", identifier: "player.endCard.done", prominent: true) { [weak self] in self?.close() }]
+        }
         let row = UIStackView(arrangedSubviews: buttons)
-        row.spacing = 8
-        row.distribution = .fillEqually
+        row.spacing = 10
+        rows.append(row)
 
-        let stack = UIStackView(arrangedSubviews: [heading, name, detail, row])
+        let stack = UIStackView(arrangedSubviews: rows)
         stack.axis = .vertical
+        stack.alignment = .trailing
         stack.spacing = 4
-        stack.setCustomSpacing(12, after: detail)
+        stack.setCustomSpacing(10, after: rows[rows.count - 2])
         stack.translatesAutoresizingMaskIntoConstraints = false
-        panel.contentView.addSubview(stack)
+        stack.accessibilityIdentifier = "player.endCard"
+        // Legible over bright frames without a box.
+        for label in [heading, name] {
+            label.layer.shadowColor = UIColor.black.cgColor
+            label.layer.shadowOpacity = 0.8
+            label.layer.shadowRadius = 4
+            label.layer.shadowOffset = .zero
+        }
+        return stack
+    }
+
+    /// Grey, with a white fill growing behind the black title as the countdown runs.
+    private func makeNextEpisodeButton() -> UIView {
+        let track = UIView()
+        track.backgroundColor = UIColor(white: 0.62, alpha: 1)
+        track.layer.cornerRadius = 6
+        track.clipsToBounds = true
+        let fill = UIView()
+        fill.backgroundColor = .white
+        fill.translatesAutoresizingMaskIntoConstraints = false
+        let button = Self.cardButton("Next Episode", systemImage: "play.fill", identifier: "player.upNext.play", clear: true) { [weak self] in
+            guard let self, let next = self.upNextItem else { return }
+            self.playNext(next)
+        }
+        button.translatesAutoresizingMaskIntoConstraints = false
+        track.addSubview(fill)
+        track.addSubview(button)
+        let width = fill.widthAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: panel.contentView.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: panel.contentView.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: panel.contentView.topAnchor, constant: 14),
-            stack.bottomAnchor.constraint(equalTo: panel.contentView.bottomAnchor, constant: -14)
+            width, fill.leadingAnchor.constraint(equalTo: track.leadingAnchor),
+            fill.topAnchor.constraint(equalTo: track.topAnchor), fill.bottomAnchor.constraint(equalTo: track.bottomAnchor),
+            button.leadingAnchor.constraint(equalTo: track.leadingAnchor), button.trailingAnchor.constraint(equalTo: track.trailingAnchor),
+            button.topAnchor.constraint(equalTo: track.topAnchor), button.bottomAnchor.constraint(equalTo: track.bottomAnchor)
         ])
-        return (panel, detail)
+        upNextButton = button
+        upNextFill = width
+        return track
+    }
+
+    private static func cardButton(_ title: String, systemImage: String? = nil, identifier: String, prominent: Bool = false,
+                                   clear: Bool = false, action: @escaping @MainActor () -> Void) -> UIButton {
+        var configuration = UIButton.Configuration.filled()
+        configuration.title = title
+        configuration.image = systemImage.flatMap { UIImage(systemName: $0) }
+        configuration.imagePadding = 8
+        configuration.cornerStyle = .fixed
+        configuration.background.cornerRadius = 6
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 11, leading: 16, bottom: 11, trailing: 16)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .bold)
+            return attributes
+        }
+        configuration.baseBackgroundColor = clear ? .clear : prominent ? .white : UIColor(white: 0.2, alpha: 0.85)
+        configuration.baseForegroundColor = clear || prominent ? .black : .white
+        let button = UIButton(configuration: configuration, primaryAction: UIAction { _ in action() })
+        button.accessibilityIdentifier = identifier
+        return button
     }
 
     /// Whether the countdown for the next episode is showing.
@@ -1034,8 +1082,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
         pictureInPictureStarting = true
-        // The countdown and the question can't show in Picture in Picture; unanswered, the episode is kept.
-        if let next = upNextItem ?? deleteQuestion?.next { playNext(next) } else { hideUpNext() }
+        // The end card can't show in Picture in Picture: the next episode starts, and the tick box stands.
+        if let next = upNextItem { playNext(next) } else { hideUpNext() }
     }
 
     func playerViewControllerDidStartPictureInPicture(_ playerViewController: AVPlayerViewController) {

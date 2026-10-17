@@ -19,8 +19,12 @@ final class DownloadFlowUITests: XCTestCase {
 
     /// `keepOverlay`: site subtitles stay drawn by the app, whose text tells where playback is,
     /// instead of moving into the video file.
+    /// Added to the next launch, for one test's needs.
+    private var extraLaunchArguments: [String] = []
+
     private func launch(at path: String, keepOverlay: Bool = true) {
         app.launchArguments = ["-UITestInMemory", "-StartURL", server.url(path).absoluteString] + (keepOverlay ? ["-KeepSiteSubtitleOverlay"] : [])
+            + extraLaunchArguments
         app.launch()
         app.tabBars.buttons["Browse"].tap()
     }
@@ -239,9 +243,13 @@ final class DownloadFlowUITests: XCTestCase {
         app.buttons["browser.bookmarks"].tap()
         XCTAssertTrue(app.staticTexts["***REMOVED***"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["***REMOVED***"].exists)
+        // Browse Only, the last folder, can be below the fold.
+        let ***REMOVED*** = app.staticTexts["***REMOVED***"]
+        for _ in 0..<3 where !***REMOVED***.exists { app.swipeUp() }
         XCTAssertTrue(app.staticTexts["***REMOVED***"].exists)
-        XCTAssertTrue(app.staticTexts["***REMOVED***"].exists)
+        XCTAssertTrue(***REMOVED***.exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Lanterns S1E1'")).firstMatch.exists)
+        for _ in 0..<3 where !app.buttons["Add This Page"].exists { app.swipeDown() }
         XCTAssertTrue(app.buttons["Add This Page"].waitForExistence(timeout: 5))
         app.buttons["Add This Page"].tap()
         app.buttons["Done"].tap()
@@ -674,9 +682,11 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertFalse(show.exists)
     }
 
-    /// Settings → Delete Finished Episodes → Ask First: the player asks when an episode ends,
-    /// before Up Next, and an episode deleted there leaves the show.
-    func testFinishedEpisodeIsDeletedWhenAskedBeforeTheNextOne() throws {
+    /// Settings → Delete Finished Episodes → Ask First: the end card has a Delete box beside
+    /// Next Episode, applied when the card goes, and an episode deleted there leaves the show.
+    func testFinishedEpisodeIsDeletedWhenTickedOnTheEndCard() throws {
+        // XCUITest can take longer than the card's 10 seconds to find and tap the box.
+        extraLaunchArguments = ["-UpNextSeconds", "120"]
         makeTwoEpisodeShow()
         app.tabBars.buttons["Settings"].tap()
         let setting = app.buttons["settings.finishedEpisodes"]
@@ -692,21 +702,23 @@ final class DownloadFlowUITests: XCTestCase {
         app.buttons["show.playNext"].tap()
         XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
 
-        // Episode 1 (5 s) ends: the question comes first, and Up Next waits for the answer.
-        let delete = app.buttons["player.deleteEpisode.delete"]
-        XCTAssertTrue(delete.waitForExistence(timeout: 15), "asked when episode 1 ends")
-        XCTAssertTrue(app.staticTexts["Fixture Show Ep. 1"].exists)
-        XCTAssertFalse(app.buttons["player.upNext.play"].exists, "Up Next waits for the answer")
-        delete.tap()
+        // Episode 1 (5 s) ends: one card with Next Episode and an unticked Delete box.
+        let toggle = app.buttons["player.deleteEpisode.toggle"]
         let playNow = app.buttons["player.upNext.play"]
-        XCTAssertTrue(playNow.waitForExistence(timeout: 5), "Up Next follows the answer")
-        wait(for: playNow, "exists == false", timeout: 8, "the countdown starts episode 2")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 15), "offered when episode 1 ends")
+        // Tick first: the card counts down while the checks run.
+        XCTAssertEqual(toggle.value as? String, "0", "nothing is deleted unless ticked")
+        toggle.tap()
+        XCTAssertTrue(playNow.waitForExistence(timeout: 5), "Next Episode is on the same card")
+        XCTAssertTrue(app.staticTexts["Fixture Show Ep. 2"].exists)
+        wait(for: toggle, "value == '1'", timeout: 3, "ticked")
+        playNow.tap()
+        wait(for: playNow, "exists == false", timeout: 10, "Next Episode starts episode 2")
 
-        // Episode 2, the last, ends: kept.
-        let keep = app.buttons["player.deleteEpisode.keep"]
-        XCTAssertTrue(keep.waitForExistence(timeout: 15), "asked when episode 2 ends")
-        keep.tap()
-        XCTAssertFalse(app.buttons["player.upNext.play"].exists, "nothing follows the last episode")
+        // Episode 2, the last, ends: Done instead of Next Episode, and left unticked it's kept.
+        XCTAssertTrue(toggle.waitForExistence(timeout: 15), "offered when episode 2 ends")
+        XCTAssertTrue(app.buttons["player.endCard.done"].exists)
+        XCTAssertFalse(playNow.exists, "nothing follows the last episode")
         closePlayer()
         let episodes = app.buttons.matching(identifier: "show.episode")
         wait(for: episodes.element(boundBy: 1), "exists == false", timeout: 5, "episode 1 was deleted")
@@ -770,9 +782,8 @@ final class DownloadFlowUITests: XCTestCase {
         sleep(2)
         closePlayer()
 
-        // Watched past 10 s: the video is offered under Continue Watching and resumes where it stopped.
-        // iOS 18 shows list headers in capitals.
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'Continue Watching'")).firstMatch.waitForExistence(timeout: 5))
+        // Watched past 10 s: the video is offered at the top of My Videos and resumes where it stopped.
+        XCTAssertTrue(app.buttons["library.hero.play"].waitForExistence(timeout: 5))
         wait(for: item, "label CONTAINS 'Continue watching'", timeout: 5, item.label)
         item.tap()
         XCTAssertTrue(app.buttons["Resume"].waitForExistence(timeout: 5))

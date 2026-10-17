@@ -25,7 +25,7 @@ struct ContentView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
-        .tint(.cyan)
+        .tint(.brandRed)
         .preferredColorScheme(.dark)
         // A page's video would otherwise keep playing, and streaming, behind other tabs and saved videos.
         .onChange(of: selection) { previous, _ in
@@ -50,15 +50,17 @@ struct ContentView: View {
         .alert("Unable to play video", isPresented: Binding(get: { playback.errorMessage != nil }, set: { if !$0 { playback.clearError() } })) {
             Button("OK", role: .cancel) { playback.clearError() }
         } message: { Text(playback.errorMessage ?? "") }
-        // Delete Finished Episodes → Ask First, for an episode closed in its last 10%. It waits
-        // while another video plays.
-        .confirmationDialog("Delete this episode?",
-                            isPresented: Binding(get: { playback.finishedEpisode != nil && !playback.isPresented },
-                                                 set: { if !$0 { playback.answerFinishedEpisode(delete: false) } }),
-                            titleVisibility: .visible, presenting: playback.finishedEpisode) { _ in
-            Button("Delete Episode", role: .destructive) { playback.answerFinishedEpisode(delete: true) }
-            Button("Keep", role: .cancel) { playback.answerFinishedEpisode(delete: false) }
-        } message: { episode in Text("You finished \(episode.displayTitle). \(StorageCleanup.freedText(episode))") }
+        // Delete Finished Episodes → Ask First, for an episode closed in its last 10%: a banner over
+        // the tab bar rather than a dialog. It waits while another video plays.
+        .overlay(alignment: .bottom) {
+            if let episode = playback.finishedEpisode, !playback.isPresented {
+                FinishedEpisodeBanner(episode: episode) { playback.answerFinishedEpisode(delete: $0) }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 64)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: playback.finishedEpisode?.id)
         .alert("Can't start download", isPresented: Binding(get: { downloads.startError != nil }, set: { if !$0 { downloads.startError = nil } })) {
             Button("OK", role: .cancel) { downloads.startError = nil }
         } message: { Text(downloads.startError ?? "") }
@@ -66,5 +68,44 @@ struct ContentView: View {
 
     private func updateBrowserVisibility() {
         browser.isVisible = selection == .browse && scenePhase == .active && !playback.isPresented
+    }
+}
+
+extension Color {
+    /// The app's accent: a deep red on black, as on Netflix.
+    static let brandRed = Color(red: 0.898, green: 0.035, blue: 0.078)
+}
+
+/// "You finished … Delete it?" over the tab bar. Unanswered, it goes after a while and the episode is kept.
+private struct FinishedEpisodeBanner: View {
+    let episode: DownloadItem
+    let answer: (Bool) -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VideoThumbnailView(item: episode, width: 64, height: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Finished \(episode.displayTitle)").font(.subheadline.bold()).lineLimit(1).truncationMode(.middle)
+                Text(episode.fileSize.map { "Delete it to free \(ByteCountFormatter.string(fromByteCount: $0, countStyle: .file))" } ?? "Delete it from this iPhone?")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            Button("Delete") { answer(true) }
+                .font(.subheadline.bold())
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("finishedEpisode.delete")
+            Button { answer(false) } label: { Image(systemName: "xmark").font(.subheadline.bold()) }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Keep")
+                .accessibilityIdentifier("finishedEpisode.keep")
+        }
+        .padding(12)
+        .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+        .task(id: episode.id) {
+            try? await Task.sleep(for: .seconds(12))
+            if !Task.isCancelled { answer(false) }
+        }
     }
 }

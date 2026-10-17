@@ -10,7 +10,9 @@ struct LibraryScreen: View {
     @EnvironmentObject private var labelStore: LabelStore
     @EnvironmentObject private var showStore: ShowStore
     @Query(filter: #Predicate<DownloadItem> { $0.statusRaw == "completed" }, sort: \DownloadItem.completedAt, order: .reverse)
-    private var completed: [DownloadItem]
+    private var queriedCompleted: [DownloadItem]
+    /// A video deleted from a show's page can still be in the query for one more render; reading it then crashes.
+    private var completed: [DownloadItem] { queriedCompleted.filter { !$0.isDeleted && $0.modelContext != nil } }
     @Query(sort: \DownloadFolder.title) private var folders: [DownloadFolder]
     @Query(sort: \VideoLabel.name) private var allLabels: [VideoLabel]
     @Query(sort: \Show.title) private var shows: [Show]
@@ -66,13 +68,20 @@ struct LibraryScreen: View {
         NavigationStack {
             List {
                 expiryWarning
-                if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering && !continueWatching.isEmpty {
-                    continueWatchingSection(continueWatching)
+                if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering, let hero = continueWatching.first {
+                    heroSection(hero)
+                }
+                // The hero already shows the first one.
+                if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering && continueWatching.count > 1 {
+                    continueWatchingSection(Array(continueWatching.dropFirst()))
                 }
                 if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering { showsSection }
                 if displayed.isEmpty { emptyState }
                 allVideosSection(displayed, labelsByID: labelsByID)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.black)
             // Outside the list: on iOS 18 a list row swallows taps on buttons in a scroll view.
             .safeAreaInset(edge: .top, spacing: 0) {
                 if query.isFiltering || selectedFolderID != nil { filterChips(query) }
@@ -158,44 +167,106 @@ struct LibraryScreen: View {
         }
     }
 
+    /// Netflix's billboard: the video you'd carry on with, full width, with Play and Episodes.
+    private func heroSection(_ item: DownloadItem) -> some View {
+        let show = shows.first { $0.id == item.showID }
+        let resuming = (item.playbackPosition ?? 0) > 10
+        return Section {
+            ZStack(alignment: .bottom) {
+                VideoThumbnailView(item: item, width: nil, height: 200, cornerRadius: 0, showsWatchedBadge: false)
+                LinearGradient(colors: [.clear, .black.opacity(0.6), .black], startPoint: .center, endPoint: .bottom)
+                VStack(spacing: 8) {
+                    Text(show?.title ?? item.displayTitle)
+                        .font(.title.weight(.heavy)).multilineTextAlignment(.center).lineLimit(2)
+                    Text(heroDetail(item, in: show)).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
+                    HStack(spacing: 10) {
+                        Button { start(item, at: resuming ? item.playbackPosition ?? 0 : 0) } label: {
+                            Label("Play", systemImage: "play.fill").font(.headline).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black)
+                        .accessibilityIdentifier("library.hero.play")
+                        if let show {
+                            Button { openedShow = show } label: {
+                                Label("Episodes", systemImage: "list.bullet").font(.headline).frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered).tint(.white)
+                        }
+                    }
+                    .controlSize(.large)
+                    .padding(.horizontal, 20)
+                }
+                .padding(.bottom, 14)
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.black)
+        }
+    }
+
+    private func heroDetail(_ item: DownloadItem, in show: Show?) -> String {
+        var parts: [String] = []
+        if show != nil { parts.append(item.displayTitle) }
+        if let duration = item.duration, duration > 0, (item.playbackPosition ?? 0) > 10 {
+            let left = max(duration - (item.playbackPosition ?? 0), 0)
+            parts.append(Duration.seconds(left).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)) + " left")
+        } else if let show {
+            parts.append(show.title == item.displayTitle ? "Next episode" : "Up next")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Netflix-style section titles: bold and white, not small caps.
+    private func rowHeader(_ title: String) -> some View {
+        Text(title).font(.title3.bold()).foregroundStyle(.white).textCase(nil)
+    }
+
     private func continueWatchingSection(_ items: [DownloadItem]) -> some View {
-        Section("Continue Watching") {
+        Section {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
+                HStack(spacing: 10) {
                     ForEach(items) { item in
-                        VStack(alignment: .leading, spacing: 7) {
+                        VStack(alignment: .leading, spacing: 6) {
                             Button { start(item, at: item.playbackPosition ?? 0) } label: {
-                                VideoThumbnailView(item: item, width: 174, height: 98)
+                                VideoThumbnailView(item: item, width: 174, height: 98, showsWatchedBadge: false)
+                                    .overlay {
+                                        Image(systemName: "play.circle")
+                                            .font(.system(size: 38, weight: .light)).foregroundStyle(.white)
+                                            .shadow(radius: 4)
+                                    }
+                                    .overlay(alignment: .bottom) { PlaybackProgressBar(item: item) }
                             }
                             .buttonStyle(.plain)
                             HStack(alignment: .top, spacing: 4) {
-                                Text(item.displayTitle).font(.subheadline.bold()).lineLimit(2)
+                                Text(item.displayTitle).font(.footnote.bold()).lineLimit(2)
                                     .truncationMode(.middle)
                                     .foregroundStyle(.primary)
                                 Spacer(minLength: 0)
                                 Menu { actions(for: item) } label: {
-                                    Image(systemName: "ellipsis.circle")
+                                    Image(systemName: "ellipsis")
+                                        .frame(minWidth: 24, minHeight: 20)
                                         .accessibilityLabel("More options for \(item.title)")
                                 }
                             }
-                            Text(item.downloadedText).font(.caption2).foregroundStyle(.secondary)
-                            Label((item.playbackPosition ?? 0) > 10 ? "Resume" : "Next Episode",
-                                  systemImage: (item.playbackPosition ?? 0) > 10 ? "play.fill" : "forward.end.fill")
-                                .font(.caption).foregroundStyle(.tint)
+                            Text((item.playbackPosition ?? 0) > 10 ? "Resume" : "Next Episode")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         .frame(width: 174, alignment: .leading)
                     }
                 }
+                .padding(.horizontal, 16)
                 .padding(.vertical, 4)
             }
-        }
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.black)
+        } header: { rowHeader("Continue Watching") }
     }
 
     /// Suggested shows to confirm, then the viewer's shows.
     @ViewBuilder private var showsSection: some View {
         let suggestions = ShowSuggestion.suggestions(items: completed, shows: shows, dismissed: showStore.dismissed)
         if !shows.isEmpty || !suggestions.isEmpty {
-            Section("Shows") {
+            Section {
                 ForEach(suggestions) { suggestion in
                     ShowSuggestionRow(suggestion: suggestion, accept: { accept(suggestion) }, dismiss: { showStore.dismissSuggestion(suggestion) })
                 }
@@ -224,7 +295,7 @@ struct LibraryScreen: View {
                         Button("Delete", systemImage: "trash") { deletingShow = show }.tint(.red)
                     }
                 }
-            }
+            } header: { rowHeader("My Shows") }
         }
     }
 
@@ -250,34 +321,37 @@ struct LibraryScreen: View {
     }
 
     private func allVideosSection(_ displayed: [DownloadItem], labelsByID: [UUID: VideoLabel]) -> some View {
-        Section(displayed.isEmpty ? "" : "All Videos") {
+        Section {
             ForEach(displayed) { item in
-                HStack(spacing: 4) {
-                    Button { open(item) } label: { LibraryRow(item: item, labels: item.labelIDs?.compactMap { labelsByID[$0] } ?? []) }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("library.item")
-                    Menu { actions(for: item) } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title3)
-                            .frame(minWidth: 40, minHeight: 44)
-                            .accessibilityLabel("More options for \(item.title)")
+                // SwiftUI can rebuild a row from the old list after its video was deleted (from a show's page).
+                if !item.isDeleted, item.modelContext != nil {
+                    HStack(spacing: 4) {
+                        Button { open(item) } label: { LibraryRow(item: item, labels: item.labelIDs?.compactMap { labelsByID[$0] } ?? []) }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("library.item")
+                        Menu { actions(for: item) } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.title3)
+                                .frame(minWidth: 40, minHeight: 44)
+                                .accessibilityLabel("More options for \(item.title)")
+                        }
+                        .accessibilityIdentifier("library.moreOptions")
                     }
-                    .accessibilityIdentifier("library.moreOptions")
-                }
-                .contextMenu { actions(for: item) }
-                .swipeActions(edge: .leading) {
-                    Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
-                        setWatched(item, !item.isWatched)
+                    .contextMenu { actions(for: item) }
+                    .swipeActions(edge: .leading) {
+                        Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
+                            setWatched(item, !item.isWatched)
+                        }
+                        .tint(.green)
                     }
-                    .tint(.green)
-                }
-                .swipeActions(edge: .trailing) {
-                    Button("Delete", role: .destructive) { downloads.delete(item) }
-                    Button("Rename") { beginRename(item) }.tint(.blue)
+                    .swipeActions(edge: .trailing) {
+                        Button("Delete", role: .destructive) { downloads.delete(item) }
+                        Button("Rename") { beginRename(item) }.tint(.blue)
+                    }
                 }
             }
-        }
+        } header: { if !displayed.isEmpty { rowHeader("All Videos") } }
     }
 
     private func sortAndFilterMenu(_ query: LibraryQuery) -> some View {
@@ -318,10 +392,10 @@ struct LibraryScreen: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 if let folderID = query.folderID, let folder = folders.first(where: { $0.id == folderID }) {
-                    FilterChip(title: folder.title, systemImage: "folder", color: .cyan) { selectedFolderID = nil }
+                    FilterChip(title: folder.title, systemImage: "folder", color: .brandRed) { selectedFolderID = nil }
                 }
                 if query.status != .all {
-                    FilterChip(title: query.status.name, systemImage: "eye", color: .cyan) { statusRaw = LibraryQuery.Status.all.rawValue }
+                    FilterChip(title: query.status.name, systemImage: "eye", color: .brandRed) { statusRaw = LibraryQuery.Status.all.rawValue }
                 }
                 ForEach(allLabels.filter { query.labelIDs.contains($0.id) }) { label in
                     FilterChip(title: label.name, systemImage: "tag", color: label.color) { setLabelFilter(label.id, false) }
@@ -495,7 +569,7 @@ private struct LibraryRow: View {
                         .font(.caption2).foregroundStyle(.tint)
                     if let duration = item.duration ?? duration, duration > 0 {
                         ProgressView(value: min((item.playbackPosition ?? 0) / duration, 1))
-                            .tint(.cyan)
+                            .tint(.brandRed)
                             .accessibilityLabel("Playback progress")
                     }
                 }
@@ -511,37 +585,58 @@ private struct LibraryRow: View {
     private var fileExists: Bool { item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
 }
 
+/// Netflix's thin red bar along the bottom of a thumbnail, for a video started but not finished.
+struct PlaybackProgressBar: View {
+    let item: DownloadItem
+
+    var body: some View {
+        if let duration = item.duration, duration > 0, (item.playbackPosition ?? 0) > 10, !item.isWatched {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(.white.opacity(0.3))
+                    Rectangle().fill(Color.brandRed).frame(width: proxy.size.width * min((item.playbackPosition ?? 0) / duration, 1))
+                }
+            }
+            .frame(height: 3)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
 struct VideoThumbnailView: View {
     let item: DownloadItem
-    var width: CGFloat = 72
+    /// nil stretches to the available width, for the hero image.
+    var width: CGFloat? = 72
     var height: CGFloat = 48
+    var cornerRadius: CGFloat = 6
+    var showsWatchedBadge = true
     @State private var image: UIImage?
 
     var body: some View {
-        Group {
-            if let image = image ?? ThumbnailCache.shared.cachedImage(for: item.id, fileName: item.localFileName) {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                Image(systemName: "film").font(.title2).foregroundStyle(.tint)
+        Rectangle().fill(.quaternary)
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil)
+            .overlay {
+                if let image = image ?? ThumbnailCache.shared.cachedImage(for: item.id, fileName: item.localFileName) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "film").font(.title2).foregroundStyle(.tint)
+                }
             }
-        }
-        .frame(width: width, height: height)
-        .clipped()
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(alignment: .topTrailing) {
-            if item.isWatched {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.white, .green)
-                    .padding(4)
-                    .accessibilityHidden(true)
+            .overlay(alignment: .topTrailing) {
+                if showsWatchedBadge && item.isWatched {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.white, .green)
+                        .padding(4)
+                        .accessibilityHidden(true)
+                }
             }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .task(id: item.localFileName) {
-            // The body falls back to the in-memory cache, so clearing this doesn't flash a placeholder.
-            image = nil
-            image = await ThumbnailCache.shared.image(for: item.id, fileName: item.localFileName, mediaURL: item.localURL, kind: item.kind)
-        }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .task(id: item.localFileName) {
+                // The body falls back to the in-memory cache, so clearing this doesn't flash a placeholder.
+                image = nil
+                image = await ThumbnailCache.shared.image(for: item.id, fileName: item.localFileName, mediaURL: item.localURL, kind: item.kind)
+            }
     }
 }
