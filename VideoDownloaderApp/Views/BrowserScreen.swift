@@ -457,28 +457,35 @@ private struct BrowserCollectionsSheet: View {
                 .accessibilityIdentifier("browser.addBookmark")
             }
         }
-        Section("Saved Sites") {
-            if visibleBookmarks.isEmpty {
-                ContentUnavailableView(searchText.isEmpty ? "No bookmarks" : "No matching bookmarks", systemImage: "bookmark",
-                                       description: Text(searchText.isEmpty ? "Save a site or page to find it here." : "Try another search."))
+        if visibleBookmarks.isEmpty {
+            ContentUnavailableView(searchText.isEmpty ? "No bookmarks" : "No matching bookmarks", systemImage: "bookmark",
+                                   description: Text(searchText.isEmpty ? "Save a site or page to find it here." : "Try another search."))
+        }
+        let groups = Dictionary(grouping: visibleBookmarks, by: \.folder)
+        ForEach(Bookmark.Folder.allCases.filter { groups[$0] != nil }, id: \.self) { folder in
+            Section {
+                bookmarkRows(groups[folder] ?? [])
+            } header: { Text(folder.rawValue) } footer: { if !folder.footer.isEmpty { Text(folder.footer) } }
+        }
+    }
+
+    @ViewBuilder private func bookmarkRows(_ bookmarks: [Bookmark]) -> some View {
+        ForEach(bookmarks) { bookmark in
+            HStack(spacing: 8) {
+                Button {
+                    navigate(bookmark.url)
+                    dismiss()
+                } label: { BrowserCollectionRow(title: bookmark.title, detail: bookmark.url.host ?? "") }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("bookmark.site")
+                Menu {
+                    Button("Rename", systemImage: "pencil") { newTitle = bookmark.title; renaming = bookmark }
+                    Button("Delete", systemImage: "trash", role: .destructive) { modelContext.delete(bookmark); try? modelContext.save() }
+                } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 40, minHeight: 44) }
+                    .accessibilityLabel("More options for \(bookmark.title)")
             }
-            ForEach(visibleBookmarks) { bookmark in
-                HStack(spacing: 8) {
-                    Button {
-                        navigate(bookmark.url)
-                        dismiss()
-                    } label: { BrowserCollectionRow(title: bookmark.title, detail: bookmark.url.host ?? "") }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("bookmark.site")
-                    Menu {
-                        Button("Rename", systemImage: "pencil") { newTitle = bookmark.title; renaming = bookmark }
-                        Button("Delete", systemImage: "trash", role: .destructive) { modelContext.delete(bookmark); try? modelContext.save() }
-                    } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 40, minHeight: 44) }
-                        .accessibilityLabel("More options for \(bookmark.title)")
-                }
-                .swipeActions { Button("Delete", role: .destructive) { modelContext.delete(bookmark); try? modelContext.save() } }
-            }
+            .swipeActions { Button("Delete", role: .destructive) { modelContext.delete(bookmark); try? modelContext.save() } }
         }
     }
 

@@ -146,4 +146,14 @@ final class BrowserCollectionsStoreTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<BrowsingHistoryEntry>()), BrowserHistoryStore.maximumEntries)
         XCTAssertTrue(try context.fetch(FetchDescriptor<BrowsingHistoryEntry>()).map(\.url.absoluteString).contains("https://example.com/page/3"))
     }
+
+    /// Every shipped site is filed; the user's own bookmarks of a shipped site join its folder.
+    func testBookmarksAreGroupedIntoFolders() {
+        for (title, url) in Bookmark.knownSites {
+            XCTAssertNotEqual(Bookmark(title: title, url: url).folder, .mine, "\(title) has no folder")
+        }
+        XCTAssertEqual(Bookmark(title: "Ep 2", url: URL(string: "https://www.***REMOVED***.to/watch/1/x?ep=2")!).folder, .autoDownload)
+        XCTAssertEqual(Bookmark(title: "***REMOVED***", url: URL(string: "https://***REMOVED***tv.to/watch/x/ep-3")!).folder, .needsTap)
+        XCTAssertEqual(Bookmark(title: "Mine", url: URL(string: "https://example.com/")!).folder, .mine)
+    }
 }
