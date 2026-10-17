@@ -84,6 +84,17 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         if (type.includes('mpegurl') ||
             (interactionTime !== null && type.startsWith('video/'))) send(url, null, false, contentType, via);
       };
+      const postTracks = tracks => {
+        if (!tracks.length) return;
+        const key = tracks.map(t => t.url + '|' + t.label).join('\n');
+        if (reportedTracks.has(key)) return;
+        reportedTracks.add(key);
+        post({ event: 'subtitles', tracks, documentURL: location.href });
+      };
+      const absoluteURL = src => {
+        if (!src || typeof src !== 'string' || src.startsWith('blob:') || src.startsWith('data:')) return null;
+        try { return new URL(src, document.baseURI).href; } catch (_) { return null; }
+      };
       // Players such as Plyr show subtitles from <track> files that aren't part of the
       // stream; report them with their labels so a download can keep them.
       const reportTracks = video => {
@@ -92,18 +103,74 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         video.querySelectorAll('track').forEach(track => {
           const kind = (track.getAttribute('kind') || 'subtitles').toLowerCase();
           if (kind !== 'subtitles' && kind !== 'captions') return;
-          const src = track.getAttribute('src');
-          if (!src || src.startsWith('blob:') || src.startsWith('data:')) return;
-          let url;
-          try { url = new URL(src, document.baseURI).href; } catch (_) { return; }
+          const url = absoluteURL(track.getAttribute('src'));
+          if (!url) return;
           tracks.push({ url, label: track.getAttribute('label') || '', language: track.getAttribute('srclang') || '',
                         isDefault: track.hasAttribute('default') });
         });
-        if (!tracks.length) return;
-        const key = tracks.map(t => t.url + '|' + t.label).join('\n');
-        if (reportedTracks.has(key)) return;
-        reportedTracks.add(key);
-        post({ event: 'subtitles', tracks, documentURL: location.href });
+        postTracks(tracks);
+      };
+      // JW Player keeps its subtitle list in its playlist, not in <track> elements, and
+      // fetches only the language being shown.
+      const reportPlayerTracks = () => {
+        try {
+          if (typeof window.jwplayer !== 'function') return;
+          const player = window.jwplayer();
+          const item = player && player.getPlaylistItem && player.getPlaylistItem();
+          const tracks = [];
+          ((item && item.tracks) || []).forEach(t => {
+            const kind = String((t && t.kind) || 'captions').toLowerCase();
+            const url = t && absoluteURL(t.file);
+            if (!url || (kind !== 'captions' && kind !== 'subtitles')) return;
+            tracks.push({ url, label: t.label || '', language: t.language || '', isDefault: !!t.default });
+          });
+          postTracks(tracks);
+        } catch (_) {}
+      };
+      // Other players fetch a whole WebVTT or SRT file by script. HLS subtitle segments are
+      // .vtt too, but carry X-TIMESTAMP-MAP and are saved with the stream, so they're skipped.
+      const reportSubtitleFile = (url, contentType, body) => {
+        const type = (contentType || '').toLowerCase();
+        if (!type.includes('text/vtt') && !type.includes('subrip') && !/\.(vtt|srt)(?:[?#]|$)/i.test(url || '')) return;
+        if (typeof body !== 'string' || body.includes('X-TIMESTAMP-MAP')) return;
+        const text = body.replace(/^\uFEFF/, '').trimStart();
+        if (!text.startsWith('WEBVTT') && !/^\d+\s*\r?\n\d\d:\d\d/.test(text)) return;
+        const absolute = absoluteURL(url);
+        if (absolute) postTracks([{ url: absolute, label: '', language: '', isDefault: false }]);
+      };
+      // Some players fetch a JSON list of subtitle files and download only the language picked:
+      // ***REMOVED***'s [{ label, file }] ("Arabic", "Arabic2", …) and ***REMOVED***'s [{ url, display, language,
+      // format }]. One file per language is kept.
+      const reportSubtitleList = (url, contentType, body) => {
+        if (!/json/i.test(contentType || '') || body === null || body === undefined) return;
+        const subtitleRequest = /sub|caption|***REMOVED***/i.test(url || '');
+        let data = body;
+        if (typeof body === 'string') {
+          if (body.length > 2000000 || (!subtitleRequest && !/\.(vtt|srt)\b|"format"\s*:\s*"(srt|vtt)"/i.test(body))) return;
+          try { data = JSON.parse(body); } catch (_) { return; }
+        }
+        const tracks = [];
+        const languages = new Set();
+        const visit = (value, depth) => {
+          if (!value || typeof value !== 'object' || depth > 5 || tracks.length >= 60) return;
+          if (Array.isArray(value)) { value.forEach(item => visit(item, depth + 1)); return; }
+          const file = [value.file, value.url, value.src].find(v => typeof v === 'string' && /^https?:/i.test(v));
+          const format = String(value.format || '').toLowerCase();
+          const label = String(value.label || value.display || '').replace(/\s*\d+$/, '');
+          const language = String(value.language || value.lang || value.srclang || '');
+          if (file && !/\.(m3u8|mp4|m4v|webm|ts|jpe?g|png|webp)(?:[?#]|$)/i.test(file) &&
+              (/\.(vtt|srt)(?:[?#]|$)/i.test(file) || format === 'srt' || format === 'vtt' || (subtitleRequest && (label || language)))) {
+            const key = (language || label).toLowerCase() + (value.isHearingImpaired ? ' sdh' : '');
+            if (!languages.has(key)) {
+              languages.add(key);
+              tracks.push({ url: file, label: label + (value.isHearingImpaired ? ' (SDH)' : ''), language, isDefault: !!value.default });
+            }
+            return;
+          }
+          Object.values(value).forEach(item => visit(item, depth + 1));
+        };
+        visit(data, 0);
+        postTracks(tracks);
       };
       // Artwork for the library: a player's poster, or the page's preview image.
       let reportedPosters = new Set();
@@ -160,6 +227,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         reportedTracks = new Set();
         reportedPosters = new Set();
         document.querySelectorAll('video,audio,source').forEach(inspect);
+        reportPlayerTracks();
         reportPagePoster();
         scanResources();
         document.querySelectorAll('iframe').forEach(f => { try { f.contentWindow.postMessage({ __vdaRescan: true }, '*'); } catch (_) {} });
@@ -167,8 +235,8 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       window.addEventListener('message', event => { if (event.data && event.data.__vdaRescan === true) window.__vdaRescan(); });
       document.querySelectorAll('video,audio,source').forEach(inspect);
       if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', reportPagePoster); else reportPagePoster();
-      document.addEventListener('loadedmetadata', event => inspect(event.target), true);
-      document.addEventListener('play', event => inspect(event.target), true);
+      document.addEventListener('loadedmetadata', event => { inspect(event.target); reportPlayerTracks(); }, true);
+      document.addEventListener('play', event => { inspect(event.target); reportPlayerTracks(); }, true);
       document.addEventListener('pointerdown', activate, true);
       document.addEventListener('touchstart', activate, true);
       document.addEventListener('keydown', activate, true);
@@ -197,14 +265,40 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         const originalFetch = window.fetch;
         window.fetch = function() {
           const result = originalFetch.apply(this, arguments);
-          try { result.then(response => { try { report(response.url, response.headers.get('content-type'), 'fetch'); } catch (_) {} }, () => {}); } catch (_) {}
+          try {
+            result.then(response => {
+              try {
+                const type = response.headers.get('content-type');
+                report(response.url, type, 'fetch');
+                if (/\.(vtt|srt)(?:[?#]|$)/i.test(response.url) || /text\/vtt|subrip|json/i.test(type || '')) {
+                  response.clone().text().then(text => {
+                    reportSubtitleFile(response.url, type, text);
+                    reportSubtitleList(response.url, type, text);
+                  }, () => {});
+                }
+              } catch (_) {}
+            }, () => {});
+          } catch (_) {}
           return result;
         };
       }
       if (typeof XMLHttpRequest !== 'undefined' && XMLHttpRequest.prototype) {
         const originalSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.send = function() {
-          try { this.addEventListener('load', () => { try { report(this.responseURL, this.getResponseHeader('content-type'), 'xhr'); } catch (_) {} }); } catch (_) {}
+          try {
+            this.addEventListener('load', () => {
+              try {
+                const type = this.getResponseHeader('content-type');
+                report(this.responseURL, type, 'xhr');
+                if (this.responseType === '' || this.responseType === 'text') {
+                  reportSubtitleFile(this.responseURL, type, this.responseText);
+                  reportSubtitleList(this.responseURL, type, this.responseText);
+                } else if (this.responseType === 'json') {
+                  reportSubtitleList(this.responseURL, type, this.response);
+                }
+              } catch (_) {}
+            });
+          } catch (_) {}
           return originalSend.apply(this, arguments);
         };
       }

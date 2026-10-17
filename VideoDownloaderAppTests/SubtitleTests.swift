@@ -65,6 +65,18 @@ final class SubtitleTrackTests: XCTestCase {
         XCTAssertEqual(SubtitleTrack.cleanLabel("Spanish (- Spanish(Latin America))"), "Spanish (Latin America)")
         XCTAssertEqual(SubtitleTrack.cleanLabel(" English (CC) "), "English (CC)")
     }
+
+    /// Files found by their download have no label; the name often says the language.
+    func testUnlabelledTrackTakesItsLanguageFromTheFileName() {
+        let languages = ["https://c.example/subs/eng.vtt", "https://c.example/en.srt", "https://c.example/English.vtt",
+                         "https://c.example/sub?lang=fr", "https://c.example/sub.vtt", "https://c.example/a8f3c1.vtt",
+                         "https://storage.***REMOVED***.cfd/uploads/subs/a6318f05-daa2.en.srt"]
+            .map { SubtitleTrack.languageCode(in: URL(string: $0)!) }
+        XCTAssertEqual(languages, ["en", "en", "en", "fr", nil, nil, "en"])
+        let labelled = SubtitleTrack.tracks(from: ["tracks": [["url": "https://c.example/eng.vtt", "label": "Forced"],
+                                                               ["url": "https://c.example/1.vtt", "label": "Spanish"]]], frameURL: nil)
+        XCTAssertEqual(labelled.map(\.language), [nil, "es"], "a site's label wins over the file name, and names its language")
+    }
 }
 
 final class SubtitleStoreTests: XCTestCase {

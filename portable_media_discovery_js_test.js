@@ -200,3 +200,91 @@ setTimeout(() => {
   if (posters().length !== 2) throw new Error('the same poster was reported again');
   console.log('WebKit discovery poster checks passed');
 })();
+
+// Subtitle files fetched by script (no <track>) and JW Player's subtitle list are reported;
+// HLS subtitle segments (X-TIMESTAMP-MAP) and non-subtitle text are not.
+(() => {
+  const posted = [];
+  const docListeners = {};
+  const bodies = {
+    'https://cdn.example/subs/eng.vtt': 'WEBVTT\n\n00:00.000 --> 00:02.000\nHello\n',
+    'https://cdn.example/hls/seg-1.vtt': 'WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n\n00:00.000 --> 00:02.000\nHi\n',
+    'https://cdn.example/subs/fr.srt': '1\n00:00:00,000 --> 00:00:02,000\nBonjour\n',
+    'https://cdn.example/expired.vtt': '<!doctype html><p>gone</p>'
+  };
+  const response = url => ({ url, headers: { get: () => 'text/plain' }, clone() { return { text: () => Promise.resolve(bodies[url]) }; } });
+  const win = {
+    webkit: { messageHandlers: { mediaDiscovery: { postMessage: value => posted.push(value) } } },
+    addEventListener: () => {},
+    fetch: url => Promise.resolve(response(url)),
+    jwplayer: () => ({ getPlaylistItem: () => ({ tracks: [
+      { file: '/c/en.vtt', label: 'English', kind: 'captions', default: true },
+      { file: '/c/thumbs.vtt', kind: 'thumbnails' }
+    ] }) })
+  };
+  const ctx = {
+    document: {
+      baseURI: 'https://player.example/e/1', title: 'Player', documentElement: {},
+      querySelectorAll: () => [], addEventListener: (name, callback) => { docListeners[name] = callback; }
+    },
+    location: { href: 'https://player.example/e/1' },
+    window: win,
+    history: { pushState: function () {}, replaceState: function () {} },
+    MutationObserver: class { observe() {} },
+    PerformanceObserver: class { observe() {} },
+    performance: { getEntriesByType: () => [], now: () => 1000 },
+    setTimeout, URL, console
+  };
+  win.top = win;
+  vm.runInNewContext(match[1], ctx);
+  Promise.all(Object.keys(bodies).map(url => win.fetch(url))).then(() => setTimeout(() => {
+    const urls = posted.filter(m => m.event === 'subtitles').flatMap(m => m.tracks.map(t => t.url)).sort();
+    if (urls.join(',') !== 'https://cdn.example/subs/eng.vtt,https://cdn.example/subs/fr.srt')
+      throw new Error(`unexpected fetched subtitle files: ${urls.join(', ')}`);
+    docListeners.play({ target: {} });
+    const jw = posted.filter(m => m.event === 'subtitles' && m.tracks[0].label === 'English');
+    if (jw.length !== 1 || jw[0].tracks.length !== 1 || jw[0].tracks[0].url !== 'https://player.example/c/en.vtt' || !jw[0].tracks[0].isDefault)
+      throw new Error('JW Player subtitle list not reported correctly');
+    console.log('WebKit discovery fetched subtitle checks passed');
+  }, 0));
+})();
+
+// JSON subtitle lists: ***REMOVED***'s [{ label, file }] with numbered duplicates, and ***REMOVED***'s
+// [{ url, display, language, format }]; video source lists are not subtitles.
+(() => {
+  const posted = [];
+  const lists = {
+    'https://sub.***REMOVED***.site/v1/tv/1396/1/1': JSON.stringify([
+      { label: 'Arabic', file: 'https://cache.***REMOVED***.site/v1/vtt/tv/1396/1/1/Arabic.vtt' },
+      { label: 'Arabic2', file: 'https://cache.***REMOVED***.site/v1/vtt/tv/1396/1/1/Arabic2.vtt' },
+      { label: 'English', file: 'https://cache.***REMOVED***.site/v1/vtt/tv/1396/1/1/English.vtt' }]),
+    'https://***REMOVED***.vc/***REMOVED***': JSON.stringify([
+      { url: 'https://sub.***REMOVED***.ru/c/abc/id/1?format=srt', display: 'English', language: 'en', format: 'srt', isHearingImpaired: false },
+      { url: 'https://sub.***REMOVED***.ru/c/abc/id/2?format=srt', display: 'English', language: 'en', format: 'srt', isHearingImpaired: false },
+      { url: 'https://sub.***REMOVED***.ru/c/abc/id/3?format=srt', display: 'English', language: 'en', format: 'srt', isHearingImpaired: true }]),
+    'https://api.example/sources': JSON.stringify({ sources: [{ file: 'https://cdn.example/master.m3u8', label: '1080p' }] })
+  };
+  const win = {
+    webkit: { messageHandlers: { mediaDiscovery: { postMessage: value => posted.push(value) } } },
+    addEventListener: () => {},
+    fetch: url => Promise.resolve({ url, headers: { get: () => 'application/json' }, clone() { return { text: () => Promise.resolve(lists[url]) }; } })
+  };
+  const ctx = {
+    document: { baseURI: 'https://***REMOVED***.su/watch/tv/1396/1/1', title: 'Player', documentElement: {}, querySelectorAll: () => [], addEventListener: () => {} },
+    location: { href: 'https://***REMOVED***.su/watch/tv/1396/1/1' },
+    window: win,
+    history: { pushState: function () {}, replaceState: function () {} },
+    MutationObserver: class { observe() {} },
+    PerformanceObserver: class { observe() {} },
+    performance: { getEntriesByType: () => [], now: () => 1000 },
+    setTimeout, URL, console
+  };
+  win.top = win;
+  vm.runInNewContext(match[1], ctx);
+  Promise.all(Object.keys(lists).map(url => win.fetch(url))).then(() => setTimeout(() => {
+    const labels = posted.filter(m => m.event === 'subtitles').flatMap(m => m.tracks.map(t => `${t.label}|${t.language}|${t.url.split('/').pop()}`));
+    const expected = ['Arabic||Arabic.vtt', 'English||English.vtt', 'English|en|1?format=srt', 'English (SDH)|en|3?format=srt'];
+    if (labels.join(',') !== expected.join(',')) throw new Error(`unexpected subtitle list tracks: ${labels.join(', ')}`);
+    console.log('WebKit discovery subtitle list checks passed');
+  }, 0));
+})();

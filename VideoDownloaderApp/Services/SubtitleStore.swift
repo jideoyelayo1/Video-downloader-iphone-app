@@ -41,7 +41,11 @@ enum SubtitleStore {
                      context: (SubtitleTrack) async -> RequestContext?) async -> [Saved] {
         var saved: [Saved] = []
         var files: [(name: String, text: String)] = []
-        for track in tracks.prefix(maxTracks) {
+        // Long lists (***REMOVED*** offers dozens, alphabetically) keep the viewer's language within the cap.
+        let device = Locale.current.language.languageCode?.identifier
+        let preferred: (SubtitleTrack) -> Bool = { $0.isDefault || ($0.language.map { Locale(identifier: $0).language.languageCode?.identifier } ?? nil) == device }
+        let kept = Set((tracks.filter(preferred) + tracks.filter { !preferred($0) }).prefix(maxTracks))
+        for track in tracks where kept.contains(track) {
             var request = URLRequest(url: track.url)
             let requestContext = await context(track)
             requestContext?.apply(to: &request)

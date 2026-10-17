@@ -34,9 +34,32 @@ struct SubtitleTrack: Codable, Hashable {
             guard let raw = entry["url"] as? String, let url = URL(string: raw),
                   ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
             let label = cleanLabel((entry["label"] as? String) ?? "")
-            let language = (entry["language"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return SubtitleTrack(url: url, label: label, language: language?.isEmpty == false ? language : nil,
+            var language = (entry["language"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if language?.isEmpty != false { language = label.isEmpty ? languageCode(in: url) : languageCode(named: label) }
+            return SubtitleTrack(url: url, label: label, language: language,
                                  isDefault: entry["isDefault"] as? Bool ?? false, referer: documentURL)
         }
+    }
+
+    /// A file found by its download has no label; its name often is the language: `eng.vtt`,
+    /// `en.srt`, `English.vtt`, `?lang=fr`.
+    static func languageCode(in url: URL) -> String? {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+            .first { ["lang", "language"].contains($0.name.lowercased()) }?.value
+        let stem = url.deletingPathExtension().lastPathComponent
+        // "<id>.en.srt", "show_eng.vtt"
+        let suffix = stem.split(whereSeparator: { ".-_".contains($0) }).last.map(String.init)
+        return [query, stem, suffix].lazy.compactMap { $0.flatMap(languageCode(named:)) }.first
+    }
+
+    /// "en", "eng" or "English" → "en". Only two-letter languages: three-letter codes like
+    /// "sub" are rare languages, not captions.
+    static func languageCode(named raw: String) -> String? {
+        let name = raw.lowercased().trimmingCharacters(in: .whitespaces)
+        let english = Locale(identifier: "en")
+        return Locale.LanguageCode.isoLanguageCodes.first {
+            $0.identifier.count == 2 && ($0.identifier == name || $0.identifier(.alpha3) == name
+                || english.localizedString(forLanguageCode: $0.identifier)?.lowercased() == name)
+        }?.identifier
     }
 }
