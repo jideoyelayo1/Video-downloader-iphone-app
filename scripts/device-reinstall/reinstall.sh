@@ -18,7 +18,7 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 STATE="$SUPPORT/state"
 WORK="$SUPPORT/work"
 APP="$WORK/build/DerivedData/Build/Products/Debug-iphoneos/VideoDownloaderApp.app"
-BUNDLE_ID=com.jideoyelayo.VideoDownloaderApp
+BUNDLE_ID=com.jideoyelayo.VideoDownloader
 force=${1:-}
 
 log() { print -r -- "$(date '+%Y-%m-%d %H:%M:%S') $*" }

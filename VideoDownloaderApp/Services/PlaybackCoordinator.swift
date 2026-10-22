@@ -51,6 +51,18 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private var subtitlesButton: UIButton?
     /// Episode menu for videos in a show: next/previous, intro and credits marks.
     private var showButton: UIButton?
+    private var sleepTimerButton: UIButton?
+    enum SleepTimerOption: Equatable {
+        case minutes(Int)
+        case endOfVideo
+    }
+    private(set) var sleepTimerOption: SleepTimerOption?
+    private(set) var sleepTimerDeadline: Date?
+    private var sleepTimer: Timer?
+    private var sleepTimerForegroundObserver: NSObjectProtocol?
+    private var sleepTimerPlaybackObservation: NSKeyValueObservation?
+    /// Keeps a pending load or end notification from restarting playback after the timer fires.
+    private var sleepTimerHasExpired = false
     /// The column of buttons beside AVKit's controls, which shows and fades with them.
     private var sideControls: UIStackView?
     private var skipIntroButton: UIButton?
@@ -137,7 +149,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     /// Moves on to the next episode in the same player, so full screen or Picture in Picture carries on.
     func playNext(_ next: DownloadItem) {
-        guard let player = controller.player, let url = next.localURL, FileManager.default.fileExists(atPath: url.path) else { return }
+        guard sleepTimerTick(), let player = controller.player, let url = next.localURL, FileManager.default.fileExists(atPath: url.path) else { return }
         if episodeToDelete?.id == next.id { episodeToDelete = nil }
         resetItemState()
         let token = UUID()
@@ -192,6 +204,15 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
                 player.appliesMediaSelectionCriteriaAutomatically = false
             }
             controller.player = player
+            sleepTimerPlaybackObservation = player.observe(\.rate, options: [.new]) { [weak self] player, _ in
+                Task { @MainActor [weak self, weak player] in
+                    guard let self, let player, self.controller.player === player,
+                          player.rate > 0, self.sleepTimerHasExpired else { return }
+                    // Pressing Play after the timer paused is an explicit request to carry on.
+                    self.sleepTimerHasExpired = false
+                    self.refreshSleepTimerButton()
+                }
+            }
         }
         // The finished episode is out of the player now.
         deleteFinishedEpisode()
@@ -209,8 +230,13 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
         isLoading = false
         if position > 0 {
-            player.seek(to: CMTime(seconds: position, preferredTimescale: 600)) { _ in player.play() }
-        } else { player.play() }
+            player.seek(to: CMTime(seconds: position, preferredTimescale: 600)) { [weak self, weak player] finished in
+                Task { @MainActor [weak self, weak player] in
+                    guard let self, let player, finished, self.loadID == token, self.sleepTimerTick() else { return }
+                    player.play()
+                }
+            }
+        } else if sleepTimerTick() { player.play() }
         diagnostics.record(event: "playback", url: url.absoluteString, note: "Started; captions=\(captionNames.count)")
     }
 
@@ -359,11 +385,17 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     }
 
     /// Buttons AVKit has no place for, in a column beside its controls that appears and fades
-    /// with them: Subtitles for site subtitle files AVKit can't list, and an episode menu for
-    /// videos in a show.
+    /// with them: site subtitles, episode options, and a sleep timer for every saved video.
     private func installSideControls() {
         guard sideControls == nil else { return }
-        var buttons: [UIButton] = []
+        let timerButton = Self.sideButton(systemImage: "moon.zzz", identifier: "player.sleepTimer", label: "Sleep Timer")
+        timerButton.accessibilityHint = "Pause playback after a chosen time or at the end of this video."
+        timerButton.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+            MainActor.assumeIsolated { completion(self?.sleepTimerMenuElements() ?? []) }
+        }])
+        sleepTimerButton = timerButton
+        var buttons: [UIButton] = [timerButton]
+        refreshSleepTimerButton()
         if !siteSubtitles.isEmpty {
             let button = Self.sideButton(systemImage: "captions.bubble", identifier: "player.captions", label: "Subtitles")
             subtitlesButton = button
@@ -378,7 +410,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             showButton = button
             buttons.append(button)
         }
-        guard !buttons.isEmpty else { return }
         let stack = UIStackView(arrangedSubviews: buttons)
         stack.axis = .vertical
         stack.spacing = 12
@@ -424,6 +455,107 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         let target: CGFloat = avkitControlsVisible() == false ? 0 : 1
         guard sideControls.alpha != target else { return }
         UIView.animate(withDuration: 0.25) { sideControls.alpha = target }
+    }
+
+    // MARK: Sleep timer
+
+    /// The deadline belongs to the playback session, so changing episodes never restarts it.
+    /// Pausing, scrubbing and changing playback speed don't change the time remaining.
+    func setSleepTimer(_ option: SleepTimerOption?) {
+        if option != nil, item == nil { return }
+        if case .minutes(let minutes) = option, minutes <= 0 { return }
+        sleepTimer?.invalidate()
+        sleepTimer = nil
+        if let observer = sleepTimerForegroundObserver { NotificationCenter.default.removeObserver(observer) }
+        sleepTimerForegroundObserver = nil
+        sleepTimerOption = option
+        sleepTimerDeadline = nil
+        sleepTimerHasExpired = false
+        if case .minutes(let minutes) = option {
+            sleepTimerDeadline = Date().addingTimeInterval(TimeInterval(minutes) * 60)
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { _ = self?.sleepTimerTick() }
+            }
+            timer.tolerance = 0.1
+            RunLoop.main.add(timer, forMode: .common)
+            sleepTimer = timer
+            // Reconcile the deadline immediately after any period when iOS suspended the app.
+            sleepTimerForegroundObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { _ = self?.sleepTimerTick() }
+            }
+        } else if option == .endOfVideo {
+            hideUpNext()
+            if playbackEnded { expireSleepTimer() }
+        }
+        refreshSleepTimerButton()
+    }
+
+    /// Also checked before autoplay and after asynchronous loads, so a late callback cannot
+    /// play another episode once the deadline has passed, even before the next timer tick.
+    @discardableResult
+    func sleepTimerTick(at now: Date = Date()) -> Bool {
+        if let deadline = sleepTimerDeadline, now >= deadline { expireSleepTimer() }
+        refreshSleepTimerButton(at: now)
+        return !sleepTimerHasExpired
+    }
+
+    private func expireSleepTimer() {
+        setSleepTimer(nil)
+        sleepTimerHasExpired = true
+        controller.player?.pause()
+        hideUpNext()
+        // During a transition the old player item can still be loaded while `item` is the next
+        // episode, so don't save the old episode's position into the new one.
+        if !isLoading { savePosition() }
+        refreshSleepTimerButton()
+        diagnostics.record(event: "playback", url: item?.localURL?.absoluteString ?? "app://player", note: "Sleep timer paused playback")
+    }
+
+    private func sleepTimerMenuElements() -> [UIMenuElement] {
+        var choices: [UIMenuElement] = [10, 15, 20, 30, 45, 60].map { minutes in
+            UIAction(title: "\(minutes) minutes", state: sleepTimerOption == .minutes(minutes) ? .on : .off) { [weak self] _ in
+                self?.setSleepTimer(.minutes(minutes))
+            }
+        }
+        choices.append(UIAction(title: "End of video", state: sleepTimerOption == .endOfVideo ? .on : .off) { [weak self] _ in
+            self?.setSleepTimer(.endOfVideo)
+        })
+        if sleepTimerOption != nil {
+            choices.append(UIAction(title: "Turn Off Timer", image: UIImage(systemName: "xmark.circle")) { [weak self] _ in
+                self?.setSleepTimer(nil)
+            })
+        }
+        return [UIMenu(title: "Sleep Timer", options: .displayInline, children: choices)]
+    }
+
+    private func refreshSleepTimerButton(at now: Date = Date()) {
+        guard let button = sleepTimerButton else { return }
+        let status: String
+        if let deadline = sleepTimerDeadline {
+            let seconds = max(0, Int(ceil(deadline.timeIntervalSince(now))))
+            status = seconds >= 3600
+                ? String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+                : String(format: "%d:%02d", seconds / 60, seconds % 60)
+        } else if sleepTimerOption == .endOfVideo {
+            status = "End"
+        } else {
+            status = sleepTimerHasExpired ? "Paused" : "Off"
+        }
+        let subtitle = sleepTimerOption != nil || sleepTimerHasExpired ? status : nil
+        if var configuration = button.configuration, configuration.subtitle != subtitle {
+            configuration.subtitle = subtitle
+            configuration.imagePlacement = .top
+            configuration.imagePadding = 2
+            configuration.subtitleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+                var attributes = attributes
+                attributes.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+                return attributes
+            }
+            button.configuration = configuration
+        }
+        button.accessibilityValue = sleepTimerOption == .endOfVideo ? "End of video" : status
     }
 
     // MARK: Shows: episodes, intro and credits, speed
@@ -594,7 +726,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// Plays the next (1) or previous (-1) episode of the current show in the same player.
     @discardableResult
     func playEpisode(_ offset: Int) -> Bool {
-        guard let item, let episode = shows?.episode(offset, from: item) else { return false }
+        guard sleepTimerTick(), let item, let episode = shows?.episode(offset, from: item) else { return false }
         playNext(episode)
         return true
     }
@@ -706,6 +838,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         let wasInPiP = isInPiP
         let presented = presentsPlayer && controller.presentingViewController != nil
         loadID = UUID()
+        setSleepTimer(nil)
+        sleepTimerPlaybackObservation = nil
         let finished = savePosition(closing: true) || playbackEnded || reachedCredits
         if finished, let item, item.id != kept?.id { closedFinished(item, presented: presented) }
         resetItemState()
@@ -754,6 +888,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         cachedShow = nil
         subtitlesButton = nil
         showButton = nil
+        sleepTimerButton = nil
         setSkipIntroVisible(false)
         reachedCredits = false
         skippedIntroAutomatically = false
@@ -803,6 +938,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         playbackEnded = true
         item?.setWatched(true)
         try? context.save()
+        if sleepTimerOption == .endOfVideo { expireSleepTimer() }
         if let item { episodeFinished(item, atCredits: false) }
     }
 
@@ -811,9 +947,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// The end of an episode, or the start of its marked credits. The Delete Finished Episodes
     /// setting deletes it, or (Ask First) puts a tick box on the end card beside Next Episode.
     private func episodeFinished(_ item: DownloadItem, atCredits: Bool) {
+        guard sleepTimerTick() else { return }
         // Nothing can be shown in Picture in Picture or the background.
         let onScreen = presentsPlayer && !isInPiP && UIApplication.shared.applicationState == .active
-        let next = shows?.autoplayNext(after: item)
+        let next = sleepTimerOption == .endOfVideo ? nil : shows?.autoplayNext(after: item)
         var offer: DownloadItem?
         switch finishedEpisodeSetting(for: item) {
         case .delete:
@@ -898,6 +1035,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     }
 
     private func tickUpNext() {
+        guard sleepTimerTick() else { return }
         upNextCountdown -= 1
         if upNextCountdown <= 0, let next = upNextItem { playNext(next) } else { updateUpNextCountdown(); animateFill() }
     }

@@ -417,6 +417,131 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertTrue(try exists(first))
     }
 
+    func testSleepTimerPausesAMovieAndKeepsItsResumePosition() async throws {
+        let coordinator = makeCoordinator()
+        defer { coordinator.close() }
+        let item = makeItem(in: container.mainContext)
+        coordinator.open(item, at: 0)
+        try await waitUntil("movie ready") { coordinator.controller.player != nil && !coordinator.isLoading }
+        let player = try XCTUnwrap(coordinator.controller.player)
+        player.pause()
+        await player.seek(to: CMTime(seconds: 2, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        coordinator.setSleepTimer(.minutes(10))
+        let deadline = try XCTUnwrap(coordinator.sleepTimerDeadline)
+        player.play()
+
+        XCTAssertFalse(coordinator.sleepTimerTick(at: deadline))
+        XCTAssertEqual(player.rate, 0)
+        XCTAssertTrue(coordinator.controller.player === player, "the movie stays open for resuming")
+        XCTAssertEqual(try XCTUnwrap(item.playbackPosition), 2, accuracy: 0.3)
+        XCTAssertFalse(item.isWatched, "a sleep timer doesn't mark an unfinished movie watched")
+        XCTAssertNil(coordinator.sleepTimerOption)
+        XCTAssertNil(coordinator.sleepTimerDeadline)
+
+        // Play explicitly resumes playback after sleeping; normal controls work again.
+        player.play()
+        try await waitUntil("resumed") { coordinator.sleepTimerTick() }
+        XCTAssertGreaterThan(player.rate, 0)
+    }
+
+    func testSleepTimerCarriesAcrossAutoplayAndStopsFurtherEpisodesInPiP() async throws {
+        let coordinator = makeCoordinator()
+        defer { coordinator.close() }
+        let (shows, show, first, second) = try makeShow(deleting: .keep, for: coordinator)
+        let third = try makeEpisode(3)
+        shows.add([third], to: show)
+        coordinator.open(first, at: 0)
+        try await waitUntil("first episode ready") { coordinator.controller.player != nil && !coordinator.isLoading }
+        let player = try XCTUnwrap(coordinator.controller.player)
+        coordinator.setSleepTimer(.minutes(10))
+        let deadline = try XCTUnwrap(coordinator.sleepTimerDeadline)
+        coordinator.playerViewControllerDidStartPictureInPicture(coordinator.controller)
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: player.currentItem)
+        try await waitUntil("autoplay started episode 2") { coordinator.title == second.displayTitle && !coordinator.isLoading }
+        XCTAssertEqual(coordinator.sleepTimerDeadline, deadline, "autoplay must not restart the countdown")
+        XCTAssertTrue(coordinator.controller.player === player)
+        XCTAssertNotNil(second.lastPlayedAt)
+
+        XCTAssertFalse(coordinator.sleepTimerTick(at: deadline))
+        XCTAssertEqual(player.rate, 0)
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: player.currentItem)
+        XCTAssertEqual(coordinator.title, second.displayTitle)
+        XCTAssertNil(third.lastPlayedAt, "a queued end notification cannot autoplay past the timer")
+        XCTAssertFalse(coordinator.isShowingUpNext)
+    }
+
+    func testSleepTimerCanBeChangedCancelledAndClearsWhenClosing() async throws {
+        let coordinator = makeCoordinator()
+        defer { coordinator.close() }
+        let item = makeItem(in: container.mainContext)
+        coordinator.open(item, at: 0)
+        try await waitUntil("ready") { coordinator.controller.player != nil && !coordinator.isLoading }
+        let player = try XCTUnwrap(coordinator.controller.player)
+        player.pause()
+        coordinator.setSleepTimer(.minutes(10))
+        let firstDeadline = try XCTUnwrap(coordinator.sleepTimerDeadline)
+        coordinator.setSleepTimer(.minutes(30))
+        XCTAssertTrue(coordinator.sleepTimerTick(at: firstDeadline))
+        XCTAssertEqual(coordinator.sleepTimerOption, .minutes(30))
+        XCTAssertGreaterThan(try XCTUnwrap(coordinator.sleepTimerDeadline), firstDeadline)
+        let laterDeadline = try XCTUnwrap(coordinator.sleepTimerDeadline)
+
+        coordinator.setSleepTimer(nil)
+        XCTAssertTrue(coordinator.sleepTimerTick(at: laterDeadline))
+        XCTAssertNil(coordinator.sleepTimerDeadline)
+        XCTAssertNil(coordinator.sleepTimerOption)
+        XCTAssertEqual(player.rate, 0, "turning off the timer doesn't start a paused video")
+        coordinator.setSleepTimer(.endOfVideo)
+        coordinator.close()
+        XCTAssertNil(coordinator.sleepTimerOption)
+        coordinator.open(item, at: 0)
+        try await waitUntil("reopened") { coordinator.controller.player != nil && !coordinator.isLoading }
+        XCTAssertNil(coordinator.sleepTimerOption)
+        XCTAssertTrue(coordinator.sleepTimerTick(at: laterDeadline))
+    }
+
+    func testEndOfVideoSleepTimerPlaysThroughCreditsWithoutAutoplay() async throws {
+        let coordinator = makeCoordinator()
+        defer { coordinator.close() }
+        let (_, show, first, second) = try makeShow(deleting: .keep, for: coordinator)
+        show.creditsFromEnd = 1
+        coordinator.open(first, at: 0)
+        try await waitUntil("ready") { coordinator.controller.player != nil && !coordinator.isLoading }
+        let player = try XCTUnwrap(coordinator.controller.player)
+        coordinator.setSleepTimer(.minutes(10))
+        coordinator.setSleepTimer(.endOfVideo)
+        XCTAssertNil(coordinator.sleepTimerDeadline, "End of video replaces an elapsed-time timer")
+        coordinator.showPlaybackTick(at: 4.2)
+        XCTAssertEqual(coordinator.sleepTimerOption, .endOfVideo, "the timer waits for the actual end, beyond marked credits")
+        XCTAssertNil(second.lastPlayedAt)
+        XCTAssertFalse(coordinator.isShowingUpNext)
+
+        NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: player.currentItem)
+        XCTAssertFalse(coordinator.sleepTimerTick())
+        XCTAssertEqual(player.rate, 0)
+        XCTAssertEqual(coordinator.title, first.displayTitle)
+        XCTAssertTrue(first.isWatched)
+        XCTAssertNil(second.lastPlayedAt)
+    }
+
+    func testSleepTimerExpiringDuringEpisodeLoadPreventsPlaybackStarting() async throws {
+        let coordinator = makeCoordinator()
+        defer { coordinator.close() }
+        let (_, _, first, second) = try makeShow(deleting: .keep, for: coordinator)
+        coordinator.open(first, at: 0)
+        try await waitUntil("ready") { coordinator.controller.player != nil && !coordinator.isLoading }
+        let player = try XCTUnwrap(coordinator.controller.player)
+        coordinator.setSleepTimer(.minutes(10))
+        let deadline = try XCTUnwrap(coordinator.sleepTimerDeadline)
+        coordinator.playNext(second)
+        XCTAssertTrue(coordinator.isLoading)
+        XCTAssertFalse(coordinator.sleepTimerTick(at: deadline))
+        try await waitUntil("next episode loaded") { !coordinator.isLoading }
+        XCTAssertEqual(coordinator.title, second.displayTitle)
+        XCTAssertEqual(player.rate, 0, "a pending load must not restart playback after sleep")
+        XCTAssertFalse(coordinator.sleepTimerTick())
+    }
+
     func testIntroIsSkippedCreditsCountAsWatchedAndSpeedIsKept() async throws {
         let coordinator = makeCoordinator()
         let shows = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "PlaybackCoordinatorTests-\(UUID().uuidString)")!)

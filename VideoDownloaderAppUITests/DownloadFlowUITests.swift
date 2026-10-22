@@ -489,6 +489,47 @@ final class DownloadFlowUITests: XCTestCase {
         wait(for: episodes.element(boundBy: 0), "label CONTAINS 'Ep. 1'", timeout: 5, episodes.element(boundBy: 0).label)
     }
 
+    func testSleepTimerMenuShowsCountdownChangesAndCancels() throws {
+        launch(at: "/page/long.html")
+        downloadFirstCandidate()
+        app.tabBars.buttons["My Videos"].tap()
+        app.buttons["library.item"].firstMatch.tap()
+        XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
+        // Paused playback keeps AVKit's controls visible while we inspect their values.
+        // The sleep countdown must still advance while the video is paused.
+        tapPlayerControl(app.buttons["Pause"], opening: app.buttons["Play"])
+        let timer = app.buttons["player.sleepTimer"]
+        XCTAssertTrue(timer.waitForExistence(timeout: 5))
+        XCTAssertEqual(timer.value as? String, "Off")
+        tapPlayerControl(timer, opening: app.buttons["10 minutes"])
+        for minutes in [10, 15, 20, 30, 45, 60] {
+            XCTAssertTrue(app.buttons["\(minutes) minutes"].exists)
+        }
+        XCTAssertTrue(app.buttons["End of video"].exists)
+        app.buttons["10 minutes"].tap()
+        wait(for: timer, "value MATCHES '9:[0-5][0-9]'", timeout: 5)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Sleep timer countdown"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        tapPlayerControl(timer, opening: app.buttons["20 minutes"])
+        app.buttons["20 minutes"].tap()
+        wait(for: timer, "value MATCHES '19:[0-5][0-9]'", timeout: 5)
+        tapPlayerControl(timer, opening: app.buttons["Turn Off Timer"])
+        app.buttons["Turn Off Timer"].tap()
+        XCTAssertEqual(timer.value as? String, "Off")
+
+        tapPlayerControl(timer, opening: app.buttons["End of video"])
+        app.buttons["End of video"].tap()
+        XCTAssertEqual(timer.value as? String, "End of video")
+        closePlayer()
+        app.buttons["library.item"].firstMatch.tap()
+        XCTAssertTrue(timer.waitForExistence(timeout: 10))
+        XCTAssertEqual(timer.value as? String, "Off", "closing clears the session's sleep timer")
+        closePlayer()
+    }
+
     func testShowPlaysTheNextEpisodeAfterACountdown() throws {
         makeTwoEpisodeShow()
         app.buttons["library.show"].firstMatch.tap()

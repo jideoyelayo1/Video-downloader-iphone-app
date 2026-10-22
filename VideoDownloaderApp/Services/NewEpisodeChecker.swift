@@ -8,7 +8,7 @@ import UserNotifications
 /// background refresh, which iOS schedules as it sees fit.
 @MainActor
 final class NewEpisodeChecker {
-    static let backgroundTaskID = "com.jideoyelayo.VideoDownloaderApp.newEpisodes"
+    static let backgroundTaskID = "com.jideoyelayo.VideoDownloader.newEpisodes"
     private static let notifiedKey = "notifiedEpisodePages"
 
     private let shows: ShowStore
