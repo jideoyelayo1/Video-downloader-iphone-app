@@ -52,6 +52,9 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// Episode menu for videos in a show: next/previous, intro and credits marks.
     private var showButton: UIButton?
     private var sleepTimerButton: UIButton?
+    /// Set while the screen lock takes every touch; it stays on from one episode to the next.
+    private var lockWindow: PlayerLockWindow?
+    var isScreenLocked: Bool { lockWindow != nil }
     enum SleepTimerOption: Equatable {
         case minutes(Int)
         case endOfVideo
@@ -394,6 +397,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             MainActor.assumeIsolated { completion(self?.sleepTimerMenuElements() ?? []) }
         }])
         sleepTimerButton = timerButton
+        let lockButton = Self.sideButton(systemImage: "lock", identifier: "player.lock", label: "Lock Screen")
+        lockButton.accessibilityHint = "Ignores touches so the video keeps playing, in the shower say. Tap the lock twice to unlock."
+        lockButton.showsMenuAsPrimaryAction = false
+        lockButton.addAction(UIAction { [weak self] _ in self?.lockScreen() }, for: .primaryActionTriggered)
         var buttons: [UIButton] = [timerButton]
         refreshSleepTimerButton()
         if !siteSubtitles.isEmpty {
@@ -410,6 +417,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             showButton = button
             buttons.append(button)
         }
+        buttons.append(lockButton)
         let stack = UIStackView(arrangedSubviews: buttons)
         stack.axis = .vertical
         stack.spacing = 12
@@ -429,14 +437,11 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     }
 
     private static func sideButton(systemImage: String, identifier: String, label: String) -> UIButton {
-        var configuration: UIButton.Configuration
-        if #available(iOS 26.0, *) {
-            configuration = .glass()
-        } else {
-            configuration = .filled()
-            configuration.baseBackgroundColor = UIColor(white: 0.12, alpha: 0.72)
-            configuration.cornerStyle = .capsule
-        }
+        // Not .glass(): with three glass buttons beside AVKit's own glass controls, AVKit's Close
+        // button stopped working once a second video was opened (iOS 26.5 simulator).
+        var configuration = UIButton.Configuration.filled()
+        configuration.baseBackgroundColor = UIColor(white: 0.12, alpha: 0.72)
+        configuration.cornerStyle = .capsule
         configuration.image = UIImage(systemName: systemImage)
         configuration.baseForegroundColor = .white
         let button = UIButton(configuration: configuration)
@@ -452,9 +457,28 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     private func matchAVKitControls() {
         guard let sideControls else { return }
-        let target: CGFloat = avkitControlsVisible() == false ? 0 : 1
+        let target: CGFloat = isScreenLocked || avkitControlsVisible() == false ? 0 : 1
         guard sideControls.alpha != target else { return }
         UIView.animate(withDuration: 0.25) { sideControls.alpha = target }
+    }
+
+    // MARK: Screen lock
+
+    func lockScreen() {
+        guard lockWindow == nil, let scene = controller.view.window?.windowScene else { return }
+        // Hidden at once, as in Netflix, rather than when AVKit next fades them.
+        controller.showsPlaybackControls = false
+        lockWindow = PlayerLockWindow(scene: scene) { [weak self] in self?.unlockScreen() }
+        matchAVKitControls()
+        diagnostics.record(event: "playback", url: item?.localURL?.absoluteString ?? "app://player", note: "Screen locked")
+    }
+
+    func unlockScreen() {
+        guard let lockWindow else { return }
+        lockWindow.remove()
+        self.lockWindow = nil
+        controller.showsPlaybackControls = true
+        diagnostics.record(event: "playback", url: item?.localURL?.absoluteString ?? "app://player", note: "Screen unlocked")
     }
 
     // MARK: Sleep timer
@@ -838,6 +862,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         let wasInPiP = isInPiP
         let presented = presentsPlayer && controller.presentingViewController != nil
         loadID = UUID()
+        unlockScreen()
         setSleepTimer(nil)
         sleepTimerPlaybackObservation = nil
         let finished = savePosition(closing: true) || playbackEnded || reachedCredits
@@ -1220,6 +1245,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
         pictureInPictureStarting = true
+        // The lock would cover the rest of the app, not the Picture in Picture window.
+        unlockScreen()
         // The end card can't show in Picture in Picture: the next episode starts, and the tick box stands.
         if let next = upNextItem { playNext(next) } else { hideUpNext() }
     }

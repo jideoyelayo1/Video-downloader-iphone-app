@@ -249,9 +249,10 @@ final class LocalMediaServer {
             if request.path.hasPrefix("/page/"), let html = Self.pages[String(request.path.dropFirst(6))] {
                 return .text(html, "text/html; charset=utf-8")
             }
-            // A three-episode series with numbered pages, for season downloads; episode 4 isn't out.
+            // A three-episode series with numbered pages, for season downloads. Episode 4 isn't
+            // out: like ***REMOVED***, the site sends its page to episode 1.
             if let number = Self.seriesEpisode(request.path) {
-                guard (1...3).contains(number) else { return .text(Self.page("Not Found", "<p>No such episode</p>"), "text/html", status: 404) }
+                guard (1...3).contains(number) else { return .redirect(origin + "series/ep-1.html") }
                 return .text(Self.page("Fixture Series Ep. \(number)", #"<video src="/series/video-\#(number).mp4" controls playsinline width="320" height="180"></video>"#),
                              "text/html; charset=utf-8")
             }

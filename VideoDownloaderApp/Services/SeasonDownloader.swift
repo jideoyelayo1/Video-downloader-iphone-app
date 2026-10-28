@@ -17,6 +17,8 @@ final class SeasonDownloader: ObservableObject {
     var diagnostics: DiagnosticsLog?
     /// How long a page may take to offer a ready video.
     var pageTimeout: TimeInterval = 30
+    /// Smaller videos are a player's ads, not the episode (My***REMOVED*** showed 0.3 and 1.4 MB ones).
+    var minimumEpisodeBytes: Int64 = 5_000_000
     private var task: Task<Void, Never>?
 
     init(downloads: DownloadManager, shows: ShowStore) {
@@ -122,13 +124,15 @@ final class SeasonDownloader: ObservableObject {
         while Date() < deadline, !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(250))
             if Self.isVerificationPage(title: model.pageTitle) { return .verification }
-            if model.bestReady != nil {
+            if model.bestReady(atLeast: minimumEpisodeBytes) != nil {
                 readySince = readySince ?? Date()
                 // Give the page a moment to offer a master playlist beside its first stream.
                 if !model.isChecking || Date().timeIntervalSince(readySince!) > 4 { break }
             }
         }
-        guard let best = model.bestReady else { return .noVideo }
+        guard let best = model.bestReady(atLeast: minimumEpisodeBytes) else { return .noVideo }
+        // A site can send an episode that isn't out to another one: ***REMOVED*** opens episode 1.
+        if let wanted = EpisodeURL.number(in: page), EpisodeURL.number(in: best.candidate.sourcePageURL) != wanted { return .noVideo }
         return .found(best.candidate, best.probe, model.subtitleTracks, title: model.pageTitle, poster: model.posterURL)
     }
 

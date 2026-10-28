@@ -252,6 +252,8 @@ final class Show {
     var notifyNewEpisodesRaw: Bool?
     var autoDownloadNewEpisodesRaw: Bool?
     var lastCheckedAt: Date?
+    /// The last check stopped at the site's "verify you're human" page; nil otherwise.
+    var lastCheckNeededVerification: Bool?
     /// When the most recently played of its deleted, watched episodes was played, so Continue
     /// Watching still offers the episode after it.
     var deletedEpisodePlayedAt: Date?

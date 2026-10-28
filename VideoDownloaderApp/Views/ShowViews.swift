@@ -334,6 +334,9 @@ struct ShowScreen: View {
             return "Works for sites whose episode pages are numbered, such as ***REMOVED*** and ***REMOVED***."
         }
         let checked = show.lastCheckedAt.map { " Last checked " + $0.formatted(.relative(presentation: .named)) + "." } ?? ""
+        if show.lastCheckNeededVerification == true {
+            return "\(page.host ?? "The site") asked to check you're human, so the next episode couldn't be looked for. Open the show's page in Browse, then tap Check Now." + checked
+        }
         return "Checks \(page.host ?? "the site") for the next episode when you open the app, and in the background now and then." + checked
     }
 

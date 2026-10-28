@@ -47,6 +47,7 @@ final class SeasonDownloaderTests: XCTestCase {
         container.mainContext.insert(saved)
         let downloader = SeasonDownloader(downloads: manager, shows: shows)
         downloader.pageTimeout = 15
+        downloader.minimumEpisodeBytes = 0
         downloader.start(after: server.url("/series/ep-1.html"), count: 2)
         let deadline = Date().addingTimeInterval(60)
         while downloader.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(200)) }
@@ -71,6 +72,7 @@ final class SeasonDownloaderTests: XCTestCase {
         manager.showStore = shows
         let downloader = SeasonDownloader(downloads: manager, shows: shows)
         downloader.pageTimeout = 15
+        downloader.minimumEpisodeBytes = 0
 
         downloader.start(after: server.url("/series/ep-1.html"), count: 3)
         let deadline = Date().addingTimeInterval(60)
@@ -83,5 +85,27 @@ final class SeasonDownloaderTests: XCTestCase {
         while items.contains(where: \.isActive), Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
         XCTAssertTrue(items.allSatisfy { $0.status == .completed }, items.map { $0.errorMessage ?? "" }.joined(separator: "; "))
         for item in items { manager.delete(item) }
+    }
+
+    /// An ad in the player isn't the episode, and an episode that isn't out isn't found on the
+    /// page the site sends it to instead (***REMOVED*** opens episode 1).
+    func testAdsAndRedirectedPagesAreNotTheEpisode() async throws {
+        let server = try LocalMediaServer()
+        try server.start()
+        defer { server.stop() }
+        let container = try LibrarySchema.container(inMemory: true)
+        let manager = DownloadManager(context: container.mainContext, directConfiguration: .ephemeral, restore: false)
+        let shows = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "SeasonDownloaderTests-\(UUID().uuidString)")!)
+        let downloader = SeasonDownloader(downloads: manager, shows: shows)
+        downloader.pageTimeout = 5
+
+        let adSized = await downloader.findVideo(on: server.url("/series/ep-2.html"))
+        XCTAssertEqual(adSized, .noVideo, "the fixture's 230 KB video is the size of an ad")
+        downloader.minimumEpisodeBytes = 0
+        let episode3 = await downloader.findVideo(on: server.url("/series/ep-3.html"))
+        guard case .found(let candidate, _, _, _, _) = episode3 else { return XCTFail("episode 3: \(episode3)") }
+        XCTAssertEqual(candidate.url.lastPathComponent, "video-3.mp4")
+        let redirected = await downloader.findVideo(on: server.url("/series/ep-4.html"))
+        XCTAssertEqual(redirected, .noVideo, "episode 4's page opens episode 1")
     }
 }

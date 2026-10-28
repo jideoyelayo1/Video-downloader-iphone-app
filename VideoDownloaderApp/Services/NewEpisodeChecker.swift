@@ -61,9 +61,11 @@ final class NewEpisodeChecker {
         // A background refresh that iOS cut short didn't really look: check again next time.
         guard !Task.isCancelled else { return false }
         show.lastCheckedAt = now
+        show.lastCheckNeededVerification = result == .verification ? true : nil
         shows.save()
         guard case .found = result else {
-            diagnostics?.record(event: "new-episode", url: next.absoluteString, note: "\(show.title): not out yet")
+            let outcome = result == .verification ? "the site wants verification in Browse" : "not out yet"
+            diagnostics?.record(event: "new-episode", url: next.absoluteString, note: "\(show.title): \(outcome)")
             return false
         }
         var notified = Set(preferences.stringArray(forKey: Self.notifiedKey) ?? [])

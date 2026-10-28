@@ -81,9 +81,10 @@ final class NewEpisodeCheckerTests: XCTestCase {
         show.notifyNewEpisodes = true
         let second = episode(2)
         var looked: [String] = []
+        var result = SeasonDownloader.PageResult.noVideo
         let checker = NewEpisodeChecker(shows: shows, downloads: manager, preferences: preferences, find: { url in
             looked.append(url.lastPathComponent)
-            return .noVideo
+            return result
         }, download: { _ in nil }, notify: { _, _ in XCTFail("nothing new to announce") })
 
         _ = await checker.checkFollowedShows()
@@ -99,5 +100,14 @@ final class NewEpisodeCheckerTests: XCTestCase {
         _ = await checker.checkFollowedShows(force: true)
         XCTAssertEqual(looked.last, "ep-3")
         XCTAssertNotNil(show.lastCheckedAt)
+        XCTAssertNil(show.lastCheckNeededVerification)
+
+        // A site's Cloudflare page isn't "not out yet": the show says the site wants verifying.
+        result = .verification
+        _ = await checker.checkFollowedShows(force: true)
+        XCTAssertEqual(show.lastCheckNeededVerification, true)
+        result = .noVideo
+        _ = await checker.checkFollowedShows(force: true)
+        XCTAssertNil(show.lastCheckNeededVerification, "cleared once the site lets the check through")
     }
 }

@@ -127,9 +127,10 @@ final class BrowserViewModel: ObservableObject {
     var isChecking: Bool { candidates.contains { statuses[$0.id] == nil || statuses[$0.id] == .checking } }
 
     /// The video Found videos lists first: a master playlist, else the longest, then largest.
-    var bestReady: (candidate: MediaCandidate, probe: ProbeResult)? {
+    /// Videos known to be smaller than `minimumBytes` are left out.
+    func bestReady(atLeast minimumBytes: Int64) -> (candidate: MediaCandidate, probe: ProbeResult)? {
         let ready = candidates.compactMap { candidate -> (MediaCandidate, ProbeResult)? in
-            if case .ready(let probe)? = statuses[candidate.id] { return (candidate, probe) }
+            if case .ready(let probe)? = statuses[candidate.id], (probe.expectedBytes ?? .max) >= minimumBytes { return (candidate, probe) }
             return nil
         }
         return ready.max { a, b in

@@ -75,6 +75,8 @@ final class AppServices {
         downloads.showStore = shows
         seasons = SeasonDownloader(downloads: downloads, shows: shows)
         seasons.diagnostics = diagnostics
+        // The UI tests' episode videos are a few hundred KB.
+        if inMemory { seasons.minimumEpisodeBytes = 0 }
         newEpisodes = NewEpisodeChecker(shows: shows, downloads: downloads, preferences: preferences,
                                         find: { [seasons] url in await seasons.findVideo(on: url) },
                                         download: { [seasons] result in seasons.download(result) })

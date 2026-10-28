@@ -530,6 +530,35 @@ final class DownloadFlowUITests: XCTestCase {
         closePlayer()
     }
 
+    /// Locked, taps where AVKit's controls and Pause sit reach nothing, and the video plays on;
+    /// two taps on the lock unlock it.
+    func testScreenLockIgnoresTouchesUntilUnlockedTwice() throws {
+        launch(at: "/page/long.html")
+        downloadFirstCandidate()
+        app.tabBars.buttons["My Videos"].tap()
+        app.buttons["library.item"].firstMatch.tap()
+        let video = app.otherElements["player.video"]
+        XCTAssertTrue(video.waitForExistence(timeout: 10))
+        let unlock = app.buttons["player.unlock"]
+        tapPlayerControl(app.buttons["player.lock"], opening: unlock)
+        XCTAssertNil(shownFrame(of: app.buttons["Close"]), "locking hides AVKit's controls")
+        for _ in 0..<3 { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+        XCTAssertNil(shownFrame(of: app.buttons["Close"]), "taps don't bring AVKit's controls back")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Screen locked"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        unlock.tap()
+        XCTAssertTrue(unlock.label.contains("Tap Again"), unlock.label)
+        unlock.tap()
+        XCTAssertTrue(unlock.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(video.exists, "the player stayed open")
+        revealPlayerControls()
+        XCTAssertTrue(app.buttons["Pause"].exists, "still playing: the locked taps didn't pause it")
+        closePlayer()
+    }
+
     func testShowPlaysTheNextEpisodeAfterACountdown() throws {
         makeTwoEpisodeShow()
         app.buttons["library.show"].firstMatch.tap()
