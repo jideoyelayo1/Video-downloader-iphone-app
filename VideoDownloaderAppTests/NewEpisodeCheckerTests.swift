@@ -64,6 +64,49 @@ final class NewEpisodeCheckerTests: XCTestCase {
         for item in episodes where item.id != first.id { manager.delete(item) }
     }
 
+    func testShowsCheckedLongestAgoGoFirstAndCatchUpOnSeveralEpisodes() async throws {
+        let container = try LibrarySchema.container(inMemory: true)
+        let context = container.mainContext
+        let suite = "NewEpisodeCheckerTests-\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let manager = DownloadManager(context: context, directConfiguration: .ephemeral, restore: false)
+        let shows = ShowStore(context: context, preferences: preferences)
+        let now = Date()
+        for (name, hoursAgo) in [("recent", 7.0), ("stale", 48.0)] {
+            let first = DownloadItem(title: "\(name) Ep. 1", remoteURL: URL(string: "https://cdn.example/\(name)/1.mp4")!,
+                                     sourcePageURL: URL(string: "https://site.example/\(name)/ep-1.html")!, kind: .video, status: .completed)
+            context.insert(first)
+            let show = shows.create(title: name, with: [first])
+            show.autoDownloadNewEpisodes = true
+            show.lastCheckedAt = now.addingTimeInterval(-hoursAgo * 3600)
+        }
+        var looked: [String] = []
+        let out: Set<String> = ["/stale/ep-2.html", "/stale/ep-3.html"]
+        let checker = NewEpisodeChecker(shows: shows, downloads: manager, preferences: preferences, find: { url in
+            looked.append(url.path)
+            guard out.contains(url.path) else { return .noVideo }
+            return .found(MediaCandidate(url: url.appendingPathExtension("mp4"), sourcePageURL: url, title: "x", kind: .video),
+                          ProbeResult(kind: .video, expectedBytes: 1), [], title: url.path)
+        }, download: { result in
+            guard case .found(let candidate, _, _, let title, _) = result else { return nil }
+            let item = DownloadItem(title: title, remoteURL: candidate.url, sourcePageURL: candidate.sourcePageURL, kind: .video, status: .completed)
+            context.insert(item)
+            return item
+        }, notify: { _, _ in })
+
+        let found = await checker.checkFollowedShows(now: now)
+        XCTAssertEqual(found, 2)
+        XCTAssertEqual(looked, ["/stale/ep-2.html", "/stale/ep-3.html", "/stale/ep-4.html", "/recent/ep-2.html"])
+    }
+
+    func testTheNotificationOnlySaysDownloadingWhenItStarted() {
+        XCTAssertEqual(NewEpisodeChecker.notificationBody(autoDownload: true, started: true), "It's downloading now.")
+        XCTAssertFalse(NewEpisodeChecker.notificationBody(autoDownload: true, started: false).contains("downloading now"),
+                       "a download refused for lack of storage isn't downloading")
+        XCTAssertTrue(NewEpisodeChecker.notificationBody(autoDownload: false, started: false).contains("Browse"))
+    }
+
     func testAnInterruptedCheckIsNotCountedAndSavedEpisodesAreFollowedOn() async throws {
         let container = try LibrarySchema.container(inMemory: true)
         let suite = "NewEpisodeCheckerTests-\(UUID().uuidString)"

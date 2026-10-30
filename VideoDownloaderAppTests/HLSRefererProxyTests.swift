@@ -26,7 +26,7 @@ final class HLSRefererProxyTests: XCTestCase {
 
         let proxy = try HLSRefererProxy(context: context)
         defer { proxy.stop() }
-        let localMaster = try proxy.start(for: candidate.url)
+        let localMaster = try await proxy.start(for: candidate.url)
         let (masterData, masterResponse) = try await URLSession.shared.data(from: localMaster)
         XCTAssertEqual((masterResponse as? HTTPURLResponse)?.statusCode, 200)
         let master = String(decoding: masterData, as: UTF8.self)
@@ -71,7 +71,7 @@ final class HLSRefererProxyTests: XCTestCase {
         let context = RequestContext(cookies: [], userAgent: "RelayFixture/1", referer: server.url("/page/basic.html"))
         let proxy = try HLSRefererProxy(context: context)
         defer { proxy.stop() }
-        let url = try proxy.start(for: server.url("/hls/referer-master.m3u8"))
+        let url = try await proxy.start(for: server.url("/hls/referer-master.m3u8"))
         let asset = AVURLAsset(url: url)
         let playable = try await asset.load(.isPlayable)
         let duration = try await asset.load(.duration)
@@ -84,7 +84,7 @@ final class HLSRefererProxyTests: XCTestCase {
         let context = RequestContext(cookies: [], userAgent: "RelayFixture/1", referer: server.url("/page/basic.html"))
         let proxy = try HLSRefererProxy(context: context)
         defer { proxy.stop() }
-        let localMaster = try proxy.start(for: server.url("/hls/separate-audio-master.m3u8"))
+        let localMaster = try await proxy.start(for: server.url("/hls/separate-audio-master.m3u8"))
         let (masterData, _) = try await URLSession.shared.data(from: localMaster)
         let master = String(decoding: masterData, as: UTF8.self)
         let audioLine = try XCTUnwrap(master.components(separatedBy: .newlines).first { $0.hasPrefix("#EXT-X-MEDIA:TYPE=AUDIO") })
@@ -103,7 +103,7 @@ final class HLSRefererProxyTests: XCTestCase {
         let context = RequestContext(cookies: [], userAgent: "RelayFixture/1", referer: server.url("/page/basic.html"))
         let proxy = try HLSRefererProxy(context: context)
         defer { proxy.stop() }
-        let localMaster = try proxy.start(for: server.url("/hls/separate-audio-master.m3u8"))
+        let localMaster = try await proxy.start(for: server.url("/hls/separate-audio-master.m3u8"))
         let (first, _) = try await URLSession.shared.data(from: localMaster)
         let (second, _) = try await URLSession.shared.data(from: localMaster)
         XCTAssertFalse(first.isEmpty)
@@ -115,7 +115,7 @@ final class HLSRefererProxyTests: XCTestCase {
         do {
             let context = RequestContext(cookies: [], userAgent: "RelayFixture/1", referer: server.url("/page/basic.html"))
             let proxy = try HLSRefererProxy(context: context)
-            let local = try proxy.start(for: server.url("/hls/separate-audio-master.m3u8"))
+            let local = try await proxy.start(for: server.url("/hls/separate-audio-master.m3u8"))
             _ = try await URLSession.shared.data(from: local)
             proxy.stop()
             weakProxy = proxy

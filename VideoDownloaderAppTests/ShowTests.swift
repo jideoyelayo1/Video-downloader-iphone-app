@@ -35,6 +35,15 @@ final class ShowTests: XCTestCase {
         return item
     }
 
+    func testShowPagesSplitIntoSeasonsOnlyWhenEveryTitleNamesOne() {
+        let seasons = ["South Park S1E1", "South Park S1E2", "South Park S2E1"].map(video)
+        XCTAssertEqual(ShowPlaylist.seasonRuns(seasons), [.init(season: 1, range: 0..<2), .init(season: 2, range: 2..<3)])
+        XCTAssertEqual(ShowPlaylist.seasonRuns(Array(seasons.prefix(2))), [.init(season: nil, range: 0..<2)], "one season needs no headers")
+        let mixed = [video("South Park S1E1"), video("South Park Ep. 2")]
+        XCTAssertEqual(ShowPlaylist.seasonRuns(mixed), [.init(season: nil, range: 0..<2)])
+        XCTAssertEqual(ShowPlaylist.seasonRuns([]), [.init(season: nil, range: 0..<0)])
+    }
+
     func testSeriesAndEpisodeNumbersFromTitles() {
         func parse(_ title: String) -> ShowSuggestion.Parsed { ShowSuggestion.parse(title) }
         XCTAssertEqual(parse("***REMOVED*** Ep. 10"), .init(series: "***REMOVED***", season: nil, episode: 10))
@@ -159,6 +168,21 @@ final class ShowTests: XCTestCase {
         XCTAssertEqual(show.followSourceURL, third.sourcePageURL, "the latest episode's page is followed")
         XCTAssertNil(store.addToMatchingShow(video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · ***REMOVED***")))
         XCTAssertNil(store.addToMatchingShow(video("Basic Video Page")), "no episode number")
+    }
+
+    func testMoviesLeaveShowsAndAreNeverSuggested() {
+        let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
+        let movies = [1, 2].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") }
+        movies.forEach { store.setMovie($0, true) }
+        XCTAssertTrue(store.suggestions.isEmpty, "two movies of a series aren't a show")
+        XCTAssertNil(store.addToMatchingShow(movies[0]))
+
+        let show = store.create(title: "Smoking", with: [video("***REMOVED*** Ep. 3 · ***REMOVED***")])
+        store.add([movies[0]], to: show)
+        XCTAssertFalse(movies[0].isMovie, "an episode isn't a movie")
+        store.setMovie(movies[0], true)
+        XCTAssertNil(movies[0].showID, "a movie isn't an episode")
+        XCTAssertEqual(store.episodes(of: show).count, 1)
     }
 
     /// Older downloads without an episode number can't send the new-episode check back to an

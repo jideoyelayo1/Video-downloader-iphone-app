@@ -59,6 +59,15 @@ final class LibraryStatsTests: XCTestCase {
         XCTAssertEqual(stats.notInShow.count, 1, "an episode of a show that's gone counts as not in a show")
     }
 
+    func testMoviesAreCountedApartFromVideosNotInAShow() {
+        let film = video("Film", size: 700)
+        film.isMovie = true
+        let stats = LibraryStats(items: [film, video("Clip", size: 20)], shows: [], now: now)
+        XCTAssertEqual(stats.movies.count, 1)
+        XCTAssertEqual(stats.movies.bytes, 700)
+        XCTAssertEqual(stats.notInShow.count, 1, "as in My Videos, a movie isn't counted as not in a show")
+    }
+
     func testMeasuredSizesFillInOlderVideos() {
         let older = video("Older", size: nil)
         let stats = LibraryStats(items: [older, video("Newer", size: 200)], shows: [], sizes: [older.id: 1_000], now: now)

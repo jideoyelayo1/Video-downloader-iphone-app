@@ -11,7 +11,7 @@ struct NewShowSeed: Identifiable {
     /// The video's series name, with the other saved episodes of that series ticked.
     static func around(_ item: DownloadItem, in items: [DownloadItem]) -> NewShowSeed {
         let parsed = ShowSuggestion.parse(item.displayTitle)
-        let matches = items.filter { $0.showID == nil && ShowSuggestion.parse($0.displayTitle).key == parsed.key }
+        let matches = items.filter { $0.showID == nil && !$0.isMovie && ShowSuggestion.parse($0.displayTitle).key == parsed.key }
         return NewShowSeed(title: parsed.series, selected: Set(matches.map(\.id) + [item.id]))
     }
 }
@@ -30,6 +30,7 @@ struct ShowRow: View {
             } else {
                 Image(systemName: "rectangle.stack").font(.title2).foregroundStyle(.tint)
                     .frame(width: 112, height: 72).background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(show.title).font(.headline).lineLimit(2)
@@ -215,42 +216,47 @@ struct ShowScreen: View {
                 Toggle("Autoplay Next Episode", isOn: Binding(get: { show.autoplayNext }, set: { show.autoplayNext = $0; shows.save() }))
                     .accessibilityIdentifier("show.autoplay")
             }
-            Section {
-                ForEach(Array(episodes.enumerated()), id: \.element.id) { index, item in
-                    // A row button and a separate Delete button: a button inside another's label takes its taps on iOS 18.
-                    HStack(spacing: 4) {
-                        Button { open(item) } label: { EpisodeRow(number: index + 1, item: item) }
-                            .buttonStyle(.plain)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityIdentifier("show.episode")
-                        if item.isWatched {
-                            Button { deletingEpisode = item } label: {
-                                Image(systemName: "trash").font(.title3).foregroundStyle(.red).frame(minWidth: 44, minHeight: 44)
+            ForEach(ShowPlaylist.seasonRuns(episodes)) { run in
+                Section {
+                    // Positions in the run, for moves and deletes; each element keeps its place in the whole show.
+                    ForEach(Array(Array(episodes.enumerated())[run.range]), id: \.element.id) { index, item in
+                        // A row button and a separate Delete button: a button inside another's label takes its taps on iOS 18.
+                        HStack(spacing: 4) {
+                            Button { open(item) } label: { EpisodeRow(number: index - run.range.lowerBound + 1, item: item) }
+                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityIdentifier("show.episode")
+                            if item.isWatched {
+                                Button { deletingEpisode = item } label: {
+                                    Image(systemName: "trash").font(.title3).foregroundStyle(.red).frame(minWidth: 44, minHeight: 44)
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Delete \(item.displayTitle)")
+                                .accessibilityIdentifier("show.deleteEpisode")
                             }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("Delete \(item.displayTitle)")
-                            .accessibilityIdentifier("show.deleteEpisode")
+                        }
+                        .swipeActions(edge: .leading) {
+                            Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
+                                item.setWatched(!item.isWatched)
+                                shows.save()
+                            }
+                            .tint(.green)
+                        }
+                        .contextMenu {
+                            Button(item.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
+                                item.setWatched(!item.isWatched)
+                                shows.save()
+                            }
+                            Button("Remove from Show", systemImage: "rectangle.stack.badge.minus") { shows.remove(item) }
+                            Button("Delete Episode…", systemImage: "trash", role: .destructive) { deletingEpisode = item }
                         }
                     }
-                    .swipeActions(edge: .leading) {
-                        Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
-                            item.setWatched(!item.isWatched)
-                            shows.save()
-                        }
-                        .tint(.green)
-                    }
-                    .contextMenu {
-                        Button(item.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
-                            item.setWatched(!item.isWatched)
-                            shows.save()
-                        }
-                        Button("Remove from Show", systemImage: "rectangle.stack.badge.minus") { shows.remove(item) }
-                        Button("Delete Episode…", systemImage: "trash", role: .destructive) { deletingEpisode = item }
-                    }
+                    .onMove { shows.move(in: show, from: IndexSet($0.map { $0 + run.range.lowerBound }), to: $1 + run.range.lowerBound) }
+                    .onDelete { offsets in offsets.map { episodes[$0 + run.range.lowerBound] }.forEach(shows.remove) }
+                } header: {
+                    Text(run.season.map { "Season \($0)" } ?? "Episodes").font(.title3.bold()).foregroundStyle(.white).textCase(nil)
                 }
-                .onMove { shows.move(in: show, from: $0, to: $1) }
-                .onDelete { offsets in offsets.map { episodes[$0] }.forEach(shows.remove) }
-            } header: { Text("Episodes").font(.title3.bold()).foregroundStyle(.white).textCase(nil) }
+            }
             Section {
                 Toggle("Tell Me When the Next Episode Is Out", isOn: Binding(get: { show.notifyNewEpisodes }, set: { on in
                     show.notifyNewEpisodes = on
@@ -317,12 +323,7 @@ struct ShowScreen: View {
         } message: { Text("Their video files are removed from this iPhone. The show keeps the rest.") }
         // Leave first: the screen reads the show while it animates away.
         .modifier(DeleteShowDialog(show: $deleting, leave: { dismiss() }))
-        // An alert, so iOS 26 shows Cancel too (its action sheets have none).
-        .alert("Delete this episode?", isPresented: Binding(get: { deletingEpisode != nil }, set: { if !$0 { deletingEpisode = nil } }),
-               presenting: deletingEpisode) { item in
-            Button("Delete", role: .destructive) { downloads.delete(item) }
-            Button("Cancel", role: .cancel) { }
-        } message: { item in Text("\(item.displayTitle)\n\(StorageCleanup.freedText(item))") }
+        .modifier(DeleteVideoAlert(item: $deletingEpisode, title: "Delete this episode?"))
         .confirmationDialog("Play video", isPresented: Binding(get: { pendingPlayback != nil }, set: { if !$0 { pendingPlayback = nil } })) {
             Button("Resume") { if let item = pendingPlayback { start(item, at: item.playbackPosition ?? 0) }; pendingPlayback = nil }
             Button("Start from Beginning") { if let item = pendingPlayback { start(item, at: 0) }; pendingPlayback = nil }
@@ -364,6 +365,20 @@ struct ShowScreen: View {
     private func start(_ item: DownloadItem, at position: Double) {
         if position == 0 { item.playbackPosition = 0; try? modelContext.save() }
         playback.open(item, at: position)
+    }
+}
+
+/// Asks before deleting a video from this iPhone. An alert, so iOS 26 shows Cancel too (its action sheets have none).
+struct DeleteVideoAlert: ViewModifier {
+    @EnvironmentObject private var downloads: DownloadManager
+    @Binding var item: DownloadItem?
+    var title = "Delete this video?"
+
+    func body(content: Content) -> some View {
+        content.alert(title, isPresented: Binding(get: { item != nil }, set: { if !$0 { item = nil } }), presenting: item) { item in
+            Button("Delete", role: .destructive) { downloads.delete(item) }
+            Button("Cancel", role: .cancel) { }
+        } message: { item in Text("\(item.displayTitle)\n\(StorageCleanup.freedText(item))") }
     }
 }
 
@@ -411,7 +426,7 @@ private struct EpisodeRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VideoThumbnailView(item: item, width: 124, height: 70)
-                .overlay { Image(systemName: "play.circle").font(.title).foregroundStyle(.white).shadow(radius: 3) }
+                .overlay { Image(systemName: "play.circle").font(.title).foregroundStyle(.white).shadow(radius: 3).accessibilityHidden(true) }
                 .overlay(alignment: .bottom) { PlaybackProgressBar(item: item) }
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(number). \(item.displayTitle)").font(.subheadline.bold()).foregroundStyle(.primary).lineLimit(2).truncationMode(.middle)

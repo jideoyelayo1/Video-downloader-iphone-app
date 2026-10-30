@@ -358,7 +358,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
 
         if dictionary["event"] as? String == "poster" {
             let documentURL = (dictionary["documentURL"] as? String).flatMap(URL.init(string:))
-            if let url = URL(string: rawURL), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+            if let url = URL(string: rawURL), url.isWeb,
                !MediaDiscovery.isStale(documentURL: documentURL, isMainFrame: isMainFrame, currentPageURL: mainURL) {
                 onPoster?(url, dictionary["kind"] as? String == "video")
             }

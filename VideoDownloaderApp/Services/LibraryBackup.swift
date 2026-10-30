@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
 /// labels, shows and folders. Restoring merges by ID; a video whose file isn't on this iPhone
 /// comes back under Needs Attention, with Open Page to download it again.
 struct LibraryBackup: Codable {
-    var version = 1
+    static let currentVersion = 1
+    var version = currentVersion
     var createdAt = Date()
     var videos: [Video] = []
     var labels: [Label] = []
@@ -18,7 +19,7 @@ struct LibraryBackup: Codable {
         var id: UUID, title: String, remoteURL: URL, sourcePageURL: URL, refererURL: URL?, kind: String
         var localFileName: String?, createdAt: Date, completedAt: Date?, fileSize: Int64?, playbackPosition: Double?
         var folderID: UUID?, watchedAt: Date?, lastPlayedAt: Date?, duration: Double?, labelIDs: [UUID]?
-        var showID: UUID?, showOrder: Int?, posterURL: URL?, requiresReferer: Bool?
+        var showID: UUID?, showOrder: Int?, posterURL: URL?, requiresReferer: Bool?, isMovie: Bool?
     }
     struct Label: Codable { var id: UUID, name: String, colorName: String, sites: [String]?, isSiteLabel: Bool? }
     struct ShowRecord: Codable {
@@ -26,6 +27,18 @@ struct LibraryBackup: Codable {
         var autoSkipIntro: Bool, playbackRate: Double?, followSourceURL: URL?, notifyNewEpisodes: Bool, autoDownloadNewEpisodes: Bool
     }
     struct Folder: Codable { var id: UUID, title: String }
+
+    enum RestoreError: LocalizedError {
+        case newerVersion
+        case couldNotSave(Error)
+
+        var errorDescription: String? {
+            switch self {
+            case .newerVersion: "This backup was made by a newer version of Video Downloader. Update the app, then restore it."
+            case .couldNotSave(let error): "The library couldn't be saved, so nothing was restored: \(error.localizedDescription)"
+            }
+        }
+    }
 
     struct Summary: Equatable {
         var added = 0, updated = 0, missingFiles = 0
@@ -46,7 +59,7 @@ struct LibraryBackup: Codable {
                   localFileName: $0.localFileName, createdAt: $0.createdAt, completedAt: $0.completedAt, fileSize: $0.fileSize,
                   playbackPosition: $0.playbackPosition, folderID: $0.folderID, watchedAt: $0.watchedAt, lastPlayedAt: $0.lastPlayedAt,
                   duration: $0.duration, labelIDs: $0.labelIDs, showID: $0.showID, showOrder: $0.showOrder, posterURL: $0.posterURL,
-                  requiresReferer: $0.requiresRefererRaw)
+                  requiresReferer: $0.requiresRefererRaw, isMovie: $0.isMovie)
         }
         backup.labels = ((try? context.fetch(FetchDescriptor<VideoLabel>())) ?? []).map {
             Label(id: $0.id, name: $0.name, colorName: $0.colorName, sites: $0.sites, isSiteLabel: $0.isSiteLabel)
@@ -70,11 +83,14 @@ struct LibraryBackup: Codable {
     static func decode(_ data: Data) throws -> LibraryBackup {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(LibraryBackup.self, from: data)
+        let backup = try decoder.decode(LibraryBackup.self, from: data)
+        // A newer backup may hold records this version would misread or drop.
+        guard backup.version <= currentVersion else { throw RestoreError.newerVersion }
+        return backup
     }
 
     @MainActor
-    func restore(into context: ModelContext) -> Summary {
+    func restore(into context: ModelContext) throws -> Summary {
         var summary = Summary()
         let folders = Dictionary(((try? context.fetch(FetchDescriptor<DownloadFolder>())) ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for folder in self.folders where folders[folder.id] == nil { context.insert(DownloadFolder(id: folder.id, title: folder.title)) }
@@ -122,9 +138,11 @@ struct LibraryBackup: Codable {
             item.watchedAt = video.watchedAt
             item.lastPlayedAt = video.lastPlayedAt
             item.duration = video.duration ?? item.duration
-            item.labelIDs = video.labelIDs
+            // Older backups have no labels or movie flag; nil there keeps what's on this iPhone.
+            item.labelIDs = video.labelIDs ?? item.labelIDs
             item.showID = video.showID
             item.showOrder = video.showOrder
+            item.isMovieRaw = video.isMovie ?? item.isMovieRaw
             item.playbackPosition = video.playbackPosition
             item.posterURL = video.posterURL ?? item.posterURL
             if !downloading, !(item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false) {
@@ -133,14 +151,19 @@ struct LibraryBackup: Codable {
                 summary.missingFiles += 1
             }
         }
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw RestoreError.couldNotSave(error)
+        }
         return summary
     }
 }
 
 /// The backup as a file to share or save, made only when shared.
 struct LibraryBackupFile: Transferable {
-    let make: @MainActor () -> LibraryBackup
+    let make: @MainActor @Sendable () -> LibraryBackup
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(exportedContentType: .json) { file in

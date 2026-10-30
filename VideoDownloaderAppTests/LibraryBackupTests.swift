@@ -28,6 +28,7 @@ final class LibraryBackupTests: XCTestCase {
                                    sourcePageURL: URL(string: "https://***REMOVED***.to/anime/x/p-2-dub")!, kind: .video, status: .completed)
         missing.localFileName = "gone-\(UUID().uuidString).mp4"
         missing.playbackPosition = 321
+        missing.isMovie = true
         source.insert(present)
         source.insert(missing)
         try source.save()
@@ -44,6 +45,8 @@ final class LibraryBackupTests: XCTestCase {
         XCTAssertEqual(restored[0].labelIDs, [label.id])
         XCTAssertEqual(restored[1].status, .failed, "its file isn't here, so it waits to be downloaded again")
         XCTAssertEqual(restored[1].playbackPosition, 321)
+        XCTAssertTrue(restored[1].isMovie)
+        XCTAssertFalse(restored[0].isMovie)
         let restoredShow = try XCTUnwrap(target.fetch(FetchDescriptor<Show>()).first)
         XCTAssertEqual(restoredShow.introEnd, 100)
         XCTAssertEqual(try target.fetch(FetchDescriptor<VideoLabel>()).first?.name, "***REMOVED***")
@@ -71,8 +74,35 @@ final class LibraryBackupTests: XCTestCase {
                                    refererURL: nil, kind: "video", localFileName: nil, createdAt: Date(), completedAt: Date(), fileSize: nil,
                                    playbackPosition: 42, folderID: nil, watchedAt: nil, lastPlayedAt: nil, duration: nil, labelIDs: nil,
                                    showID: nil, showOrder: nil, posterURL: nil, requiresReferer: nil))
-        _ = backup.restore(into: context)
+        _ = try backup.restore(into: context)
         XCTAssertEqual(downloading.status, .downloading, "its transfer carries on")
         XCTAssertEqual(downloading.playbackPosition, 42)
+    }
+
+    func testOlderBackupKeepsLabelsAndMovieFlagAndNewerBackupIsRefused() throws {
+        let container = try LibrarySchema.container(inMemory: true)
+        let context = container.mainContext
+        let film = DownloadItem(title: "Film", remoteURL: URL(string: "https://cdn.example/f.mp4")!,
+                                sourcePageURL: URL(string: "https://site.example/f")!, kind: .video, status: .completed)
+        let label = UUID()
+        film.labelIDs = [label]
+        film.isMovie = true
+        context.insert(film)
+        try context.save()
+        var backup = LibraryBackup.make(from: context)
+        backup.videos[0].labelIDs = nil
+        backup.videos[0].isMovie = nil
+        _ = try backup.restore(into: context)
+        XCTAssertEqual(film.labelIDs, [label], "a backup from before labels doesn't clear them")
+        XCTAssertTrue(film.isMovie, "a backup from before movies doesn't clear the flag")
+
+        backup.videos[0].isMovie = false
+        _ = try backup.restore(into: context)
+        XCTAssertFalse(film.isMovie, "a newer backup's flag is restored")
+
+        backup.version = LibraryBackup.currentVersion + 1
+        XCTAssertThrowsError(try LibraryBackup.decode(backup.encoded())) { error in
+            guard case LibraryBackup.RestoreError.newerVersion = error else { return XCTFail("\(error)") }
+        }
     }
 }

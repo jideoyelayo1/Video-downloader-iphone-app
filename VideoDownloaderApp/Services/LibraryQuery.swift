@@ -31,21 +31,55 @@ struct LibraryQuery: Equatable {
         }
     }
 
+    /// A place in My Videos, chosen like a folder.
+    enum Group: String, CaseIterable, Identifiable {
+        case all, movies, notInShow
+
+        var id: String { rawValue }
+        var name: String {
+            switch self {
+            case .all: "All Videos"
+            case .movies: "Movies"
+            case .notInShow: "Not in a Show"
+            }
+        }
+        var systemImage: String {
+            switch self {
+            case .all: "play.rectangle"
+            case .movies: "film"
+            case .notInShow: "rectangle.stack.badge.plus"
+            }
+        }
+    }
+
     var sort = Sort.newest
     var status = Status.all
+    var group = Group.all
+    /// Shows that exist, so an episode of a deleted show counts as not in a show.
+    var showIDs: Set<UUID> = []
     /// Videos with any of these labels.
     var labelIDs: Set<UUID> = []
     var folderID: UUID?
     var searchText = ""
+    /// Show and label names by ID, so searching a show's or label's name finds its videos.
+    var names: [UUID: String] = [:]
 
-    /// A status or label filter is narrowing the list (folders and search show themselves).
-    var isFiltering: Bool { status != .all || !labelIDs.isEmpty }
+    /// A status, label or group filter is narrowing the list (folders and search show themselves).
+    var isFiltering: Bool { status != .all || !labelIDs.isEmpty || group != .all }
 
     func matches(_ item: DownloadItem) -> Bool {
         guard !item.isStreamFragment else { return false }
         if let folderID, item.folderID != folderID { return false }
-        if !searchText.isEmpty, !item.title.localizedStandardContains(searchText) { return false }
+        if !searchText.isEmpty {
+            let related = ([item.showID].compactMap { $0 } + (item.labelIDs ?? [])).compactMap { names[$0] }
+            guard ([item.title] + related).contains(where: { $0.localizedStandardContains(searchText) }) else { return false }
+        }
         if !labelIDs.isEmpty, !(item.labelIDs ?? []).contains(where: labelIDs.contains) { return false }
+        switch group {
+        case .all: break
+        case .movies: if !item.isMovie { return false }
+        case .notInShow: if item.isMovie || item.showID.map(showIDs.contains) == true { return false }
+        }
         switch status {
         case .all: return true
         case .unwatched: return !item.isWatched

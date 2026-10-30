@@ -95,6 +95,17 @@ final class SeasonDownloader: ObservableObject {
                                requiresReferer: probe.requiresReferer, subtitles: subtitles, poster: poster)
     }
 
+    /// A download whose link expired: its page is opened again in the hidden browser, and the
+    /// same row starts again from the fresh link. False if the page offers no video now.
+    func refreshLink(of item: DownloadItem) async -> Bool {
+        guard case .found(let found, let probe, let subtitles, _, let poster) = await findVideo(on: item.sourcePageURL) else { return false }
+        // The row's page and title, so start() repairs this row instead of adding another.
+        let candidate = MediaCandidate(url: found.url, sourcePageURL: item.sourcePageURL, frameURL: found.frameURL ?? found.sourcePageURL,
+                                       isMainFrame: found.isMainFrame, title: item.title, kind: probe.kind, contentType: found.contentType)
+        return downloads.start(candidate, expectedBytes: probe.expectedBytes, preferredBitrate: item.preferredBitrate,
+                               requiresReferer: probe.requiresReferer, subtitles: subtitles, poster: poster) != nil
+    }
+
     private static func episodes(_ count: Int) -> String { count == 1 ? "1 episode" : "\(count) episodes" }
 
     private func finish(_ message: String) {

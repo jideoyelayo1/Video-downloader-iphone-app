@@ -7,10 +7,19 @@ struct ContentView: View {
     /// A page given with `-StartURL` (tests and site checks) opens in Browse.
     @State private var selection = LaunchOptions.value("-StartURL") != nil ? Tab.browse : Tab.library
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum Tab { case browse, downloads, library, settings }
 
     var body: some View {
+        if let error = AppServices.shared.libraryOpenError {
+            LibraryRecoveryView(error: error).preferredColorScheme(.dark)
+        } else {
+            tabs
+        }
+    }
+
+    private var tabs: some View {
         TabView(selection: $selection) {
             LibraryScreen(showBrowse: { selection = .browse })
                 .tabItem { Label("My Videos", systemImage: "play.rectangle.on.rectangle") }
@@ -57,7 +66,7 @@ struct ContentView: View {
                 FinishedEpisodeBanner(episode: episode) { playback.answerFinishedEpisode(delete: $0) }
                     .padding(.horizontal, 12)
                     .padding(.bottom, 64)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.snappy, value: playback.finishedEpisode?.id)
@@ -74,6 +83,43 @@ struct ContentView: View {
 extension Color {
     /// The app's accent: a deep red on black, as on Netflix.
     static let brandRed = Color(red: 0.898, green: 0.035, blue: 0.078)
+}
+
+/// Shown instead of the tabs when the saved library won't open. Nothing is moved until asked.
+private struct LibraryRecoveryView: View {
+    let error: Error
+    @State private var outcome: String?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill").font(.largeTitle).foregroundStyle(.yellow).accessibilityHidden(true)
+            Text("Your library couldn't be opened").font(.title2.bold())
+            Text("Nothing has been deleted. If you just installed an older version of the app, install the latest one again. Otherwise close the app and open it again.")
+            Text(error.localizedDescription).font(.footnote).foregroundStyle(.secondary)
+            if let outcome {
+                Text(outcome).font(.callout.bold())
+            } else {
+                Button("Start a New Library", role: .destructive, action: startNewLibrary).buttonStyle(.borderedProminent)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .padding(24)
+    }
+
+    private func startNewLibrary() {
+        // It may open now, after the iPhone was first unlocked, say: then reopening is all it needs.
+        if (try? LibrarySchema.container(inMemory: false)) != nil {
+            outcome = "The library opens now. Close the app and open it again."
+            return
+        }
+        do {
+            let folder = try LibrarySchema.setAsideSavedStore()
+            AppServices.shared.diagnostics.record(event: "library", url: "app://library", note: "Set aside in \(folder.path)")
+            outcome = "The old library is kept in the app's Library Recovery folder. Close the app and open it again to start a new one."
+        } catch {
+            outcome = "The old library couldn't be moved: \(error.localizedDescription)"
+        }
+    }
 }
 
 /// "You finished … Delete it?" over the tab bar. Unanswered, it goes after a while and the episode is kept.

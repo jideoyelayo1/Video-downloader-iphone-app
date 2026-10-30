@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+        // Without the saved library, finished files would be thrown away as unknown; iOS keeps the events for later.
+        guard AppServices.shared.libraryOpenError == nil else { return completionHandler() }
         // The app may be launched in the background just for this, before any scene exists.
         AppServices.shared.downloads.setBackgroundCompletionHandler(completionHandler, for: identifier)
     }
@@ -52,24 +54,37 @@ final class AppServices {
     let newEpisodes: NewEpisodeChecker
     /// App settings; a fresh, separate store when UI tests run with an in-memory library.
     let preferences: UserDefaults
+    /// Why the saved library didn't open. The app then runs on an empty in-memory library that
+    /// leaves the saved one (and its settings) untouched, and ContentView asks what to do.
+    let libraryOpenError: Error?
 
     private init() {
+        let recovering: Bool
         let inMemory = LaunchOptions.isRunningUnitTests || LaunchOptions.flag("-UITestInMemory")
         do {
             container = try LibrarySchema.container(inMemory: inMemory)
+            libraryOpenError = nil
+            recovering = false
         } catch {
-            fatalError("Unable to open the download library: \(error)")
+            // Crashing would repeat on every launch. An older build opening a newer store, or a launch
+            // before the iPhone's first unlock, fails here too, so nothing is moved without asking.
+            guard let fallback = try? LibrarySchema.container(inMemory: true) else { fatalError("Unable to open the download library: \(error)") }
+            container = fallback
+            libraryOpenError = error
+            recovering = true
         }
         let context = container.mainContext
-        if !inMemory { LegacyDownloadImport.run(into: context) }
-        StarterBookmarks.install(in: context, inMemory: inMemory)
+        // One-time imports and settings flags must wait for the saved library.
+        let throwaway = inMemory || recovering
+        if !throwaway { LegacyDownloadImport.run(into: context) }
+        StarterBookmarks.install(in: context, inMemory: throwaway)
         history = BrowserHistoryStore(context: context)
         // Created once: an isolated test suite is cleared each time it is requested.
-        preferences = LaunchOptions.preferences(isolated: inMemory)
+        preferences = LaunchOptions.preferences(isolated: throwaway)
         labels = LabelStore(context: context, preferences: preferences)
         labels.backfillSiteLabelsIfNeeded()
         shows = ShowStore(context: context, preferences: preferences)
-        downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests)
+        downloads = DownloadManager(context: context, restore: !LaunchOptions.isRunningUnitTests && !recovering)
         downloads.labelStore = labels
         downloads.preferences = preferences
         downloads.showStore = shows
@@ -90,7 +105,8 @@ final class AppServices {
         downloads.requestContextProvider = { url, referer in await BrowserSession.requestContext(for: url, referer: referer) }
         downloads.diagnostics = diagnostics
         shows.fillMissingFollowedPages()
-        if !LaunchOptions.isRunningUnitTests {
+        if let libraryOpenError { diagnostics.record(event: "library", url: "app://library", note: "Couldn't open: \(libraryOpenError)") }
+        if !LaunchOptions.isRunningUnitTests && !recovering {
             downloads.deleteOldWatchedVideos()
             Task { await subtitleEmbedder.embedPending() }
         }

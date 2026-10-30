@@ -6,7 +6,8 @@ import UIKit
 /// rendition, so AVAssetImageGenerator alone cannot provide their thumbnails.
 /// Not main-actor isolated: frame conversion and JPEG encoding run off the main thread.
 enum VideoThumbnailService {
-    private static let size = CGSize(width: 240, height: 160)
+    /// As wide as site posters (PosterImage), sharp enough for the full-width artwork in My Videos and on show pages.
+    private static let size = CGSize(width: 640, height: 360)
     private static let ciContext = CIContext()
 
     static func imageData(for url: URL, kind: MediaKind) async -> Data? {
@@ -31,6 +32,8 @@ enum VideoThumbnailService {
         return nil
     }
 
+    /// On the main actor, where AVPlayerItem must be made; it waits without blocking and decodes one frame.
+    @MainActor
     private static func playbackImage(for asset: AVAsset) async -> CGImage? {
         let item = AVPlayerItem(asset: asset)
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [

@@ -1,12 +1,14 @@
 import Foundation
 import Network
+import os
 
 /// Serves one HLS asset on loopback, forwarding each request to its original URL
 /// with the browser's scoped cookies, User-Agent and player Referer. AVFoundation's
 /// background HLS API cannot attach an arbitrary Referer to its own HTTP requests.
 /// This relay must remain alive while the download runs, so the UI asks the user
 /// to keep the app open for these streams.
-final class HLSRefererProxy {
+/// Its tables are guarded by `lock`, and the listener and its connections run on `queue`.
+final class HLSRefererProxy: @unchecked Sendable {
     enum ProxyError: Error { case couldNotStart }
 
     private let listener: NWListener
@@ -34,23 +36,34 @@ final class HLSRefererProxy {
 
     deinit { stop() }
 
-    func start(for original: URL) throws -> URL {
-        let ready = DispatchSemaphore(value: 0)
-        var succeeded = false
-        listener.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .ready:
-                self?.port = self?.listener.port?.rawValue
-                succeeded = self?.port != nil
-                ready.signal()
-            case .failed:
-                ready.signal()
-            default: break
+    /// Waits (without blocking the caller's thread) up to 5 s for the loopback listener.
+    func start(for original: URL) async throws -> URL {
+        let succeeded: Bool = await withCheckedContinuation { continuation in
+            // Exactly one of the handlers below resumes.
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            @Sendable func finish(_ result: Bool) {
+                guard !resumed.withLock({ resumed in defer { resumed = true }; return resumed }) else { return }
+                continuation.resume(returning: result)
             }
+            listener.stateUpdateHandler = { [weak self] state in
+                switch state {
+                case .ready:
+                    guard let self else { return finish(false) }
+                    self.lock.lock()
+                    self.port = self.listener.port?.rawValue
+                    let hasPort = self.port != nil
+                    self.lock.unlock()
+                    finish(hasPort)
+                case .failed, .cancelled:
+                    finish(false)
+                default: break
+                }
+            }
+            listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
+            listener.start(queue: queue)
+            queue.asyncAfter(deadline: .now() + 5) { finish(false) }
         }
-        listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
-        listener.start(queue: queue)
-        guard ready.wait(timeout: .now() + 5) == .success, succeeded else { throw ProxyError.couldNotStart }
+        guard succeeded else { throw ProxyError.couldNotStart }
         return localURL(for: original)
     }
 
@@ -64,6 +77,7 @@ final class HLSRefererProxy {
         let id = routeIDs[remote] ?? UUID()
         routeIDs[remote] = id
         routes[id] = remote
+        let port = self.port
         lock.unlock()
         let suffix = remote.pathExtension.lowercased() == "m3u8" ? "m3u8" : "bin"
         return URL(string: "http://127.0.0.1:\(port ?? 0)/r/\(id.uuidString)/asset.\(suffix)")!
@@ -98,9 +112,7 @@ final class HLSRefererProxy {
             send(status: 400, type: "text/plain", body: Data(), to: connection)
             return
         }
-        lock.lock()
-        let remote = routes[identifier]
-        lock.unlock()
+        let remote = lock.withLock { routes[identifier] }
         guard let remote else {
             send(status: 404, type: "text/plain", body: Data(), to: connection)
             return
@@ -115,7 +127,15 @@ final class HLSRefererProxy {
             request.setValue(String(range.dropFirst("range:".count)).trimmingCharacters(in: .whitespaces), forHTTPHeaderField: "Range")
         }
         do {
-            let (data, response) = try await session.data(for: request, delegate: RedirectScoper(context: context, original: request))
+            let delegate = RedirectScoper(context: context, original: request)
+            let result: (Data, URLResponse)
+            do {
+                result = try await session.data(for: request, delegate: delegate)
+            } catch let error as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(error.code) {
+                // One more go: a single dropped segment would otherwise fail the whole download.
+                result = try await session.data(for: request, delegate: delegate)
+            }
+            let (data, response) = result
             guard let http = response as? HTTPURLResponse else { throw ProxyError.couldNotStart }
             let finalURL = response.url ?? remote
             let type = http.mimeType ?? (finalURL.pathExtension.lowercased() == "m3u8" ? "application/vnd.apple.mpegurl" : "application/octet-stream")
@@ -150,7 +170,7 @@ final class HLSRefererProxy {
                 for match in matches.reversed() {
                     guard let range = Range(match.range(at: 1), in: rewritten),
                           let remote = URL(string: String(rewritten[range]), relativeTo: baseURL)?.absoluteURL,
-                          ["http", "https"].contains(remote.scheme?.lowercased() ?? "") else { continue }
+                          remote.isWeb else { continue }
                     rewritten.replaceSubrange(range, with: map(remote).absoluteString)
                 }
                 return rewritten
@@ -158,7 +178,7 @@ final class HLSRefererProxy {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty,
                   let remote = URL(string: trimmed, relativeTo: baseURL)?.absoluteURL,
-                  ["http", "https"].contains(remote.scheme?.lowercased() ?? "") else { return line }
+                  remote.isWeb else { return line }
             return map(remote).absoluteString
         }.joined(separator: "\n")
     }

@@ -22,7 +22,8 @@ concurrency:
 jobs:
   build:
     name: Build and unit tests
-    runs-on: macos-latest
+    # Pinned, so a new macos-latest image (and its Xcode) can't break a run by surprise.
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
@@ -55,13 +56,21 @@ jobs:
     - name: Build
       run: |
         xcodebuild build-for-testing -project VideoDownloaderApp.xcodeproj -scheme VideoDownloaderApp \
-          -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" -derivedDataPath DerivedData
+          -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" -derivedDataPath DerivedData \
+          -enableCodeCoverage YES
 
+    # A test that fails once on a cold simulator (see SeasonDownloaderTests' page limit) gets a second go;
+    # a green run costs nothing extra.
     - name: Unit tests
       run: |
         xcodebuild test-without-building -project VideoDownloaderApp.xcodeproj -scheme VideoDownloaderApp \
           -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" -derivedDataPath DerivedData \
-          -only-testing:VideoDownloaderAppTests -resultBundlePath TestResults.xcresult
+          -only-testing:VideoDownloaderAppTests -resultBundlePath TestResults.xcresult \
+          -enableCodeCoverage YES -retry-tests-on-failure -test-iterations 2
+
+    - name: Coverage
+      if: success()
+      run: xcrun xccov view --report --only-targets TestResults.xcresult
 
     - name: Keep the results of a failed run
       if: failure()

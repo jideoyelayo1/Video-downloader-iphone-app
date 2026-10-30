@@ -33,6 +33,8 @@ final class ThumbnailCache {
         self.generator = generator
         self.thumbnailURL = thumbnailURL
         images.countLimit = 200
+        // Decoded bytes, so 640-wide frames and posters stay within about 64 MB.
+        images.totalCostLimit = 64 * 1024 * 1024
     }
 
     /// A decoded image already in memory, so a reappearing row needs no placeholder.
@@ -51,7 +53,10 @@ final class ThumbnailCache {
         inFlight[key] = task
         let image = await task.value
         inFlight[key] = nil
-        if let image { images.setObject(Entry(fileName: fileName, image: image), forKey: id as NSUUID) } else { failed.insert(key) }
+        if let image {
+            let bytes = Int(image.size.width * image.scale * image.size.height * image.scale) * 4
+            images.setObject(Entry(fileName: fileName, image: image), forKey: id as NSUUID, cost: bytes)
+        } else { failed.insert(key) }
         return image
     }
 

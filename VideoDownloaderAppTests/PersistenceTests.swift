@@ -70,6 +70,11 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(DownloadStorage.storedURL("video.mp4"), DownloadStorage.libraryDirectory.appendingPathComponent("video.mp4"))
     }
 
+    func testVideosAreLeftOutOfDeviceBackups() throws {
+        let values = try DownloadStorage.libraryDirectory.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(values.isExcludedFromBackup, true)
+    }
+
     /// iOS 27 reports an HLS package under /.nofollow/private/var/…, and every install moves the app's
     /// container. A path saved on the iPhone that way (2026-10-09) finds the package in this install's container.
     func testHLSPackagesAreFoundAfterAnInstallMovesTheContainer() throws {

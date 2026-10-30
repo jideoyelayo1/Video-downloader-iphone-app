@@ -5,8 +5,12 @@ enum DownloadStorage {
     static let applicationSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
     static let containerRoot = applicationSupportDirectory.deletingLastPathComponent()
     static let libraryDirectory: URL = {
-        let directory = applicationSupportDirectory.appendingPathComponent("VideoDownloads", isDirectory: true)
+        var directory = applicationSupportDirectory.appendingPathComponent("VideoDownloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // Videos can be downloaded again, so they stay out of iCloud and computer backups; the library store doesn't.
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? directory.setResourceValues(values)
         return directory
     }()
     static let resumeDataDirectory: URL = {
@@ -91,6 +95,18 @@ enum LibrarySchema {
     static func container(inMemory: Bool) throws -> ModelContainer {
         try ModelContainer(for: Schema(models), configurations: ModelConfiguration(isStoredInMemoryOnly: inMemory))
     }
+
+    /// Moves a library that won't open into Application Support/Library Recovery, so the next launch starts afresh.
+    static func setAsideSavedStore() throws -> URL {
+        let store = ModelConfiguration().url
+        let folder = DownloadStorage.applicationSupportDirectory
+            .appendingPathComponent("Library Recovery/\(Int(Date().timeIntervalSince1970))", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for suffix in ["", "-wal", "-shm"] where FileManager.default.fileExists(atPath: store.path + suffix) {
+            try FileManager.default.moveItem(atPath: store.path + suffix, toPath: folder.appendingPathComponent(store.lastPathComponent + suffix).path)
+        }
+        return folder
+    }
 }
 
 enum DownloadStatus: String, Codable {
@@ -138,6 +154,8 @@ final class DownloadItem {
     var showOrder: Int?
     /// The page's poster or preview image, used as artwork.
     var posterURL: URL?
+    /// Listed under Movies, not as a video waiting for a show.
+    var isMovieRaw: Bool?
 
     init(id: UUID = UUID(), title: String, remoteURL: URL, sourcePageURL: URL, refererURL: URL? = nil, kind: MediaKind,
          status: DownloadStatus = .queued, createdAt: Date = Date(), preferredBitrate: Int? = nil, requiresReferer: Bool = false) {
@@ -174,6 +192,11 @@ final class DownloadItem {
     }
 
     var isWatched: Bool { watchedAt != nil }
+
+    var isMovie: Bool {
+        get { isMovieRaw == true }
+        set { isMovieRaw = newValue }
+    }
 
     /// When the download finished, such as "today at 21:40" or "26 Sep 2026 at 09:05", in the
     /// viewer's language and clock style. Downloads saved before this was recorded fall back to
@@ -431,7 +454,8 @@ enum LegacyDownloadImport {
             if item.isActive { item.status = .failed; item.errorMessage = "Download was interrupted. Tap Retry." }
             context.insert(item)
         }
-        try? context.save()
+        // Keep the file for the next launch unless its videos are safely in the store.
+        do { try context.save() } catch { context.rollback(); return 0 }
         try? FileManager.default.moveItem(at: url, to: url.appendingPathExtension("imported"))
         return items.count
     }

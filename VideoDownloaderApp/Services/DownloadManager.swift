@@ -2,6 +2,7 @@ import AVFoundation
 import Combine
 import Foundation
 import SwiftData
+import UIKit
 
 @MainActor
 final class DownloadManager: NSObject, ObservableObject {
@@ -30,6 +31,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private static let concurrentKey = "maxConcurrentDownloads"
     private static let wifiOnlyKey = "downloadOnWiFiOnly"
+    private static let notifyKey = "notifyWhenDownloadsFinish"
 
     /// At most this many downloads run at once; the rest wait as queued.
     var maxConcurrentDownloads: Int {
@@ -49,6 +51,16 @@ final class DownloadManager: NSObject, ObservableObject {
             preferences.set(newValue, forKey: Self.wifiOnlyKey)
         }
     }
+    /// A notification when a download finishes or fails while the app is in the background.
+    var notifiesWhenFinished: Bool {
+        get { preferences.bool(forKey: Self.notifyKey) }
+        set {
+            objectWillChange.send()
+            preferences.set(newValue, forKey: Self.notifyKey)
+        }
+    }
+    /// Seconds before the first automatic retry of a dropped transfer; each later one waits 4× longer.
+    var automaticRetryDelay: TimeInterval = 10
     private let directConfiguration: URLSessionConfiguration
     private var directTasks: [UUID: URLSessionDownloadTask] = [:]
     private var hlsTasks: [UUID: AVAssetDownloadTask] = [:]
@@ -73,6 +85,11 @@ final class DownloadManager: NSObject, ObservableObject {
     private var resumedTransfers: Set<UUID> = []
     private var networkObservation: AnyCancellable?
     private var progressSamples: [UUID: (date: Date, progress: Double)] = [:]
+    /// Automatic retries used since the user last started, retried or deleted each download, and the
+    /// pending one's token: a retry the user has overtaken mustn't fire as well.
+    private var automaticRetries: [UUID: (count: Int, token: UUID)] = [:]
+    /// Sizes expected when downloads were started, so several at once can't promise more space than there is.
+    private var expectedSizes: [UUID: Int64] = [:]
 
     private lazy var session = URLSession(configuration: directConfiguration, delegate: self, delegateQueue: .main)
     private lazy var hlsSession: AVAssetDownloadURLSession = {
@@ -108,7 +125,8 @@ final class DownloadManager: NSObject, ObservableObject {
             return nil
         }
         if let existing = items(for: candidate.url).first(where: \.isActive) { return existing }
-        if let error = DownloadError.storageCheck(expectedBytes: expectedBytes, availableBytes: DownloadStorage.availableCapacity()) {
+        let available = DownloadStorage.availableCapacity().map { $0 - committedBytes() }
+        if let error = DownloadError.storageCheck(expectedBytes: expectedBytes, availableBytes: available) {
             startError = error.message
             return nil
         }
@@ -126,6 +144,7 @@ final class DownloadManager: NSObject, ObservableObject {
             existing.kind = candidate.kind
             existing.preferredBitrate = preferredBitrate
             existing.requiresReferer = requiresReferer
+            expectedSizes[existing.id] = expectedBytes
             restart(existing)
             saveSubtitles(subtitles, for: existing)
             savePoster(poster, for: existing)
@@ -136,12 +155,20 @@ final class DownloadManager: NSObject, ObservableObject {
                                 refererURL: candidate.referer, kind: candidate.kind, preferredBitrate: preferredBitrate,
                                 requiresReferer: requiresReferer)
         context.insert(item)
+        expectedSizes[item.id] = expectedBytes
         savePoster(poster, for: item)
         labelStore?.applyAutomaticLabels(to: item)
         showStore?.addToMatchingShow(item)
         enqueue(item)
         saveSubtitles(subtitles, for: item)
         return item
+    }
+
+    /// What the downloads under way still expect to write.
+    private func committedBytes() -> Int64 {
+        allItems().filter(\.isActive).reduce(0) { total, item in
+            total + Int64(Double(expectedSizes[item.id] ?? 0) * (1 - progress(of: item)))
+        }
     }
 
     /// The page's poster becomes the video's thumbnail, fetched now with the page as Referer.
@@ -203,6 +230,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func retry(_ item: DownloadItem) {
         guard !item.isActive else { return }
+        automaticRetries[item.id] = nil
         userCancelled.remove(item.id)
         enqueue(item)
     }
@@ -213,6 +241,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if let localURL = item.localURL { try? FileManager.default.removeItem(at: localURL) }
         item.localFileName = nil
         item.progress = 0
+        automaticRetries[item.id] = nil
         userCancelled.remove(item.id)
         enqueue(item)
     }
@@ -229,6 +258,8 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func delete(_ item: DownloadItem, thenStartQueued: Bool) {
         resumedTransfers.remove(item.id)
+        automaticRetries[item.id] = nil
+        expectedSizes[item.id] = nil
         attemptIDs[item.id] = nil
         cancelledAttempts[item.id] = nil
         userCancelled.insert(item.id)
@@ -380,6 +411,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if let cookies = requestContext?.cookies, !cookies.isEmpty { assetOptions[AVURLAssetHTTPCookiesKey] = cookies }
         if let userAgent = requestContext?.userAgent { assetOptions[AVURLAssetHTTPUserAgentKey] = userAgent }
         let assetURL: URL
+        var relay: HLSRefererProxy?
         if item.requiresReferer {
             guard let requestContext, requestContext.referer != nil else {
                 fail(item, .other("The player context expired. Open the page, play the video, then download again."))
@@ -387,8 +419,9 @@ final class DownloadManager: NSObject, ObservableObject {
             }
             do {
                 let proxy = try HLSRefererProxy(context: requestContext)
-                assetURL = try proxy.start(for: item.remoteURL)
+                assetURL = try await proxy.start(for: item.remoteURL)
                 hlsProxies[item.id] = proxy
+                relay = proxy
             } catch {
                 fail(item, .other("Couldn't start the in-app stream relay. Try again while the app is open."))
                 return
@@ -398,12 +431,25 @@ final class DownloadManager: NSObject, ObservableObject {
             assetURL = item.remoteURL
         }
         if downloadsOnWiFiOnly { assetOptions[AVURLAssetAllowsCellularAccessKey] = false }
-        let asset = AVURLAsset(url: assetURL, options: assetOptions)
+        // A package an earlier attempt left part-way carries on from its saved segments.
+        let partial = item.requiresReferer ? nil : item.localURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+        if let partial {
+            diagnostics?.record(event: "download", url: item.remoteURL.absoluteString, note: "Resuming HLS package \(partial.lastPathComponent)")
+        }
+        let asset = AVURLAsset(url: partial ?? assetURL, options: assetOptions)
         let configuration = AVAssetDownloadConfiguration(asset: asset, title: item.title)
         if let bitrate = item.preferredBitrate {
-            configuration.primaryContentConfiguration.variantQualifiers = [
-                AVAssetVariantQualifier(predicate: NSPredicate(format: "averageBitRate >= %d", bitrate))
-            ]
+            // The quality picker lists each variant's peak BANDWIDTH, which AVFoundation reports as peakBitRate.
+            let variants = (try? await asset.load(.variants)) ?? []
+            if let index = Self.variantIndex(peakBitRates: variants.map(\.peakBitRate), preferred: bitrate) {
+                configuration.primaryContentConfiguration.variantQualifiers = [AVAssetVariantQualifier(variant: variants[index])]
+                diagnostics?.record(event: "download", url: item.remoteURL.absoluteString,
+                                    note: "Chose variant \(Int(variants[index].peakBitRate ?? 0)) for \(bitrate)")
+            } else {
+                configuration.primaryContentConfiguration.variantQualifiers = [
+                    AVAssetVariantQualifier(predicate: NSPredicate(format: "peakBitRate <= %d", bitrate))
+                ]
+            }
         }
         // Include the default audible rendition in every caption selection.
         let mediaSelections = await HLSMediaSelections.forDownload(asset: asset)
@@ -415,7 +461,14 @@ final class DownloadManager: NSObject, ObservableObject {
         guard attemptIDs[item.id] == attemptID,
               item.modelContext != nil,
               item.status == .downloading,
-              !userCancelled.contains(item.id) else { return }
+              !userCancelled.contains(item.id) else {
+            // Cancelled while the relay or asset was loading: don't leave this attempt's relay listening.
+            if let relay {
+                if hlsProxies[item.id] === relay { hlsProxies[item.id] = nil }
+                relay.stop()
+            }
+            return
+        }
         let task = hlsSession.makeAssetDownloadTask(downloadConfiguration: configuration)
         task.taskDescription = Self.taskDescription(itemID: item.id, attemptID: attemptID)
         hlsTasks[item.id] = task
@@ -477,10 +530,26 @@ final class DownloadManager: NSObject, ObservableObject {
             // has already marked it complete. A cancelled task still gets a
             // cleanup callback, but only for the attempt that was cancelled.
             guard let taskAttemptID = Self.attemptID(task),
-                  attemptIDs[id] == taskAttemptID || cancelledAttempts[id] == taskAttemptID else { return }
+                  attemptIDs[id] == taskAttemptID || cancelledAttempts[id] == taskAttemptID else {
+                // After a force-quit, relaunch can mark the transfer interrupted before iOS hands over its resume data.
+                if attemptIDs[id] == nil, item.status == .failed, !(task is AVAssetDownloadTask),
+                   let resumeData = (error as NSError?)?.userInfo[NSURLSessionDownloadTaskResumeData] as? Data,
+                   (try? resumeData.write(to: item.resumeDataURL)) != nil {
+                    item.errorMessage = Self.interruptedMessage(resumable: true)
+                    save()
+                }
+                return
+            }
         }
         releaseCookies(for: id)
-        let wasCancelled = userCancelled.remove(id) != nil || (error as? URLError)?.code == .cancelled
+        // iOS cancels transfers itself on a force-quit or when short of resources; that isn't the user cancelling.
+        let cancelledBySystem = (error as NSError?)?.userInfo[NSURLErrorBackgroundTaskCancelledReasonKey] != nil
+        let wasCancelled = userCancelled.remove(id) != nil || ((error as? URLError)?.code == .cancelled && !cancelledBySystem)
+        func failure(_ error: Error) -> DownloadError {
+            cancelledBySystem
+                ? .other(Self.interruptedMessage(resumable: FileManager.default.fileExists(atPath: item.resumeDataURL.path)))
+                : DownloadError.from(error)
+        }
 
         if task is AVAssetDownloadTask {
             hlsTasks[id] = nil
@@ -489,9 +558,15 @@ final class DownloadManager: NSObject, ObservableObject {
             if let error {
                 let nsError = error as NSError
                 diagnostics?.record(event: "download", url: item.remoteURL.absoluteString, note: "HLS \(nsError.domain) \(nsError.code): \(nsError.localizedDescription)")
-                location.map { try? FileManager.default.removeItem(at: $0) }
-                item.localFileName = nil
-                if wasCancelled { item.status = .cancelled; save() } else { fail(item, DownloadError.from(error)) }
+                if wasCancelled || item.requiresReferer {
+                    // A relayed package's segment links point at this attempt's loopback relay, so it can't resume.
+                    location.map { try? FileManager.default.removeItem(at: $0) }
+                    item.localFileName = nil
+                } else if let location {
+                    // Kept, so Retry carries on from the segments already saved.
+                    item.localFileName = DownloadStorage.managedPath(for: location)
+                }
+                if wasCancelled { item.status = .cancelled; save() } else { fail(item, failure(error)) }
             } else if let location {
                 item.localFileName = DownloadStorage.managedPath(for: location)
                 save()
@@ -536,7 +611,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if let resumeData = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
             try? resumeData.write(to: item.resumeDataURL)
         }
-        if wasCancelled { item.status = .cancelled; save() } else { fail(item, DownloadError.from(error)) }
+        if wasCancelled { item.status = .cancelled; save() } else { fail(item, failure(error)) }
     }
 
     private func markCompleted(_ item: DownloadItem, size: Int64?) {
@@ -547,9 +622,12 @@ final class DownloadManager: NSObject, ObservableObject {
         item.completedAt = Date()
         item.errorMessage = nil
         clearProgress(for: item.id)
+        automaticRetries[item.id] = nil
+        expectedSizes[item.id] = nil
         try? FileManager.default.removeItem(at: item.resumeDataURL)
         save()
         subtitleEmbedder?.embedIfNeeded(item)
+        notifyIfInBackground("Downloaded", item.displayTitle)
         startQueued()
     }
 
@@ -561,8 +639,38 @@ final class DownloadManager: NSObject, ObservableObject {
         item.errorMessage = error == .cancelled ? nil : error.message
         if let progress = progressStore.fraction(of: item.id) { item.progress = progress }
         clearProgress(for: item.id)
+        if !retryAutomaticallyIfTransient(item, error), error != .cancelled {
+            notifyIfInBackground("Download failed", "\(item.displayTitle): \(item.errorMessage ?? error.message)")
+        }
         save()
         startQueued()
+    }
+
+    /// A dropped connection or a busy server often recovers, so it is tried again after 10 s, 40 s and 160 s.
+    private func retryAutomaticallyIfTransient(_ item: DownloadItem, _ error: DownloadError) -> Bool {
+        let attempt = automaticRetries[item.id]?.count ?? 0
+        guard error.isTransient, attempt < 3 else {
+            automaticRetries[item.id] = nil
+            return false
+        }
+        let token = UUID()
+        automaticRetries[item.id] = (attempt + 1, token)
+        item.errorMessage = error.message + " Trying again shortly."
+        let id = item.id
+        let delay = automaticRetryDelay * pow(4, Double(attempt))
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            // Not if the user has retried, started over or deleted it meanwhile.
+            guard let self, self.automaticRetries[id]?.token == token, let item = self.item(id), item.status == .failed else { return }
+            self.diagnostics?.record(event: "download", url: item.remoteURL.absoluteString, note: "Automatic retry \(attempt + 1)")
+            self.enqueue(item)
+        }
+        return true
+    }
+
+    private func notifyIfInBackground(_ title: String, _ body: String) {
+        guard notifiesWhenFinished, UIApplication.shared.applicationState != .active else { return }
+        Task { await NewEpisodeChecker.postNotification(title: title, body: body) }
     }
 
     private func clearProgress(for id: UUID) {
@@ -603,6 +711,9 @@ final class DownloadManager: NSObject, ObservableObject {
             directTasks[id] = downloadTask
             item.status = .downloading
         }
+        // Browser cookies put in for a previous launch's transfers are released only when those
+        // finish in the same launch; with none carrying on, they would stay in the jar for good.
+        if directTasks.isEmpty { cookieStorage.cookies?.forEach(cookieStorage.deleteCookie) }
         for task in await hlsSession.allTasks {
             guard let id = Self.itemID(task), let item = item(id), let assetTask = task as? AVAssetDownloadTask,
                   item.isActive, pendingBegins[id] == nil else { task.cancel(); continue }
@@ -620,15 +731,59 @@ final class DownloadManager: NSObject, ObservableObject {
             item.status = .downloading
         }
         let active = (try? context.fetch(FetchDescriptor<DownloadItem>())) ?? []
+        func isOrphaned(_ item: DownloadItem) -> Bool {
+            item.status == .downloading && pendingBegins[item.id] == nil && directTasks[item.id] == nil && hlsTasks[item.id] == nil
+        }
         // Queued downloads never started, so they simply wait for a free slot.
-        for item in active where item.status == .downloading && pendingBegins[item.id] == nil && directTasks[item.id] == nil && hlsTasks[item.id] == nil {
+        for item in active where isOrphaned(item) {
+            // iOS can suspend the app after a finished file is saved but before it is checked.
+            if await savedFileIsComplete(item) {
+                if isOrphaned(item) { markCompleted(item, size: item.localURL.flatMap(DownloadStorage.allocatedSize(of:))) }
+                continue
+            }
+            guard isOrphaned(item) else { continue }
             item.status = .failed
-            item.errorMessage = FileManager.default.fileExists(atPath: item.resumeDataURL.path)
-                ? "Download was interrupted. Tap Retry to resume."
-                : "Download was interrupted. Tap Retry."
+            item.errorMessage = Self.interruptedMessage(resumable: FileManager.default.fileExists(atPath: item.resumeDataURL.path))
         }
         save()
         startQueued()
+        removeUnusedPackages()
+    }
+
+    /// HLS packages no download refers to, left by an attempt that was replaced or a crash. Only those
+    /// a day old go, so a package a task is just starting to write is never caught.
+    private func removeUnusedPackages(now: Date = Date()) {
+        // An empty test library refers to nothing, and a failed fetch must not look like one.
+        guard !context.container.configurations.contains(where: \.isStoredInMemoryOnly),
+              let items = try? context.fetch(FetchDescriptor<DownloadItem>()) else { return }
+        let library = DownloadStorage.containerRoot.appendingPathComponent("Library", isDirectory: true)
+        let folders = ((try? FileManager.default.contentsOfDirectory(at: library, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix("com.apple.UserManagedAssets") }
+        let packages = folders.flatMap { folder in
+            ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+                .filter { $0.pathExtension == "movpkg" }
+                .map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? now) }
+        }
+        let referenced = Set(items.compactMap { $0.localURL?.lastPathComponent })
+        for package in Self.unusedPackages(packages, referenced: referenced, now: now) {
+            try? FileManager.default.removeItem(at: package)
+            diagnostics?.record(event: "storage", url: "app://cleanup", note: "Removed unused stream package \(package.lastPathComponent)")
+        }
+    }
+
+    nonisolated static func unusedPackages(_ packages: [(URL, Date)], referenced: Set<String>, now: Date) -> [URL] {
+        packages.filter { url, modified in !referenced.contains(url.lastPathComponent) && now.timeIntervalSince(modified) > 86_400 }.map(\.0)
+    }
+
+    /// A saved file or package that plays: the transfer finished even though its check never ran.
+    private func savedFileIsComplete(_ item: DownloadItem) async -> Bool {
+        guard let url = item.localURL, FileManager.default.fileExists(atPath: url.path) else { return false }
+        let asset = AVURLAsset(url: url)
+        guard (try? await asset.load(.isPlayable)) == true else { return false }
+        // An HLS package is saved from its first segment, so only one that plays offline is finished.
+        guard item.kind == .hls else { return true }
+        guard asset.assetCache?.isPlayableOffline == true else { return false }
+        return !(await HLSMediaSelections.isOfflineAudioMissing(in: asset))
     }
 
     // MARK: Helpers
@@ -689,6 +844,17 @@ final class DownloadManager: NSObject, ObservableObject {
         guard let description = task.taskDescription,
               let suffix = description.split(separator: "|", maxSplits: 1).dropFirst().first else { return nil }
         return UUID(uuidString: String(suffix))
+    }
+
+    nonisolated static func interruptedMessage(resumable: Bool) -> String {
+        resumable ? "Download was interrupted. Tap Retry to resume." : "Download was interrupted. Tap Retry."
+    }
+
+    /// The chosen quality, else the best one below it, else the lowest.
+    nonisolated static func variantIndex(peakBitRates: [Double?], preferred: Int) -> Int? {
+        let rated = peakBitRates.enumerated().compactMap { index, rate in rate.map { (index, $0) } }
+        let target = Double(preferred)
+        return (rated.filter { $0.1 <= target }.max { $0.1 < $1.1 } ?? rated.min { $0.1 < $1.1 })?.0
     }
 
     nonisolated private static func prefix(of url: URL) -> Data? {

@@ -20,7 +20,9 @@ struct LibraryStats: Equatable {
     var addedThisWeekBytes: Int64 = 0
     /// Shows with saved episodes, largest first.
     var shows: [Group] = []
-    /// Videos that aren't episodes of a show.
+    /// Videos marked as movies, which My Videos keeps out of Not in a Show.
+    var movies = Group(id: "movies", name: "Movies", count: 0, bytes: 0)
+    /// Videos that aren't episodes of a show or movies.
     var notInShow = Group(id: "notInShow", name: "Not in a show", count: 0, bytes: 0)
     /// Largest first.
     var sites: [Group] = []
@@ -55,7 +57,9 @@ struct LibraryStats: Equatable {
         self.shows = Self.largestFirst(episodes.compactMap { id, items in
             id.flatMap { showsByID[$0] }.map { Group(id: $0.id.uuidString, name: $0.title, count: items.count, bytes: items.reduce(0) { $0 + size($1) }) }
         })
-        let loose = episodes[UUID?.none] ?? []
+        let movieItems = completed.filter(\.isMovie)
+        movies = Group(id: movies.id, name: movies.name, count: movieItems.count, bytes: movieItems.reduce(0) { $0 + size($1) })
+        let loose = (episodes[UUID?.none] ?? []).filter { !$0.isMovie }
         notInShow = Group(id: notInShow.id, name: notInShow.name, count: loose.count, bytes: loose.reduce(0) { $0 + size($1) })
 
         let bySite = Dictionary(grouping: completed) { $0.sourcePageURL.host.map(SiteNames.name(for:)) ?? "Other" }

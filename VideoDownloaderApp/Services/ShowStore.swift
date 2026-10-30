@@ -29,6 +29,7 @@ final class ShowStore: ObservableObject {
         for (index, item) in items.enumerated() {
             item.showID = show.id
             item.showOrder = index
+            item.isMovie = false
         }
         updateFollowedPage(show)
         save()
@@ -44,6 +45,7 @@ final class ShowStore: ObservableObject {
         for item in newcomers {
             item.showID = show.id
             item.showOrder = order
+            item.isMovie = false
             order += 1
         }
         updateFollowedPage(show)
@@ -54,7 +56,7 @@ final class ShowStore: ObservableObject {
     /// episodes' series name.
     @discardableResult
     func addToMatchingShow(_ item: DownloadItem) -> Show? {
-        guard item.showID == nil else { return nil }
+        guard item.showID == nil, !item.isMovie else { return nil }
         let parsed = ShowSuggestion.parse(item.displayTitle)
         guard parsed.episode != nil else { return nil }
         let all = videos()
@@ -105,6 +107,13 @@ final class ShowStore: ObservableObject {
         item.showOrder = nil
         renumber(episodes(of: show))
         updateFollowedPage(show)
+    }
+
+    /// A movie isn't an episode, so marking one takes it out of its show.
+    func setMovie(_ item: DownloadItem, _ movie: Bool) {
+        if movie, item.showID != nil { remove(item) }
+        item.isMovie = movie
+        save()
     }
 
     func move(in show: Show, from source: IndexSet, to destination: Int) {

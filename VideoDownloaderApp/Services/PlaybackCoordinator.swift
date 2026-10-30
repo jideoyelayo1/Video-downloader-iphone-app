@@ -37,6 +37,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// Subtitle files the site's player offered, saved with the download and drawn by `subtitleOverlay`.
     private var siteSubtitles: [SubtitleStore.Saved] = []
     private var siteCues: [Int: [SubtitleCue]] = [:]
+    /// Seconds a site subtitle is shown later than its file says (earlier if negative), for files out of sync.
+    private(set) var subtitleDelay: Double = 0
     private var subtitleObserver: Any?
     private var subtitleOverlay: SubtitleOverlayView?
     private var videoBoundsObservation: NSKeyValueObservation?
@@ -187,7 +189,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
         guard loadID == token else { return }
         let playerItem = AVPlayerItem(asset: asset)
-        playerItem.externalMetadata = [Self.titleMetadata(newItem.displayTitle)]
+        playerItem.externalMetadata = Self.nowPlayingMetadata(title: newItem.displayTitle, show: shows?.show(for: newItem)?.title,
+                                                              artwork: try? Data(contentsOf: DownloadStorage.thumbnailURL(for: newItem.id)))
         if let preferred = try? await asset.load(.preferredMediaSelection),
            let (group, option) = await HLSMediaSelections.audibleOption(for: asset, preferred: preferred) {
             playerItem.select(option, in: group)
@@ -229,7 +232,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         applyShowSpeed()
         configureRemoteCommands()
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 600), queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.savePosition() }
+            Task { @MainActor [weak self] in
+                self?.savePosition()
+                self?.rememberSpeedOutsideShows()
+            }
         }
         isLoading = false
         if position > 0 {
@@ -257,6 +263,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         captionOptions = embedded
         siteSubtitles = site
         siteCues = [:]
+        subtitleDelay = 0
         captionNames = Self.menuNames(embedded: embedded.map(\.displayName), site: site.map(\.displayName))
         guard !captionNames.isEmpty else {
             let note = group.map { $0.options.isEmpty ? "No caption track in saved media" : "Tracks advertised but absent from offline package" }
@@ -320,9 +327,9 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             return parsed
         }()
         let overlay = installSubtitleOverlay()
-        overlay.text = SubtitleParser.text(at: player.currentTime().seconds, in: cues)
-        subtitleObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 8), queue: .main) { [weak overlay] time in
-            MainActor.assumeIsolated { overlay?.text = SubtitleParser.text(at: time.seconds, in: cues) }
+        overlay.text = SubtitleParser.text(at: player.currentTime().seconds - subtitleDelay, in: cues)
+        subtitleObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 8), queue: .main) { [weak self, weak overlay] time in
+            MainActor.assumeIsolated { overlay?.text = SubtitleParser.text(at: time.seconds - (self?.subtitleDelay ?? 0), in: cues) }
         }
     }
 
@@ -332,9 +339,9 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         controller.contentOverlayView?.addSubview(overlay)
         overlay.videoFrame = controller.videoBounds
-        videoBoundsObservation = controller.observe(\.videoBounds, options: [.new]) { [weak overlay] controller, _ in
-            let bounds = controller.videoBounds
-            DispatchQueue.main.async { overlay?.videoFrame = bounds }
+        // KVO may report off the main thread; the player's views are read on it.
+        videoBoundsObservation = controller.observe(\.videoBounds, options: [.new]) { [weak self] controller, _ in
+            Task { @MainActor in self?.subtitleOverlay?.videoFrame = controller.videoBounds }
         }
         subtitleOverlay = overlay
         return overlay
@@ -574,7 +581,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             configuration.imagePadding = 2
             configuration.subtitleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
                 var attributes = attributes
-                attributes.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+                attributes.font = UIFontMetrics(forTextStyle: .caption2).scaledFont(for: .monospacedDigitSystemFont(ofSize: 10, weight: .medium))
                 return attributes
             }
             button.configuration = configuration
@@ -710,6 +717,13 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         skipIntroButton = button
     }
 
+    /// Videos that aren't in a show share one speed, the last chosen for any of them.
+    private func rememberSpeedOutsideShows() {
+        guard currentShow == nil, let rate = controller.selectedSpeed?.rate else { return }
+        if abs(rate - 1) < 0.01 { preferences.removeObject(forKey: Self.speedKey) } else { preferences.set(Double(rate), forKey: Self.speedKey) }
+    }
+    private static let speedKey = "playbackSpeed"
+
     /// AVKit's speed menu sets `selectedSpeed`; the show keeps the last one chosen.
     private func rememberShowSpeed(_ show: Show) {
         guard let rate = controller.selectedSpeed?.rate else { return }
@@ -720,7 +734,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     }
 
     private func applyShowSpeed() {
-        guard let rate = currentShow?.playbackRate,
+        let rate = currentShow.map(\.playbackRate) ?? preferences.object(forKey: Self.speedKey) as? Double
+        guard let rate,
               let speed = controller.speeds.first(where: { abs(Double($0.rate) - rate) < 0.01 }) else { return }
         controller.selectSpeed(speed)
     }
@@ -787,16 +802,41 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
                 self?.chooseCaption(offset + index)
             }
         }
-        subtitlesButton.menu = UIMenu(title: "Subtitles from the site", children: [off] + site)
+        var children: [UIMenuElement] = [off] + site
+        if let selectedCaption, selectedCaption >= offset {
+            let timing = [("Show Earlier", -0.5), ("Show Later", 0.5)].map { title, step in
+                UIAction(title: "\(title) (\(step > 0 ? "+" : "−")0.5 s)") { [weak self] _ in self?.shiftSubtitles(by: step) }
+            }
+            let reset = UIAction(title: "Reset Timing", attributes: subtitleDelay == 0 ? .disabled : []) { [weak self] _ in
+                self?.shiftSubtitles(by: -(self?.subtitleDelay ?? 0))
+            }
+            let delay = subtitleDelay == 0 ? "as in the file" : String(format: "%+.1f s", subtitleDelay)
+            children.append(UIMenu(title: "Timing: \(delay)", options: .displayInline, children: timing + [reset]))
+        }
+        subtitlesButton.menu = UIMenu(title: "Subtitles from the site", children: children)
         subtitlesButton.accessibilityValue = selectedCaption.map { captionNames[$0] } ?? "Off"
     }
 
-    private static func titleMetadata(_ title: String) -> AVMetadataItem {
-        let item = AVMutableMetadataItem()
-        item.identifier = .commonIdentifierTitle
-        item.value = title as NSString
-        item.extendedLanguageTag = "und"
-        return item
+    /// What the Lock Screen and Control Center show: the title, its show and the thumbnail.
+    func shiftSubtitles(by seconds: Double) {
+        subtitleDelay = ((subtitleDelay + seconds) * 10).rounded() / 10
+        if let selectedCaption, selectedCaption >= captionOptions.count { showSiteSubtitle(selectedCaption - captionOptions.count) }
+        refreshSubtitlesMenu()
+    }
+
+    private static func nowPlayingMetadata(title: String, show: String?, artwork: Data?) -> [AVMetadataItem] {
+        func item(_ identifier: AVMetadataIdentifier, _ value: NSCopying & NSObjectProtocol, dataType: String? = nil) -> AVMetadataItem {
+            let item = AVMutableMetadataItem()
+            item.identifier = identifier
+            item.value = value
+            item.extendedLanguageTag = "und"
+            if let dataType { item.dataType = dataType }
+            return item
+        }
+        var items = [item(.commonIdentifierTitle, title as NSString)]
+        if let show, show != title { items.append(item(.iTunesMetadataTrackSubTitle, show as NSString)) }
+        if let artwork { items.append(item(.commonIdentifierArtwork, artwork as NSData, dataType: kCMMetadataBaseDataType_JPEG as String)) }
+        return items
     }
 
     // MARK: Presentation

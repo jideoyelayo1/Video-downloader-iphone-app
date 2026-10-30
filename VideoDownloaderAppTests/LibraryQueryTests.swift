@@ -66,4 +66,34 @@ final class LibraryQueryTests: XCTestCase {
         XCTAssertEqual(LibraryQuery(labelIDs: [anime], searchText: "re:zero").apply(to: items).map(\.id), [a.id])
         XCTAssertEqual(LibraryQuery(searchText: "***REMOVED***").apply(to: items).count, 2, "search still finds the site in the full title")
     }
+
+    func testSearchFindsAShowsEpisodesAndALabelsVideosByName() {
+        let show = UUID(), label = UUID()
+        let episode = video("Ep. 3", downloaded: 1)
+        episode.showID = show
+        let labelled = video("Clip", downloaded: 2)
+        labelled.labelIDs = [label]
+        let other = video("Something else", downloaded: 3)
+        let names = [show: "Frieren", label: "Favourites"]
+        XCTAssertEqual(titles(LibraryQuery(searchText: "frieren", names: names).apply(to: [episode, labelled, other])), ["Ep. 3"])
+        XCTAssertEqual(titles(LibraryQuery(searchText: "favour", names: names).apply(to: [episode, labelled, other])), ["Clip"])
+        XCTAssertEqual(titles(LibraryQuery(searchText: "else", names: names).apply(to: [episode, labelled, other])), ["Something else"])
+    }
+
+    func testMoviesAndVideosNotInAShow() {
+        let show = UUID(), deletedShow = UUID()
+        let episode = video("Episode", downloaded: 4)
+        episode.showID = show
+        let orphan = video("Orphan", downloaded: 3)
+        orphan.showID = deletedShow
+        let movie = video("Movie", downloaded: 2)
+        movie.isMovie = true
+        let loose = video("Loose", downloaded: 1)
+        let items = [episode, orphan, movie, loose]
+        XCTAssertEqual(titles(LibraryQuery(group: .movies).apply(to: items)), ["Movie"])
+        XCTAssertEqual(titles(LibraryQuery(group: .notInShow, showIDs: [show]).apply(to: items)), ["Orphan", "Loose"],
+                       "an episode of a deleted show needs a show too; movies don't")
+        XCTAssertEqual(LibraryQuery(group: .all).apply(to: items).count, 4)
+        XCTAssertTrue(LibraryQuery(group: .movies).isFiltering)
+    }
 }

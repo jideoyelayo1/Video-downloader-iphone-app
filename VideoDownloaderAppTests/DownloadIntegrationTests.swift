@@ -220,6 +220,37 @@ final class DownloadIntegrationTests: XCTestCase {
         XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<DownloadItem>()), 1, "retry reuses the item")
     }
 
+    func testDroppedTransfersAreRetriedAutomaticallyThreeTimes() async throws {
+        manager.automaticRetryDelay = 0.01
+        let item = try start("/drop/video.mp4")
+        try await waitUntil(30) { item.status == .failed && item.errorMessage?.contains("Trying again") == false }
+        XCTAssertEqual(server.requests(to: "/drop/video.mp4").count, 4, "the first try and three automatic retries")
+    }
+
+    func testQueuedDownloadsCantPromiseMoreSpaceThanThereIs() async throws {
+        // Hold the first one's browser-context lookup, so it is under way without transferring anything.
+        var pending: CheckedContinuation<RequestContext?, Never>?
+        manager.requestContextProvider = { _, _ in await withCheckedContinuation { pending = $0 } }
+        let free = try XCTUnwrap(DownloadStorage.availableCapacity())
+        // The first leaves 300 MB, so the second's 200 MB plus the 200 MB margin doesn't fit.
+        let first = try XCTUnwrap(manager.start(candidate("/video.mp4"), expectedBytes: free - 300_000_000))
+        XCTAssertNil(manager.start(candidate("/other.mp4", title: "Second"), expectedBytes: 200_000_000))
+        XCTAssertNotNil(manager.startError)
+        try await waitUntil { pending != nil }
+        manager.cancel(first)
+        pending?.resume(returning: nil)
+        try await Task.sleep(for: .milliseconds(100))
+    }
+
+    func testOnlyOldPackagesNoDownloadRefersToAreRemoved() {
+        let now = Date()
+        let dayAgo = now.addingTimeInterval(-90_000)
+        let packages = [(URL(fileURLWithPath: "/L/a.movpkg"), dayAgo), (URL(fileURLWithPath: "/L/b.movpkg"), dayAgo),
+                        (URL(fileURLWithPath: "/L/c.movpkg"), now)]
+        XCTAssertEqual(DownloadManager.unusedPackages(packages, referenced: ["a.movpkg"], now: now).map(\.lastPathComponent), ["b.movpkg"],
+                       "c is new enough to belong to a task that is just starting")
+    }
+
     func testCancelThenRetryCompletesTheSameItem() async throws {
         let item = try start("/slow/video.mp4")
         try await waitUntil { manager.progress(of: item) > 0.1 }
@@ -332,6 +363,29 @@ final class DownloadIntegrationTests: XCTestCase {
         manager.retry(orphan)
         try await waitForFinish(orphan)
         XCTAssertEqual(orphan.status, .completed, orphan.errorMessage ?? "")
+    }
+
+    func testRelaunchCompletesADownloadWhoseFileWasSavedBeforeItsCheck() async throws {
+        let finished = DownloadItem(title: "Saved", remoteURL: server.url("/video.mp4"), sourcePageURL: server.url("/page/basic.html"), kind: .video, status: .downloading)
+        finished.localFileName = "relaunch-\(UUID().uuidString).mp4"
+        try server.fixtures.mp4.write(to: try XCTUnwrap(finished.localURL))
+        let unplayable = DownloadItem(title: "Not video", remoteURL: server.url("/page.html"), sourcePageURL: server.url("/page/basic.html"), kind: .video, status: .downloading)
+        unplayable.localFileName = "relaunch-\(UUID().uuidString).mp4"
+        try Data("<html></html>".utf8).write(to: try XCTUnwrap(unplayable.localURL))
+        container.mainContext.insert(finished)
+        container.mainContext.insert(unplayable)
+        await manager.restoreTasks()
+        XCTAssertEqual(finished.status, .completed, "the file was saved before iOS suspended the app")
+        XCTAssertNotNil(finished.fileSize)
+        XCTAssertEqual(unplayable.status, .failed, "a file that doesn't play is still interrupted")
+    }
+
+    func testTheChosenQualityIsDownloadedNotAHigherOne() {
+        let peaks: [Double?] = [5_000_000, 2_500_000, nil, 800_000]
+        XCTAssertEqual(DownloadManager.variantIndex(peakBitRates: peaks, preferred: 2_500_000), 1)
+        XCTAssertEqual(DownloadManager.variantIndex(peakBitRates: peaks, preferred: 3_000_000), 1, "the best one below")
+        XCTAssertEqual(DownloadManager.variantIndex(peakBitRates: peaks, preferred: 100_000), 3, "else the lowest")
+        XCTAssertNil(DownloadManager.variantIndex(peakBitRates: [nil], preferred: 1))
     }
 
     func testSiteSubtitlesAreSavedWithTheDownloadAndDeletedWithIt() async throws {

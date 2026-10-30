@@ -107,6 +107,12 @@ final class PlaybackCoordinatorTests: XCTestCase {
         let english = coordinator.captionNames.count - 1
         coordinator.chooseCaption(english)
         try await waitUntil("English cue drawn") { coordinator.siteSubtitleText == "Fixture English line" }
+        // An out-of-sync file can be moved; far enough and no line is due.
+        coordinator.shiftSubtitles(by: 10_000)
+        try await waitUntil("cue moved away") { coordinator.siteSubtitleText == nil }
+        coordinator.shiftSubtitles(by: -10_000)
+        XCTAssertEqual(coordinator.subtitleDelay, 0)
+        try await waitUntil("English cue drawn again") { coordinator.siteSubtitleText == "Fixture English line" }
         coordinator.chooseCaption(english - 1)
         try await waitUntil("Spanish cue drawn") { coordinator.siteSubtitleText == "Línea de prueba & más" }
         coordinator.chooseCaption(nil)

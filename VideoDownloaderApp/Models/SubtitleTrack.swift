@@ -32,7 +32,7 @@ struct SubtitleTrack: Codable, Hashable {
         let documentURL = (payload["documentURL"] as? String).flatMap(URL.init(string:)) ?? frameURL
         return entries.compactMap { entry in
             guard let raw = entry["url"] as? String, let url = URL(string: raw),
-                  ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+                  url.isWeb else { return nil }
             let label = cleanLabel((entry["label"] as? String) ?? "")
             var language = (entry["language"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             if language?.isEmpty != false { language = label.isEmpty ? languageCode(in: url) : languageCode(named: label) }

@@ -22,6 +22,7 @@ struct LibraryScreen: View {
     @State private var newTitle = ""
     @State private var searchText = ""
     @State private var selectedFolderID: UUID?
+    @State private var group = LibraryQuery.Group.all
     @State private var showingNewFolder = false
     @State private var showingManageFolders = false
     @State private var newFolderTitle = ""
@@ -32,8 +33,15 @@ struct LibraryScreen: View {
     @State private var newShowSeed: NewShowSeed?
     @State private var openedShow: Show?
     @State private var deletingShow: Show?
+    @State private var deletingVideo: DownloadItem?
+    /// Select mode: tapping a video ticks it, for the actions in the bar at the bottom.
+    @State private var selecting = false
+    @State private var selection: Set<UUID> = []
+    @State private var confirmingBulkDelete = false
     @State private var importingBackup = false
     @State private var restoreMessage: String?
+    /// Thumbnail cards grow with the text size, so their titles still fit.
+    @ScaledMetric(relativeTo: .footnote) private var cardWidth: CGFloat = 174
     @AppStorage("librarySort", store: AppServices.shared.preferences) private var sortRaw = LibraryQuery.Sort.newest.rawValue
     @AppStorage("libraryStatus", store: AppServices.shared.preferences) private var statusRaw = LibraryQuery.Status.all.rawValue
     @AppStorage("libraryLabels", store: AppServices.shared.preferences) private var labelFilterRaw = ""
@@ -42,9 +50,11 @@ struct LibraryScreen: View {
         // Labels deleted since they were chosen drop out of the filter.
         let existing = Set(allLabels.map(\.id))
         return LibraryQuery(sort: LibraryQuery.Sort(rawValue: sortRaw) ?? .newest,
-                            status: LibraryQuery.Status(rawValue: statusRaw) ?? .all,
-                            labelIDs: labelFilter.intersection(existing),
-                            folderID: selectedFolderID, searchText: searchText)
+                            status: LibraryQuery.Status(rawValue: statusRaw) ?? .all, group: group,
+                            showIDs: Set(shows.map(\.id)), labelIDs: labelFilter.intersection(existing),
+                            folderID: selectedFolderID, searchText: searchText,
+                            names: searchText.isEmpty ? [:] : Dictionary(shows.map { ($0.id, $0.title) } + allLabels.map { ($0.id, $0.name) },
+                                                                         uniquingKeysWith: { first, _ in first }))
     }
 
     private var labelFilter: Set<UUID> { Set(labelFilterRaw.split(separator: ",").compactMap { UUID(uuidString: String($0)) }) }
@@ -64,20 +74,22 @@ struct LibraryScreen: View {
         let query = query
         let displayed = query.apply(to: completed)
         let continueWatching = continueWatching
+        let home = selectedFolderID == nil && searchText.isEmpty && !query.isFiltering && !selecting
         let labelsByID = Dictionary(allLabels.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         NavigationStack {
             List {
                 expiryWarning
-                if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering, let hero = continueWatching.first {
+                if home, let hero = continueWatching.first {
                     heroSection(hero)
                 }
                 // The hero already shows the first one.
-                if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering && continueWatching.count > 1 {
+                if home && continueWatching.count > 1 {
                     continueWatchingSection(Array(continueWatching.dropFirst()))
                 }
-                if selectedFolderID == nil && searchText.isEmpty && !query.isFiltering { showsSection }
-                if displayed.isEmpty { emptyState }
-                allVideosSection(displayed, labelsByID: labelsByID)
+                if home { showsSection }
+                if home { moviesSection }
+                if displayed.isEmpty { emptyState(query) }
+                allVideosSection(displayed, title: query.group.name, labelsByID: labelsByID)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -86,16 +98,32 @@ struct LibraryScreen: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 if query.isFiltering || selectedFolderID != nil { filterChips(query) }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if selecting { selectionBar(displayed) }
+            }
             .navigationTitle("My Videos")
             .searchable(text: $searchText, prompt: "Search videos")
             .onChange(of: folders.map(\.id)) { _, ids in
                 if let selectedFolderID, !ids.contains(selectedFolderID) { self.selectedFolderID = nil }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if selecting || !displayed.isEmpty {
+                        Button(selecting ? "Done" : "Select") {
+                            selecting.toggle()
+                            selection = []
+                        }
+                        .accessibilityIdentifier("library.select")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) { sortAndFilterMenu(query) }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button("All Videos") { selectedFolderID = nil }
+                        Button("All Videos") { selectedFolderID = nil; group = .all }
+                        ForEach([LibraryQuery.Group.movies, .notInShow]) { place in
+                            Button(place.name, systemImage: place.systemImage) { group = place }
+                        }
+                        if !folders.isEmpty { Divider() }
                         ForEach(folders) { folder in
                             Button(folder.title) { selectedFolderID = folder.id }
                         }
@@ -104,7 +132,7 @@ struct LibraryScreen: View {
                         Button("Manage Folders", systemImage: "folder") { showingManageFolders = true }
                         Button("Manage Labels", systemImage: "tag") { showingManageLabels = true }
                         Divider()
-                        ShareLink(item: LibraryBackupFile { [modelContext] in LibraryBackup.make(from: modelContext) },
+                        ShareLink(item: LibraryBackupFile { [container = modelContext.container] in LibraryBackup.make(from: container.mainContext) },
                                   preview: SharePreview("Video Downloader Library")) {
                             Label("Back Up Library", systemImage: "square.and.arrow.up")
                         }
@@ -122,6 +150,15 @@ struct LibraryScreen: View {
             } message: { Text(restoreMessage ?? "") }
             .navigationDestination(item: $openedShow) { ShowScreen(show: $0) }
             .modifier(DeleteShowDialog(show: $deletingShow))
+            .modifier(DeleteVideoAlert(item: $deletingVideo))
+            .alert(selection.count == 1 ? "Delete 1 video?" : "Delete \(selection.count) videos?", isPresented: $confirmingBulkDelete) {
+                Button("Delete", role: .destructive) {
+                    downloads.delete(selectedItems)
+                    selection = []
+                    selecting = false
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: { Text("This frees \(StorageCleanup.sizeText(selectedItems)) on this iPhone.") }
             .alert("New Label", isPresented: Binding(get: { labelingItem != nil }, set: { if !$0 { labelingItem = nil } })) {
                 TextField("Label name", text: $newLabelName)
                 Button("Add") {
@@ -221,13 +258,43 @@ struct LibraryScreen: View {
     }
 
     private func continueWatchingSection(_ items: [DownloadItem]) -> some View {
+        cardRow(items, caption: { ($0.playbackPosition ?? 0) > 10 ? "Resume" : "Next Episode" },
+                play: { start($0, at: $0.playbackPosition ?? 0) }) { rowHeader("Continue Watching") }
+    }
+
+    /// Movies side by side, like Continue Watching; See All lists them with search and sort.
+    @ViewBuilder private var moviesSection: some View {
+        let movies = completed.filter { $0.isMovie && !$0.isStreamFragment }
+        if !movies.isEmpty {
+            // See All lists the rest.
+            cardRow(Array(movies.prefix(20)), caption: movieCaption, play: open) {
+                HStack {
+                    rowHeader("Movies")
+                    Spacer()
+                    Button("See All") { group = .movies }.font(.subheadline).textCase(nil)
+                        .accessibilityIdentifier("library.movies.seeAll")
+                }
+            }
+        }
+    }
+
+    private func movieCaption(_ item: DownloadItem) -> String {
+        if item.isWatched { return "Watched" }
+        if (item.playbackPosition ?? 0) > 10 { return "Resume" }
+        if let duration = item.duration, duration > 0 { return Duration.seconds(duration).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)) }
+        return item.fileSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? ""
+    }
+
+    /// Netflix's row of thumbnails, each with its title, a menu and a caption.
+    private func cardRow<Header: View>(_ items: [DownloadItem], caption: @escaping (DownloadItem) -> String,
+                                       play: @escaping (DownloadItem) -> Void, @ViewBuilder header: () -> Header) -> some View {
         Section {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
+                LazyHStack(alignment: .top, spacing: 10) {
                     ForEach(items) { item in
                         VStack(alignment: .leading, spacing: 6) {
-                            Button { start(item, at: item.playbackPosition ?? 0) } label: {
-                                VideoThumbnailView(item: item, width: 174, height: 98, showsWatchedBadge: false)
+                            Button { play(item) } label: {
+                                VideoThumbnailView(item: item, width: cardWidth, height: cardWidth * 98 / 174, showsWatchedBadge: false)
                                     .overlay {
                                         Image(systemName: "play.circle")
                                             .font(.system(size: 38, weight: .light)).foregroundStyle(.white)
@@ -236,6 +303,7 @@ struct LibraryScreen: View {
                                     .overlay(alignment: .bottom) { PlaybackProgressBar(item: item) }
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Play \(item.displayTitle)")
                             HStack(alignment: .top, spacing: 4) {
                                 Text(item.displayTitle).font(.footnote.bold()).lineLimit(2)
                                     .truncationMode(.middle)
@@ -247,10 +315,10 @@ struct LibraryScreen: View {
                                         .accessibilityLabel("More options for \(item.title)")
                                 }
                             }
-                            Text((item.playbackPosition ?? 0) > 10 ? "Resume" : "Next Episode")
+                            Text(caption(item))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                        .frame(width: 174, alignment: .leading)
+                        .frame(width: cardWidth, alignment: .leading)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -259,10 +327,10 @@ struct LibraryScreen: View {
             .listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)
             .listRowBackground(Color.black)
-        } header: { rowHeader("Continue Watching") }
+        } header: { header() }
     }
 
-    /// Suggested shows to confirm, then the viewer's shows.
+    /// Suggested shows to confirm, the viewer's shows, then the videos still to sort.
     @ViewBuilder private var showsSection: some View {
         let suggestions = ShowSuggestion.suggestions(items: completed, shows: shows, dismissed: showStore.dismissed)
         if !shows.isEmpty || !suggestions.isEmpty {
@@ -295,6 +363,20 @@ struct LibraryScreen: View {
                         Button("Delete", systemImage: "trash") { deletingShow = show }.tint(.red)
                     }
                 }
+                let loose = completed.filter(LibraryQuery(group: .notInShow, showIDs: Set(shows.map(\.id))).matches).count
+                if loose > 0 {
+                    Button { group = .notInShow } label: {
+                        HStack {
+                            Label(loose == 1 ? "1 video isn't in a show" : "\(loose) videos aren't in a show",
+                                  systemImage: LibraryQuery.Group.notInShow.systemImage)
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("library.notInShow")
+                }
             } header: { rowHeader("My Shows") }
         }
     }
@@ -307,10 +389,17 @@ struct LibraryScreen: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 14) {
-            ContentUnavailableView(playableCompletedCount == 0 ? "Your library is empty" : "No matching videos", systemImage: "play.rectangle",
-                                   description: Text(playableCompletedCount == 0 ? "Completed downloads play here, even offline." : "Try another search, filter or folder."))
+    private func emptyState(_ query: LibraryQuery) -> some View {
+        // Movies or Not in a Show is empty on its own, not just with the other filters.
+        let placeIsEmpty = !completed.contains(where: LibraryQuery(group: query.group, showIDs: query.showIDs).matches)
+        let (title, detail): (String, String) = switch (playableCompletedCount, query.group, placeIsEmpty) {
+        case (0, _, _): ("Your library is empty", "Completed downloads play here, even offline.")
+        case (_, .movies, true): ("No movies yet", "Choose Mark as Movie in a video's menu to put it here.")
+        case (_, .notInShow, true): ("Every video is sorted", "Each one is in a show or under Movies.")
+        default: ("No matching videos", "Try another search, filter or folder.")
+        }
+        return VStack(spacing: 14) {
+            ContentUnavailableView(title, systemImage: query.group.systemImage, description: Text(detail))
             if playableCompletedCount == 0 {
                 Button { showBrowse() } label: { Label("Find a video", systemImage: "safari") }
                     .buttonStyle(.borderedProminent)
@@ -320,23 +409,36 @@ struct LibraryScreen: View {
         .padding(.vertical, 20)
     }
 
-    private func allVideosSection(_ displayed: [DownloadItem], labelsByID: [UUID: VideoLabel]) -> some View {
+    private func allVideosSection(_ displayed: [DownloadItem], title: String, labelsByID: [UUID: VideoLabel]) -> some View {
         Section {
             ForEach(displayed) { item in
                 // SwiftUI can rebuild a row from the old list after its video was deleted (from a show's page).
                 if !item.isDeleted, item.modelContext != nil {
                     HStack(spacing: 4) {
-                        Button { open(item) } label: { LibraryRow(item: item, labels: item.labelIDs?.compactMap { labelsByID[$0] } ?? []) }
-                            .buttonStyle(.plain)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityIdentifier("library.item")
-                        Menu { actions(for: item) } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.title3)
-                                .frame(minWidth: 40, minHeight: 44)
-                                .accessibilityLabel("More options for \(item.title)")
+                        let selected = selection.contains(item.id)
+                        Button { selecting ? toggleSelection(item) : open(item) } label: {
+                            HStack(spacing: 10) {
+                                if selecting {
+                                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                                        .font(.title2).foregroundStyle(selected ? Color.brandRed : .secondary)
+                                        .accessibilityHidden(true)
+                                }
+                                LibraryRow(item: item, labels: item.labelIDs?.compactMap { labelsByID[$0] } ?? [])
+                            }
                         }
-                        .accessibilityIdentifier("library.moreOptions")
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityAddTraits(selecting && selected ? .isSelected : [])
+                        .accessibilityIdentifier("library.item")
+                        if !selecting {
+                            Menu { actions(for: item) } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.title3)
+                                    .frame(minWidth: 40, minHeight: 44)
+                                    .accessibilityLabel("More options for \(item.title)")
+                            }
+                            .accessibilityIdentifier("library.moreOptions")
+                        }
                     }
                     .contextMenu { actions(for: item) }
                     .swipeActions(edge: .leading) {
@@ -346,12 +448,56 @@ struct LibraryScreen: View {
                         .tint(.green)
                     }
                     .swipeActions(edge: .trailing) {
-                        Button("Delete", role: .destructive) { downloads.delete(item) }
+                        // Not .destructive: that removes the row before the alert is answered.
+                        Button("Delete") { deletingVideo = item }.tint(.red)
                         Button("Rename") { beginRename(item) }.tint(.blue)
                     }
                 }
             }
-        } header: { if !displayed.isEmpty { rowHeader("All Videos") } }
+        } header: { if !displayed.isEmpty { rowHeader(title) } }
+    }
+
+    private var selectedItems: [DownloadItem] { completed.filter { selection.contains($0.id) } }
+
+    private func toggleSelection(_ item: DownloadItem) {
+        if selection.contains(item.id) { selection.remove(item.id) } else { selection.insert(item.id) }
+    }
+
+    /// The actions for the ticked videos, over the tab bar.
+    private func selectionBar(_ displayed: [DownloadItem]) -> some View {
+        let items = selectedItems
+        let allSelected = !displayed.isEmpty && displayed.allSatisfy { selection.contains($0.id) }
+        return HStack(spacing: 18) {
+            Button(allSelected ? "Deselect All" : "Select All") {
+                selection = allSelected ? [] : Set(displayed.map(\.id))
+            }
+            Spacer()
+            Menu {
+                Button("Mark as Watched", systemImage: "checkmark.circle") { items.forEach { $0.setWatched(true) }; try? modelContext.save() }
+                Button("Mark as Unwatched", systemImage: "circle") { items.forEach { $0.setWatched(false) }; try? modelContext.save() }
+                Button("Mark as Movies", systemImage: "film") { items.forEach { showStore.setMovie($0, true) } }
+                Button("Not Movies", systemImage: "film.stack") { items.forEach { showStore.setMovie($0, false) } }
+                Menu("Add to Show", systemImage: "rectangle.stack.badge.plus") {
+                    ForEach(shows) { show in Button(show.title) { showStore.add(items, to: show) } }
+                    Button("New Show…", systemImage: "plus") {
+                        newShowSeed = NewShowSeed(title: items.first.map { ShowSuggestion.parse($0.displayTitle).series } ?? "", selected: selection)
+                    }
+                }
+                Menu("Move to Folder", systemImage: "folder") {
+                    Button("No Folder") { items.forEach { $0.folderID = nil }; try? modelContext.save() }
+                    ForEach(folders) { folder in
+                        Button(folder.title) { items.forEach { $0.folderID = folder.id }; try? modelContext.save() }
+                    }
+                }
+            } label: { Label("Actions", systemImage: "ellipsis.circle") }
+            .disabled(items.isEmpty)
+            Button(role: .destructive) { confirmingBulkDelete = true } label: { Label("Delete", systemImage: "trash") }
+                .disabled(items.isEmpty)
+                .accessibilityIdentifier("library.deleteSelected")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 
     private func sortAndFilterMenu(_ query: LibraryQuery) -> some View {
@@ -391,6 +537,9 @@ struct LibraryScreen: View {
     private func filterChips(_ query: LibraryQuery) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                if query.group != .all {
+                    FilterChip(title: query.group.name, systemImage: query.group.systemImage, color: .brandRed) { group = .all }
+                }
                 if let folderID = query.folderID, let folder = folders.first(where: { $0.id == folderID }) {
                     FilterChip(title: folder.title, systemImage: "folder", color: .brandRed) { selectedFolderID = nil }
                 }
@@ -408,6 +557,7 @@ struct LibraryScreen: View {
     }
 
     private func clearFilters() {
+        group = .all
         statusRaw = LibraryQuery.Status.all.rawValue
         labelFilterRaw = ""
     }
@@ -436,6 +586,9 @@ struct LibraryScreen: View {
         if item.showID != nil {
             Button { showStore.remove(item) } label: { Label("Remove from Show", systemImage: "rectangle.stack.badge.minus") }
         }
+        Button { showStore.setMovie(item, !item.isMovie) } label: {
+            Label(item.isMovie ? "Not a Movie" : "Mark as Movie", systemImage: item.isMovie ? "film.stack" : "film")
+        }
         Menu {
             Button("No Folder") { item.folderID = nil; try? modelContext.save() }
             ForEach(folders) { folder in
@@ -445,7 +598,7 @@ struct LibraryScreen: View {
         if item.kind != .hls, let url = item.localURL {
             ShareLink(item: url, preview: SharePreview(item.title)) { Label("Export", systemImage: "square.and.arrow.up") }
         }
-        Button(role: .destructive) { downloads.delete(item) } label: { Label("Delete", systemImage: "trash") }
+        Button(role: .destructive) { deletingVideo = item } label: { Label("Delete…", systemImage: "trash") }
     }
 
     private func setWatched(_ item: DownloadItem, _ watched: Bool) {
@@ -461,6 +614,8 @@ struct LibraryScreen: View {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             let summary = try LibraryBackup.decode(Data(contentsOf: url)).restore(into: modelContext)
             restoreMessage = summary.text
+        } catch let error as LibraryBackup.RestoreError {
+            restoreMessage = error.localizedDescription
         } catch {
             restoreMessage = "That file isn't a Video Downloader library backup."
         }
@@ -617,10 +772,11 @@ struct VideoThumbnailView: View {
             .frame(width: width, height: height)
             .frame(maxWidth: width == nil ? .infinity : nil)
             .overlay {
+                // Decorative: the row or card names the video.
                 if let image = image ?? ThumbnailCache.shared.cachedImage(for: item.id, fileName: item.localFileName) {
-                    Image(uiImage: image).resizable().scaledToFill()
+                    Image(uiImage: image).resizable().scaledToFill().accessibilityHidden(true)
                 } else {
-                    Image(systemName: "film").font(.title2).foregroundStyle(.tint)
+                    Image(systemName: "film").font(.title2).foregroundStyle(.tint).accessibilityHidden(true)
                 }
             }
             .overlay(alignment: .topTrailing) {

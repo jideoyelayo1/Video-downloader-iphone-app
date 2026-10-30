@@ -59,9 +59,9 @@ enum ShowSuggestion {
     }
 
     /// Two or more saved episodes of a series that isn't a show yet, or newer episodes of an
-    /// existing show (matched by name). Dismissed suggestions stay hidden.
+    /// existing show (matched by name). Dismissed suggestions and movies stay hidden.
     static func suggestions(items: [DownloadItem], shows: [Show], dismissed: Set<String>) -> [Suggestion] {
-        let candidates = items.filter { $0.status == .completed && !$0.isStreamFragment && $0.showID == nil }
+        let candidates = items.filter { $0.status == .completed && !$0.isStreamFragment && $0.showID == nil && !$0.isMovie }
         let parsed = candidates.map { ($0, parse($0.displayTitle)) }.filter { $0.1.episode != nil }
         let groups = Dictionary(grouping: parsed, by: \.1.key)
         let showsByKey = Dictionary(shows.map { (Parsed(series: $0.title, season: nil, episode: nil).key, $0) }, uniquingKeysWith: { first, _ in first })
@@ -81,6 +81,28 @@ enum ShowPlaylist {
             let left = a.showOrder ?? Int.max, right = b.showOrder ?? Int.max
             return left != right ? left < right : a.displayTitle.localizedStandardCompare(b.displayTitle) == .orderedAscending
         }
+    }
+
+    struct SeasonRun: Identifiable, Equatable {
+        let season: Int?
+        let range: Range<Int>
+        var id: Int { range.lowerBound }
+    }
+
+    /// A show page's sections: one per season when every title names its season ("S2E3") and
+    /// there's more than one, else one. Each is a run of the watch order, so moves stay within it.
+    static func seasonRuns(_ episodes: [DownloadItem]) -> [SeasonRun] {
+        var runs: [SeasonRun] = []
+        for (index, item) in episodes.enumerated() {
+            let season = ShowSuggestion.parse(item.title).season
+            if let last = runs.last, last.season == season {
+                runs[runs.count - 1] = SeasonRun(season: season, range: last.range.lowerBound..<index + 1)
+            } else {
+                runs.append(SeasonRun(season: season, range: index..<index + 1))
+            }
+        }
+        guard runs.count > 1, runs.allSatisfy({ $0.season != nil }) else { return [SeasonRun(season: nil, range: episodes.indices)] }
+        return runs
     }
 
     static func next(after item: DownloadItem, in episodes: [DownloadItem]) -> DownloadItem? {

@@ -442,7 +442,7 @@ private struct BrowserCollectionsSheet: View {
     }
 
     @ViewBuilder private var bookmarksContent: some View {
-        if let currentURL, ["http", "https"].contains(currentURL.scheme?.lowercased() ?? "") {
+        if let currentURL, currentURL.isWeb {
             Section {
                 Button {
                     guard !bookmarks.contains(where: { $0.url == currentURL }) else { return }

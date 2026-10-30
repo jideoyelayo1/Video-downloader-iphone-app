@@ -66,6 +66,11 @@ struct SettingsScreen: View {
                 .accessibilityIdentifier("settings.concurrent")
             Toggle("Wi-Fi Only", isOn: Binding(get: { downloads.downloadsOnWiFiOnly }, set: { downloads.downloadsOnWiFiOnly = $0 }))
                 .accessibilityIdentifier("settings.wifiOnly")
+            Toggle("Notify When Finished", isOn: Binding(get: { downloads.notifiesWhenFinished }, set: { on in
+                downloads.notifiesWhenFinished = on
+                if on { Task { _ = await NewEpisodeChecker.requestPermission() } }
+            }))
+            .accessibilityIdentifier("settings.notifyFinished")
         } header: {
             Text("Downloads")
         } footer: {
@@ -185,8 +190,10 @@ struct StatisticsScreen: View {
                 LabeledContent("Added This Week", value: countAndSize(stats.addedThisWeek, stats.addedThisWeekBytes))
             }
             if !stats.shows.isEmpty {
-                let groups = stats.shows + (stats.notInShow.count > 0 ? [stats.notInShow] : [])
-                Section("Space by Show") { sizeRows(groups, noun: { $0 == stats.notInShow ? "video" : "episode" }) }
+                let groups = stats.shows + [stats.movies, stats.notInShow].filter { $0.count > 0 }
+                Section("Space by Show") {
+                    sizeRows(groups, noun: { $0 == stats.movies ? "movie" : $0 == stats.notInShow ? "video" : "episode" })
+                }
             }
             if !stats.sites.isEmpty {
                 Section("Space by Site") { sizeRows(stats.sites, noun: { _ in "video" }) }

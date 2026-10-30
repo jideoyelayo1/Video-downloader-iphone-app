@@ -176,7 +176,7 @@ final class BrowserViewModel: ObservableObject {
     /// Navigation callbacks miss same-document changes (pushState) that some routers make
     /// without going through the page's `history.pushState`, so the web view's own state is watched.
     private func observe(_ webView: WKWebView) {
-        func watch<Value>(_ keyPath: KeyPath<WKWebView, Value>, _ update: @escaping @MainActor (BrowserViewModel, WKWebView) -> Void) -> NSKeyValueObservation {
+        func watch<Value>(_ keyPath: KeyPath<WKWebView, Value>, _ update: @escaping @MainActor @Sendable (BrowserViewModel, WKWebView) -> Void) -> NSKeyValueObservation {
             webView.observe(keyPath, options: [.new]) { [weak self] webView, _ in
                 let apply = {
                     MainActor.assumeIsolated {
@@ -206,7 +206,7 @@ final class BrowserViewModel: ObservableObject {
     }
 
     private func webViewURLChanged(_ webView: WKWebView) {
-        guard let newURL = webView.url, ["http", "https"].contains(newURL.scheme?.lowercased()) else { return }
+        guard let newURL = webView.url, newURL.isWeb else { return }
         // A full navigation is handled by the navigation delegate once it commits or finishes.
         guard !webView.isLoading else { return }
         pageDidChange(to: newURL, force: false)
@@ -226,7 +226,7 @@ final class BrowserViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let value = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-        guard let target = URL(string: value), ["http", "https"].contains(target.scheme?.lowercased()), target.host != nil else {
+        guard let target = URL(string: value), target.isWeb, target.host != nil else {
             errorMessage = "Enter a valid web address."
             return
         }
@@ -304,7 +304,7 @@ final class BrowserViewModel: ObservableObject {
         subtitleTracks.removeAll()
         posterURL = nil
         posterIsFromPlayer = false
-        if let newURL, ["http", "https"].contains(newURL.scheme?.lowercased()) {
+        if let newURL, newURL.isWeb {
             url = newURL
             if !isEditingAddress { addressText = newURL.absoluteString }
             if !force { history?.record(newURL, title: newURL.host ?? "") }
@@ -318,9 +318,17 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func add(_ candidate: MediaCandidate) {
-        guard !variantURLs.contains(MediaDiscovery.normalizedURL(candidate.url)),
-              !MediaDiscovery.isDuplicate(candidate, in: candidates) else { return }
+        guard !variantURLs.contains(MediaDiscovery.normalizedURL(candidate.url)) else { return }
+        if let known = candidates.first(where: { MediaDiscovery.isDuplicate(candidate, in: [$0]) }) {
+            // A check that timed out or lost the network is tried again when the page offers the video again.
+            if case .unavailable(let error) = statuses[known.id], error.isTransient { validate(known) }
+            return
+        }
         candidates.insert(candidate, at: 0)
+        validate(candidate)
+    }
+
+    private func validate(_ candidate: MediaCandidate) {
         statuses[candidate.id] = .checking
         let generation = generation
         Task {

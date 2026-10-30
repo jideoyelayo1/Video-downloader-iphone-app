@@ -232,7 +232,10 @@ final class DownloadFlowUITests: XCTestCase {
 
         // Delete
         app.buttons["library.item"].firstMatch.press(forDuration: 1.2)
-        app.buttons["Delete"].firstMatch.tap()
+        app.buttons["Delete…"].firstMatch.tap()
+        let confirm = app.alerts["Delete this video?"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.buttons["Delete"].tap()
         XCTAssertTrue(app.staticTexts["Your library is empty"].waitForExistence(timeout: 5))
     }
 
@@ -462,6 +465,19 @@ final class DownloadFlowUITests: XCTestCase {
         menu.tap()
         app.buttons["Clear Filters"].tap()
         wait(for: app.buttons.matching(identifier: "library.item").element(boundBy: 1), "exists == true", timeout: 5, "filters cleared")
+    }
+
+    func testSelectSeveralVideosAndDeleteThemTogether() throws {
+        downloadBasicAndCaptioned()
+        app.buttons["library.select"].tap()
+        let items = app.buttons.matching(identifier: "library.item")
+        items.element(boundBy: 0).tap()
+        items.element(boundBy: 1).tap()
+        app.buttons["library.deleteSelected"].tap()
+        let confirm = app.alerts["Delete 2 videos?"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.buttons["Delete"].tap()
+        XCTAssertTrue(app.staticTexts["Your library is empty"].waitForExistence(timeout: 5))
     }
 
     func testShowFromSuggestionKeepsTheViewersOrder() throws {

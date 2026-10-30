@@ -48,7 +48,8 @@ final class DiagnosticsLog: ObservableObject {
     }
 
     static let maxEntries = 1000
-    private static let timestampFormatter = ISO8601DateFormatter()
+    /// Read from entries made off the main actor too; ISO8601DateFormatter is thread-safe.
+    nonisolated(unsafe) private static let timestampFormatter = ISO8601DateFormatter()
     private static let urlPattern = try! NSRegularExpression(pattern: #"https?://[^\s)]+"#)
 
     @Published private(set) var entries: [Entry] = []

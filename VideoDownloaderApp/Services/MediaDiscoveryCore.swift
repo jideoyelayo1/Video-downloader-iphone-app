@@ -12,9 +12,7 @@ enum MediaDiscovery {
     static func candidate(from payload: Any, sourcePageURL: URL, frameURL: URL? = nil, isMainFrame: Bool = true) -> MediaCandidate? {
         guard let dictionary = payload as? [String: Any],
               let rawURL = dictionary["url"] as? String,
-              let url = URL(string: rawURL),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
+              let url = URL(string: rawURL), url.isWeb,
               !rawURL.lowercased().hasPrefix("blob:") else { return nil }
 
         let title = (dictionary["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -53,4 +51,9 @@ enum MediaDiscovery {
         guard isMainFrame, let documentURL else { return false }
         return normalizedURL(documentURL) != normalizedURL(currentPageURL)
     }
+}
+
+extension URL {
+    /// http or https: the only links the browser follows and downloads use.
+    var isWeb: Bool { ["http", "https"].contains(scheme?.lowercased()) }
 }

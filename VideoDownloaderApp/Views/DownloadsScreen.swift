@@ -93,6 +93,9 @@ private struct LiveProgress<Content: View>: View {
 
 private struct DownloadRow: View {
     @EnvironmentObject private var downloads: DownloadManager
+    @EnvironmentObject private var seasons: SeasonDownloader
+    @State private var findingLink = false
+    @State private var noFreshLink = false
     @ObservedObject private var network = NetworkMonitor.shared
     let item: DownloadItem
     let cancel: () -> Void
@@ -141,10 +144,19 @@ private struct DownloadRow: View {
                 Text(error.contains("CoreMediaErrorDomain") ? "The video server stopped this transfer. Open the page and try again later." : error)
                     .font(.caption).foregroundStyle(.orange).lineLimit(3)
             }
+            if noFreshLink {
+                Text("The page didn't offer the video. Open Page, play it, then download it again.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             HStack {
                 if item.isActive { Button("Cancel", action: cancel) }
                 if item.status == .failed || item.status == .cancelled {
-                    if !isRateLimited { Button(canResume ? "Resume" : "Retry", action: retry).buttonStyle(.borderedProminent) }
+                    if linkExpired {
+                        Button(findingLink ? "Finding a New Link…" : "Find New Link", action: findNewLink)
+                            .buttonStyle(.borderedProminent).disabled(findingLink)
+                    } else if !isRateLimited {
+                        Button(canResume ? "Resume" : "Retry", action: retry).buttonStyle(.borderedProminent)
+                    }
                     if item.kind == .hls || isRateLimited { Button("Open Page", action: openSource).buttonStyle(.borderedProminent) }
                 }
                 Spacer()
@@ -173,8 +185,22 @@ private struct DownloadRow: View {
         }
     }
 
+    /// Direct files resume from iOS's resume data; streams from the part of their package already saved.
     private var canResume: Bool {
-        item.kind != .hls && FileManager.default.fileExists(atPath: item.resumeDataURL.path)
+        if item.kind == .hls { return !item.requiresReferer && item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } == true }
+        return FileManager.default.fileExists(atPath: item.resumeDataURL.path)
+    }
+    private var linkExpired: Bool {
+        [DownloadError.expiredLink.message, DownloadError.notFound.message].contains(item.errorMessage)
+    }
+
+    private func findNewLink() {
+        findingLink = true
+        noFreshLink = false
+        Task {
+            noFreshLink = !(await seasons.refreshLink(of: item))
+            findingLink = false
+        }
     }
     private var isRateLimited: Bool { item.errorMessage?.contains("HTTP 429") == true }
 

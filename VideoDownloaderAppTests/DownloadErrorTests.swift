@@ -23,6 +23,28 @@ final class DownloadErrorTests: XCTestCase {
         if case .other = DownloadError.from(URLError(.badServerResponse)) {} else { XCTFail() }
     }
 
+    func testStreamServerStatusCodesKeepTheirMeaning() {
+        func coreMedia(_ text: String) -> Error {
+            NSError(domain: "CoreMediaErrorDomain", code: -12660, userInfo: [NSLocalizedDescriptionKey: text])
+        }
+        XCTAssertEqual(DownloadError.from(coreMedia("HTTP 403: Forbidden")), .expiredLink)
+        XCTAssertEqual(DownloadError.from(coreMedia("HTTP 404: File Not Found")), .notFound)
+        XCTAssertEqual(DownloadError.from(coreMedia("HTTP 429: Too Many Requests")), .rateLimited)
+        XCTAssertEqual(DownloadError.from(coreMedia("HTTP 503: Service Unavailable")), .httpStatus(503))
+        XCTAssertEqual(DownloadError.from(coreMedia("Cannot Open")), .other("Cannot Open"))
+    }
+
+    func testOnlyDroppedConnectionsAndBusyServersAreRetriedAutomatically() {
+        XCTAssertTrue(DownloadError.networkLost.isTransient)
+        XCTAssertTrue(DownloadError.timedOut.isTransient)
+        XCTAssertTrue(DownloadError.offline.isTransient)
+        XCTAssertTrue(DownloadError.httpStatus(502).isTransient)
+        XCTAssertFalse(DownloadError.httpStatus(418).isTransient)
+        XCTAssertFalse(DownloadError.expiredLink.isTransient, "needs a fresh link from the page")
+        XCTAssertFalse(DownloadError.rateLimited.isTransient, "retrying soon makes it worse")
+        XCTAssertFalse(DownloadError.insufficientStorage(required: nil, available: nil).isTransient)
+    }
+
     func testDiskFullErrors() {
         XCTAssertEqual(DownloadError.from(NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)), .insufficientStorage(required: nil, available: nil))
         XCTAssertEqual(DownloadError.from(NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC))), .insufficientStorage(required: nil, available: nil))

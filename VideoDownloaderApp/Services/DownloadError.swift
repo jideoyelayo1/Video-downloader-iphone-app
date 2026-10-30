@@ -50,6 +50,15 @@ enum DownloadError: Error, Equatable {
         }
     }
 
+    /// A dropped connection or a busy server, which is worth trying again by itself.
+    var isTransient: Bool {
+        switch self {
+        case .offline, .networkLost, .timedOut: return true
+        case .httpStatus(let code): return (500..<600).contains(code)
+        default: return false
+        }
+    }
+
     static func from(statusCode: Int) -> DownloadError? {
         switch statusCode {
         case 200..<300: return nil
@@ -74,12 +83,15 @@ enum DownloadError: Error, Equatable {
             }
         }
         let nsError = error as NSError
-        if nsError.domain == "CoreMediaErrorDomain", nsError.localizedDescription.contains("HTTP 429") {
-            return .rateLimited
-        }
         if nsError.domain == "CoreMediaErrorDomain", nsError.code == -16847,
            nsError.localizedDescription.contains("HTTP 500") {
             return .other("The video server returned HTTP 500 during download. Replay the episode in Browse to get a fresh link, then download it again.")
+        }
+        // A stream server's status only appears in the message, as "HTTP 403".
+        if nsError.domain == "CoreMediaErrorDomain",
+           let range = nsError.localizedDescription.range(of: #"HTTP \d{3}"#, options: .regularExpression),
+           let code = Int(nsError.localizedDescription[range].suffix(3)), let mapped = from(statusCode: code) {
+            return mapped
         }
         if isOutOfSpace(nsError) { return .insufficientStorage(required: nil, available: nil) }
         return .other(error.localizedDescription)

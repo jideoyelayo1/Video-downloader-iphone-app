@@ -42,9 +42,17 @@ final class NewEpisodeChecker {
         checking = true
         defer { checking = false }
         var found = 0
-        for show in shows.shows where show.notifyNewEpisodes || show.autoDownloadNewEpisodes {
+        let followed = shows.shows.filter { $0.notifyNewEpisodes || $0.autoDownloadNewEpisodes }
+        // Longest unchecked first, in case iOS ends a background refresh part-way.
+        for show in followed.sorted(by: { ($0.lastCheckedAt ?? .distantPast) < ($1.lastCheckedAt ?? .distantPast) }) {
             if !force, let last = show.lastCheckedAt, now.timeIntervalSince(last) < interval { continue }
-            if await check(show, now: now) { found += 1 }
+            // A show with several episodes out catches up, a few at a time.
+            for _ in 0..<3 {
+                let following = show.followSourceURL
+                guard await check(show, now: now) else { break }
+                found += 1
+                guard show.followSourceURL != following else { break }
+            }
         }
         return found
     }
@@ -70,17 +78,22 @@ final class NewEpisodeChecker {
         }
         var notified = Set(preferences.stringArray(forKey: Self.notifiedKey) ?? [])
         let episode = EpisodeURL.number(in: next).map { "Episode \($0)" } ?? "The next episode"
-        if show.autoDownloadNewEpisodes, let item = download(result), item.showID != show.id {
-            shows.add([item], to: show)
-        }
+        // Nil when the download was refused, for example for lack of storage.
+        let item = show.autoDownloadNewEpisodes ? download(result) : nil
+        if let item, item.showID != show.id { shows.add([item], to: show) }
         if !notified.contains(next.absoluteString) {
             notified.insert(next.absoluteString)
             preferences.set(Array(notified), forKey: Self.notifiedKey)
-            await notify("\(episode) of \(show.title) is out",
-                         show.autoDownloadNewEpisodes ? "It's downloading now." : "Open the show's page in Browse to download it.")
+            await notify("\(episode) of \(show.title) is out", Self.notificationBody(autoDownload: show.autoDownloadNewEpisodes, started: item != nil))
         }
         diagnostics?.record(event: "new-episode", url: next.absoluteString, note: "\(show.title): found")
         return true
+    }
+
+    static func notificationBody(autoDownload: Bool, started: Bool) -> String {
+        if started { return "It's downloading now." }
+        return autoDownload ? "It couldn't download automatically. Open the show's page in Browse to download it."
+                            : "Open the show's page in Browse to download it."
     }
 
     static func postNotification(title: String, body: String) async {
