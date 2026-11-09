@@ -219,40 +219,13 @@ struct ShowScreen: View {
             ForEach(ShowPlaylist.seasonRuns(episodes)) { run in
                 Section {
                     // Positions in the run, for moves and deletes; each element keeps its place in the whole show.
-                    ForEach(Array(Array(episodes.enumerated())[run.range]), id: \.element.id) { index, item in
-                        // A row button and a separate Delete button: a button inside another's label takes its taps on iOS 18.
-                        HStack(spacing: 4) {
-                            Button { open(item) } label: { EpisodeRow(number: index - run.range.lowerBound + 1, item: item) }
-                                .buttonStyle(.plain)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .accessibilityIdentifier("show.episode")
-                            if item.isWatched {
-                                Button { deletingEpisode = item } label: {
-                                    Image(systemName: "trash").font(.title3).foregroundStyle(.red).frame(minWidth: 44, minHeight: 44)
-                                }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel("Delete \(item.displayTitle)")
-                                .accessibilityIdentifier("show.deleteEpisode")
-                            }
-                        }
-                        .swipeActions(edge: .leading) {
-                            Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
-                                item.setWatched(!item.isWatched)
-                                shows.save()
-                            }
-                            .tint(.green)
-                        }
-                        .contextMenu {
-                            Button(item.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
-                                item.setWatched(!item.isWatched)
-                                shows.save()
-                            }
-                            Button("Remove from Show", systemImage: "rectangle.stack.badge.minus") { shows.remove(item) }
-                            Button("Delete Episode…", systemImage: "trash", role: .destructive) { deletingEpisode = item }
-                        }
+                    let rows = Array(Array(episodes.enumerated())[run.range])
+                    let start = run.range.lowerBound
+                    ForEach(rows, id: \.element.id) { index, item in
+                        episodeRow(item, number: index - start + 1)
                     }
-                    .onMove { shows.move(in: show, from: IndexSet($0.map { $0 + run.range.lowerBound }), to: $1 + run.range.lowerBound) }
-                    .onDelete { offsets in offsets.map { episodes[$0 + run.range.lowerBound] }.forEach(shows.remove) }
+                    .onMove { moveEpisodes(from: $0, to: $1, start: start) }
+                    .onDelete { removeEpisodes(at: $0, of: episodes, start: start) }
                 } header: {
                     Text(run.season.map { "Season \($0)" } ?? "Episodes").font(.title3.bold()).foregroundStyle(.white).textCase(nil)
                 }
@@ -345,6 +318,48 @@ struct ShowScreen: View {
     static func episodeName(_ item: DownloadItem, in episodes: [DownloadItem]) -> String {
         if let episode = ShowSuggestion.parse(item.displayTitle).episode { return "Ep. \(episode)" }
         return "Episode \((episodes.firstIndex { $0.id == item.id } ?? 0) + 1)"
+    }
+
+    // The row and its list actions sit outside `body` because Xcode 26 can't type-check them as one expression.
+    private func episodeRow(_ item: DownloadItem, number: Int) -> some View {
+        // A row button and a separate Delete button: a button inside another's label takes its taps on iOS 18.
+        HStack(spacing: 4) {
+            Button { open(item) } label: { EpisodeRow(number: number, item: item) }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("show.episode")
+            if item.isWatched {
+                Button { deletingEpisode = item } label: {
+                    Image(systemName: "trash").font(.title3).foregroundStyle(.red).frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Delete \(item.displayTitle)")
+                .accessibilityIdentifier("show.deleteEpisode")
+            }
+        }
+        .swipeActions(edge: .leading) {
+            Button(item.isWatched ? "Unwatched" : "Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
+                item.setWatched(!item.isWatched)
+                shows.save()
+            }
+            .tint(.green)
+        }
+        .contextMenu {
+            Button(item.isWatched ? "Mark as Unwatched" : "Mark as Watched", systemImage: item.isWatched ? "circle" : "checkmark.circle") {
+                item.setWatched(!item.isWatched)
+                shows.save()
+            }
+            Button("Remove from Show", systemImage: "rectangle.stack.badge.minus") { shows.remove(item) }
+            Button("Delete Episode…", systemImage: "trash", role: .destructive) { deletingEpisode = item }
+        }
+    }
+
+    private func moveEpisodes(from source: IndexSet, to destination: Int, start: Int) {
+        shows.move(in: show, from: IndexSet(source.map { $0 + start }), to: destination + start)
+    }
+
+    private func removeEpisodes(at offsets: IndexSet, of episodes: [DownloadItem], start: Int) {
+        offsets.map { episodes[$0 + start] }.forEach(shows.remove)
     }
 
     private func playLabel(_ item: DownloadItem, all episodes: [DownloadItem]) -> String {
