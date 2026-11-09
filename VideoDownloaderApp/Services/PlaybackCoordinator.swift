@@ -95,6 +95,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private var upNextTotal = 0
     /// Deletes finished episodes, as the Delete Finished Episodes setting asks.
     var downloads: DownloadManager?
+    /// Plays saved files on a Chromecast; nil in unit tests, which run without Google Cast.
+    var cast: CastController?
     /// A finished episode, deleted once the player has let go of it.
     private var episodeToDelete: DownloadItem?
     /// The finished episode the end card offers to delete, and whether its box is ticked.
@@ -131,6 +133,12 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     }
 
     func open(_ newItem: DownloadItem, at position: Double) {
+        // Connected to a Chromecast: saved files play on the TV (HLS packages can't be served to it yet).
+        if let cast, cast.isConnected, newItem.kind != .hls {
+            close(releasingAudioSession: false)
+            do { try cast.play(newItem, from: position, show: shows?.show(for: newItem)?.title) } catch { showCastMessage(error.message) }
+            return
+        }
         // The next video activates the session again right away. A finished episode opened again stays.
         close(releasingAudioSession: false, keeping: newItem)
         controller.delegate = nil
@@ -395,7 +403,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     }
 
     /// Buttons AVKit has no place for, in a column beside its controls that appears and fades
-    /// with them: site subtitles, episode options, and a sleep timer for every saved video.
+    /// with them: Chromecast, site subtitles, episode options, and a sleep timer for every saved video.
     private func installSideControls() {
         guard sideControls == nil else { return }
         let timerButton = Self.sideButton(systemImage: "moon.zzz", identifier: "player.sleepTimer", label: "Sleep Timer")
@@ -409,6 +417,17 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         lockButton.showsMenuAsPrimaryAction = false
         lockButton.addAction(UIAction { [weak self] _ in self?.lockScreen() }, for: .primaryActionTriggered)
         var buttons: [UIButton] = [timerButton]
+        if let castButton = cast?.makeButton() {
+            // Google's button draws its own images, so it can't take a button configuration.
+            castButton.backgroundColor = UIColor(white: 0.12, alpha: 0.72)
+            castButton.layer.cornerRadius = 24
+            castButton.tintColor = .white
+            NSLayoutConstraint.activate([
+                castButton.widthAnchor.constraint(equalToConstant: 48),
+                castButton.heightAnchor.constraint(equalToConstant: 48)
+            ])
+            buttons.insert(castButton, at: 0)
+        }
         refreshSleepTimerButton()
         if !siteSubtitles.isEmpty {
             let button = Self.sideButton(systemImage: "captions.bubble", identifier: "player.captions", label: "Subtitles")
@@ -858,6 +877,38 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         return top
     }
 
+    // MARK: Chromecast
+
+    var isShowingHLS: Bool { item?.kind == .hls }
+
+    /// A Chromecast connected from the player's Cast button: the open video moves to the TV.
+    func castOpenVideo(attempt: Int = 0) {
+        guard let cast, cast.isConnected, let item else { return }
+        if item.kind == .hls { return showCastMessage(CastController.hlsMessage) }
+        // Google's device list is still closing; dismissing the player now would only close the list.
+        if controller.presentedViewController != nil {
+            guard attempt < 10 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.castOpenVideo(attempt: attempt + 1) }
+            return
+        }
+        let seconds = controller.player?.currentTime().seconds ?? 0
+        let position = seconds.isFinite && seconds > 0 ? seconds : item.playbackPosition ?? 0
+        do { try cast.play(item, from: position, show: shows?.show(for: item)?.title) } catch { return showCastMessage(error.message) }
+        // Kept: handing over near the end mustn't delete the file the phone is about to serve.
+        close(releasingAudioSession: false, keeping: item)
+    }
+
+    /// An alert over whatever is on top (the player, Google's controls), where the SwiftUI alert can't show.
+    func showCastMessage(_ message: String) {
+        diagnostics.record(event: "cast", url: item?.localURL?.absoluteString ?? "app://cast", note: message)
+        guard presentsPlayer else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let alert = UIAlertController(title: "Chromecast", message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            Self.topViewController()?.present(alert, animated: true)
+        }
+    }
+
     func clearError() { errorMessage = nil }
 
     private func showError(_ message: String) {
@@ -923,7 +974,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         isPresented = false
         isInPiP = false
         pictureInPictureStarting = false
-        if releasingAudioSession && !wasInPiP {
+        // While the phone serves a Chromecast, its silent audio keeps the app running.
+        if releasingAudioSession && !wasInPiP && cast?.isServing != true {
             // Deactivation can block briefly, so keep it off the main thread.
             DispatchQueue.global(qos: .utility).async {
                 try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -985,15 +1037,8 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// - Returns: whether closing counted as finishing the video.
     @discardableResult
     private func savePosition(closing: Bool = false) -> Bool {
-        guard !playbackEnded, let item,
-              let seconds = controller.player?.currentTime().seconds,
-              seconds.isFinite, seconds > 0 else { return false }
-        let finished = closing && WatchProgress.isFinished(position: seconds, duration: item.duration ?? controller.player?.currentItem?.duration.seconds)
-        if finished {
-            item.setWatched(true)
-        } else {
-            item.playbackPosition = seconds
-        }
+        guard !playbackEnded, let item, let seconds = controller.player?.currentTime().seconds else { return false }
+        let finished = item.recordPosition(seconds, duration: item.duration ?? controller.player?.currentItem?.duration.seconds, closing: closing)
         try? context.save()
         return finished
     }

@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* GoogleCastDynamic in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000003 /* GoogleCastDynamic */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		D10000000000000000000001 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -71,6 +75,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000001 /* GoogleCastDynamic in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -131,6 +136,9 @@
 				E10000000000000000000003 /* VideoDownloaderApp */,
 			);
 			name = VideoDownloaderApp;
+			packageProductDependencies = (
+				A10000000000000000000003 /* GoogleCastDynamic */,
+			);
 			productName = VideoDownloaderApp;
 			productReference = C10000000000000000000001 /* VideoDownloaderApp.app */;
 			productType = "com.apple.product-type.application";
@@ -210,6 +218,9 @@
 			);
 			mainGroup = E10000000000000000000009;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A10000000000000000000002 /* XCRemoteSwiftPackageReference "google-cast-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E1000000000000000000000A /* Products */;
 			projectDirPath = "";
@@ -306,8 +317,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.jideoyelayo.VideoDownloader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
 				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -333,8 +344,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.jideoyelayo.VideoDownloader;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
 				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -524,6 +535,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A10000000000000000000002 /* XCRemoteSwiftPackageReference "google-cast-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googlecast/google-cast-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.8.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000003 /* GoogleCastDynamic */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000002 /* XCRemoteSwiftPackageReference "google-cast-ios-sdk" */;
+			productName = GoogleCastDynamic;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = E10000000000000000000001 /* Project object */;
 }

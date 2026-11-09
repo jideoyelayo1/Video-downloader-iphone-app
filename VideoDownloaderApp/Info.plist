@@ -11,6 +11,13 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_googlecast._tcp</string>
+		<string>_CC1AD845._googlecast._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Video Downloader looks for Chromecasts on your Wi-Fi and sends them the video you choose.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // iOS requires background tasks to be registered before launch finishes.
         NewEpisodeChecker.registerBackgroundTask { await AppServices.shared.newEpisodes.checkFollowedShows() }
+        // Unit tests run without Google Cast.
+        if !LaunchOptions.isRunningUnitTests { CastController.setUp(AppServices.shared) }
         return true
     }
 

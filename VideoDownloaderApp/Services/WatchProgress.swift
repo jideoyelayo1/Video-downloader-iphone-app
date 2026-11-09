@@ -17,4 +17,14 @@ extension DownloadItem {
         watchedAt = watched ? date : nil
         if watched { playbackPosition = 0 }
     }
+
+    /// Where playback got to, on the phone or a Chromecast; closing in the last 10% marks it watched instead.
+    /// - Returns: whether closing counted as finishing the video.
+    @discardableResult
+    func recordPosition(_ seconds: Double, duration: Double?, closing: Bool) -> Bool {
+        guard seconds.isFinite, seconds > 0 else { return false }
+        let finished = closing && WatchProgress.isFinished(position: seconds, duration: duration)
+        if finished { setWatched(true) } else { playbackPosition = seconds }
+        return finished
+    }
 }
