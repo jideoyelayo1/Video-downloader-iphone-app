@@ -4,9 +4,7 @@ import MediaPlayer
 import SwiftData
 import SwiftUI
 
-/// Plays saved videos in AVKit's own full-screen player, so there is one set of controls: AVKit's
-/// close button, title, transport, AirPlay, Picture in Picture and subtitle menu. Site subtitles
-/// (separate files AVKit can't list) get one extra button that shows and fades with taps.
+/// AVKit's own full-screen player, so one set of controls; site subtitles AVKit can't list get an extra button.
 @MainActor
 final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVPlayerViewControllerDelegate {
     @Published private(set) var isPresented = false
@@ -18,23 +16,18 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// A finished episode to ask about deleting once the player has closed.
     @Published private(set) var finishedEpisode: DownloadItem?
 
-    /// One controller per opened video, kept across its SwiftUI presentations and Picture in Picture.
-    /// Re-hosting a single controller for every video kept each earlier presentation's views alive
-    /// (about 0.75 MB per video opened).
+    /// One controller per video: re-hosting one kept every earlier presentation's views alive (~0.75 MB each).
     private(set) var controller: AVPlayerViewController
     private let context: ModelContext
     private let diagnostics: DiagnosticsLog
     private let preferences: UserDefaults
     private var item: DownloadItem?
     private var captionGroup: AVMediaSelectionGroup?
-    /// Caption tracks inside the saved media. `captionNames` lists these first, then `siteSubtitles`.
-    /// Forced-only tracks (signs and foreign-language lines) aren't listed: like AVKit, the app
-    /// selects one as "Off".
+    /// Listed first in `captionNames`, then `siteSubtitles`; forced-only tracks are left out, as in AVKit.
     private var captionOptions: [AVMediaSelectionOption] = []
     private var forcedCaptionOption: AVMediaSelectionOption?
     /// Whether "no captions" keeps the forced-only track, as the viewer last left it.
     private var offKeepsForced = true
-    /// Subtitle files the site's player offered, saved with the download and drawn by `subtitleOverlay`.
     private var siteSubtitles: [SubtitleStore.Saved] = []
     private var siteCues: [Int: [SubtitleCue]] = [:]
     /// Seconds a site subtitle is shown later than its file says (earlier if negative), for files out of sync.
@@ -51,10 +44,9 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     /// False in unit tests, which exercise playback without presenting view controllers.
     private let presentsPlayer: Bool
     private var subtitlesButton: UIButton?
-    /// Episode menu for videos in a show: next/previous, intro and credits marks.
     private var showButton: UIButton?
     private var sleepTimerButton: UIButton?
-    /// Set while the screen lock takes every touch; it stays on from one episode to the next.
+    /// The screen lock stays on from one episode to the next.
     private var lockWindow: PlayerLockWindow?
     var isScreenLocked: Bool { lockWindow != nil }
     enum SleepTimerOption: Equatable {
@@ -68,7 +60,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private var sleepTimerPlaybackObservation: NSKeyValueObservation?
     /// Keeps a pending load or end notification from restarting playback after the timer fires.
     private var sleepTimerHasExpired = false
-    /// The column of buttons beside AVKit's controls, which shows and fades with them.
     private var sideControls: UIStackView?
     private var skipIntroButton: UIButton?
     private var showObserver: Any?
@@ -79,31 +70,25 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private var selectionObserver: NSObjectProtocol?
     /// Set while the app changes the selection, so only the viewer's own choices are remembered.
     private var applyingCaption = false
-    /// AVKit applies its own subtitle preference just after it takes over a new player, which
-    /// would undo the viewer's remembered choice. Changes in this window are reverted.
+    /// AVKit re-applies its subtitle preference just after taking over a player; changes until then are reverted.
     private var automaticSelectionWindowEnd = Date.distantPast
     private var automaticSelectionReverts = 0
-    /// Plays on to the next episode of a show that has autoplay on.
     var shows: ShowStore?
     private var upNextItem: DownloadItem?
     private var upNextPanel: UIView?
     private var upNextButton: UIButton?
-    /// The white fill that sweeps across Next Episode as it counts down.
     private var upNextFill: NSLayoutConstraint?
     private var upNextTimer: Timer?
     private var upNextCountdown = 0
     private var upNextTotal = 0
-    /// Deletes finished episodes, as the Delete Finished Episodes setting asks.
     var downloads: DownloadManager?
-    /// Plays saved files on a Chromecast; nil in unit tests, which run without Google Cast.
+    /// Nil in unit tests, which run without Google Cast.
     var cast: CastController?
     /// A finished episode, deleted once the player has let go of it.
     private var episodeToDelete: DownloadItem?
-    /// The finished episode the end card offers to delete, and whether its box is ticked.
     private var cardEpisode: DownloadItem?
     private var deleteTicked = false
     private var deleteToggle: UIButton?
-    /// Each episode is asked about once.
     private var askedAboutDeleting = false
 
     init(context: ModelContext, diagnostics: DiagnosticsLog, preferences: UserDefaults = .standard, presentsPlayer: Bool = true) {
@@ -139,7 +124,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             do { try cast.play(newItem, from: position, show: shows?.show(for: newItem)?.title) } catch { showCastMessage(error.message) }
             return
         }
-        // The next video activates the session again right away. A finished episode opened again stays.
+        // The next video reactivates the audio session at once; a finished episode reopened isn't deleted.
         close(releasingAudioSession: false, keeping: newItem)
         controller.delegate = nil
         controller = Self.makeController()
@@ -177,7 +162,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         Task { await load(next, from: url, at: position, token: token, into: player) }
     }
 
-    /// Loads a saved video into a new player, or into `existing` for the next episode.
     private func load(_ newItem: DownloadItem, from url: URL, at position: Double, token: UUID, into existing: AVPlayer?) async {
         let asset = AVURLAsset(url: url)
         guard (try? await asset.load(.isPlayable)) == true else {
@@ -212,9 +196,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
             player = AVPlayer(playerItem: playerItem)
             player.isMuted = false
             if #available(iOS 26.0, *) {
-                // iOS 26 keeps re-applying the system's subtitle preference over the viewer's
-                // remembered choice; its AVKit Off works without automatic criteria. iOS 18's
-                // AVKit needs them for its own Off, so they stay on there.
+                // iOS 26 re-applies the system subtitle preference over the viewer's choice; iOS 18's Off needs it.
                 player.appliesMediaSelectionCriteriaAutomatically = false
             }
             controller.player = player
@@ -281,8 +263,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
         let defaultIndex: Int?
         if !embedded.isEmpty {
-            // The system often prefers the forced-only track; captions "on" means full subtitles,
-            // in the preferred track's language when there is one.
+            // The system often prefers the forced-only track; captions on means full subtitles in its language.
             defaultIndex = preferredOption.flatMap { embedded.firstIndex(of: $0) }
                 ?? embedded.firstIndex { $0.extendedLanguageTag != nil && $0.extendedLanguageTag == preferredOption?.extendedLanguageTag }
                 ?? 0
@@ -307,7 +288,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         diagnostics.record(event: "captions", url: item?.localURL?.absoluteString ?? "app://player", note: index.map { captionNames[$0] } ?? "Off")
     }
 
-    /// Selects an embedded track through AVFoundation, or draws a site subtitle file over the video.
     private func applyCaption(_ index: Int?, to playerItem: AVPlayerItem) {
         let index = index.flatMap { captionNames.indices.contains($0) ? $0 : nil }
         applyingCaption = true
@@ -355,12 +335,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         return overlay
     }
 
-    /// The site subtitle text currently drawn over the video.
     var siteSubtitleText: String? { subtitleOverlay?.text }
 
     // MARK: AVKit's subtitle menu and the site subtitles button
 
-    /// Remembers choices made in AVKit's own subtitle menu, and hides a site subtitle it replaces.
     private func observeSelection(of playerItem: AVPlayerItem) {
         if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
         selectionObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification,
@@ -376,9 +354,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         let index = selected.flatMap { captionOptions.firstIndex(of: $0) }
         let forcedSelected = selected.map(Self.isForcedOnly) ?? false
         let showingSite = selectedCaption.map { $0 >= captionOptions.count } ?? false
-        // The notification also arrives, later, for the app's own selections: only a selection
-        // that differs from the app's state is the viewer's. With a site subtitle showing, the
-        // embedded selection is off.
+        // The app's own selections post this too, later; only one differing from the app's state is the viewer's.
         let unchanged = index == nil
             ? (showingSite || selectedCaption == nil) && (forcedCaptionOption == nil || forcedSelected == offKeepsForced)
             : !showingSite && index == selectedCaption
@@ -402,8 +378,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
                            note: (index.map { captionNames[$0] } ?? (forcedSelected ? "Forced subtitles only" : "Off")) + " (player menu)")
     }
 
-    /// Buttons AVKit has no place for, in a column beside its controls that appears and fades
-    /// with them: Chromecast, site subtitles, episode options, and a sleep timer for every saved video.
     private func installSideControls() {
         guard sideControls == nil else { return }
         let timerButton = Self.sideButton(systemImage: "moon.zzz", identifier: "player.sleepTimer", label: "Sleep Timer")
@@ -463,8 +437,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     }
 
     private static func sideButton(systemImage: String, identifier: String, label: String) -> UIButton {
-        // Not .glass(): with three glass buttons beside AVKit's own glass controls, AVKit's Close
-        // button stopped working once a second video was opened (iOS 26.5 simulator).
+        // Not .glass(): with three glass buttons, AVKit's Close stopped working on a second video (iOS 26.5 sim).
         var configuration = UIButton.Configuration.filled()
         configuration.baseBackgroundColor = UIColor(white: 0.12, alpha: 0.72)
         configuration.cornerStyle = .capsule
@@ -492,7 +465,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     func lockScreen() {
         guard lockWindow == nil, let scene = controller.view.window?.windowScene else { return }
-        // Hidden at once, as in Netflix, rather than when AVKit next fades them.
+        // Hidden at once rather than when AVKit next fades them.
         controller.showsPlaybackControls = false
         lockWindow = PlayerLockWindow(scene: scene) { [weak self] in self?.unlockScreen() }
         matchAVKitControls()
@@ -510,7 +483,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     // MARK: Sleep timer
 
     /// The deadline belongs to the playback session, so changing episodes never restarts it.
-    /// Pausing, scrubbing and changing playback speed don't change the time remaining.
     func setSleepTimer(_ option: SleepTimerOption?) {
         if option != nil, item == nil { return }
         if case .minutes(let minutes) = option, minutes <= 0 { return }
@@ -542,8 +514,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         refreshSleepTimerButton()
     }
 
-    /// Also checked before autoplay and after asynchronous loads, so a late callback cannot
-    /// play another episode once the deadline has passed, even before the next timer tick.
+    /// Also checked before autoplay and after async loads, so a late callback can't play on past the deadline.
     @discardableResult
     func sleepTimerTick(at now: Date = Date()) -> Bool {
         if let deadline = sleepTimerDeadline, now >= deadline { expireSleepTimer() }
@@ -556,8 +527,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         sleepTimerHasExpired = true
         controller.player?.pause()
         hideUpNext()
-        // During a transition the old player item can still be loaded while `item` is the next
-        // episode, so don't save the old episode's position into the new one.
+        // Mid-transition the old player item may still be loaded while `item` is the next episode.
         if !isLoading { savePosition() }
         refreshSleepTimerButton()
         diagnostics.record(event: "playback", url: item?.localURL?.absoluteString ?? "app://player", note: "Sleep timer paused playback")
@@ -610,8 +580,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     // MARK: Shows: episodes, intro and credits, speed
 
-    /// The show of the video playing. Read twice a second during playback, so it's looked up
-    /// once per video rather than fetching every show each time.
+    /// Read twice a second during playback, so it's looked up once per video, not by fetching every show.
     private var currentShow: Show? {
         guard let item, let shows else { return nil }
         if let cached = cachedShow, cached.itemID == item.id { return cached.show }
@@ -672,7 +641,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
                            note: "Marked \(show.title): intro \(show.introStart.map(IntroSkip.timeText) ?? "–")–\(show.introEnd.map(IntroSkip.timeText) ?? "–"), credits \(show.creditsFromEnd.map(IntroSkip.timeText) ?? "–") before the end")
     }
 
-    /// Skip Intro, the start of the credits, and the speed chosen for the show.
     private func observeShowPlayback(of player: AVPlayer) {
         reachedCredits = false
         skippedIntroAutomatically = false
@@ -682,7 +650,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
     }
 
-    /// Checked twice a second while an episode of a show plays.
     func showPlaybackTick(at position: Double) {
         guard let item, let show = currentShow else { return }
         let inIntro = IntroSkip.isInIntro(position, start: show.introStart, end: show.introEnd)
@@ -736,7 +703,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         skipIntroButton = button
     }
 
-    /// Videos that aren't in a show share one speed, the last chosen for any of them.
     private func rememberSpeedOutsideShows() {
         guard currentShow == nil, let rate = controller.selectedSpeed?.rate else { return }
         if abs(rate - 1) < 0.01 { preferences.removeObject(forKey: Self.speedKey) } else { preferences.set(Double(rate), forKey: Self.speedKey) }
@@ -759,7 +725,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         controller.selectSpeed(speed)
     }
 
-    /// Next and previous episode from the Lock Screen and Control Center.
     private func configureRemoteCommands() {
         // Only for the player on screen; unit tests drive `playEpisode` directly.
         guard presentsPlayer else { return }
@@ -781,7 +746,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
     }
 
-    /// Plays the next (1) or previous (-1) episode of the current show in the same player.
+    /// `offset` is 1 for the next episode or -1 for the previous.
     @discardableResult
     func playEpisode(_ offset: Int) -> Bool {
         guard sleepTimerTick(), let item, let episode = shows?.episode(offset, from: item) else { return false }
@@ -789,8 +754,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         return true
     }
 
-    /// Whether AVKit is showing its controls, judged by its close button; nil if it can't be found,
-    /// in which case the subtitles button simply stays visible.
+    /// Judged by AVKit's close button; nil if it can't be found, which leaves the side buttons visible.
     private func avkitControlsVisible() -> Bool? {
         if avkitCloseButton?.window == nil { avkitCloseButton = Self.view(in: controller.view, identifier: "Close Button") }
         guard let closeButton = avkitCloseButton else { return nil }
@@ -836,7 +800,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         subtitlesButton.accessibilityValue = selectedCaption.map { captionNames[$0] } ?? "Off"
     }
 
-    /// What the Lock Screen and Control Center show: the title, its show and the thumbnail.
     func shiftSubtitles(by seconds: Double) {
         subtitleDelay = ((subtitleDelay + seconds) * 10).rounded() / 10
         if let selectedCaption, selectedCaption >= captionOptions.count { showSiteSubtitle(selectedCaption - captionOptions.count) }
@@ -863,8 +826,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
     private func presentPlayer() {
         isPresented = true
         guard presentsPlayer, controller.presentingViewController == nil, let presenter = Self.topViewController() else { return }
-        // A text field left focused in another tab would otherwise bring its keyboard back over the
-        // player whenever a menu opens.
+        // A text field focused in another tab would bring its keyboard over the player whenever a menu opens.
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         presenter.present(controller, animated: true)
     }
@@ -881,7 +843,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     var isShowingHLS: Bool { item?.kind == .hls }
 
-    /// A Chromecast connected from the player's Cast button: the open video moves to the TV.
     func castOpenVideo(attempt: Int = 0) {
         guard let cast, cast.isConnected, let item else { return }
         if item.kind == .hls { return showCastMessage(CastController.hlsMessage) }
@@ -898,7 +859,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         close(releasingAudioSession: false, keeping: item)
     }
 
-    /// An alert over whatever is on top (the player, Google's controls), where the SwiftUI alert can't show.
+    /// UIKit alert on the top view controller: the SwiftUI alert can't show over the player or Google's controls.
     func showCastMessage(_ message: String) {
         diagnostics.record(event: "cast", url: item?.localURL?.absoluteString ?? "app://cast", note: message)
         guard presentsPlayer else { return }
@@ -916,20 +877,17 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         diagnostics.record(event: "playback-error", url: item?.localURL?.absoluteString ?? "app://player", note: message)
     }
 
-    /// Embedded and site tracks in one list, for the remembered choice.
     private var preferenceOptions: [CaptionPreference.Option] {
         captionOptions.map(Self.preferenceOption)
             + siteSubtitles.map { CaptionPreference.Option(language: $0.language, name: $0.label.isEmpty ? $0.displayName : $0.label) }
     }
 
-    /// Menu names, marking site files that share a name with an embedded track.
     static func menuNames(embedded: [String], site: [String]) -> [String] {
         let taken = Set(embedded)
         return embedded + site.map { taken.contains($0) ? "\($0) (site)" : $0 }
     }
 
-    /// A track in the viewer's language, else the site's default, else the first. Sites mark their
-    /// first track as default regardless of the viewer (***REMOVED*** marks Arabic).
+    /// Viewer's language first: sites mark a default regardless of the viewer (***REMOVED*** marks Arabic).
     static func defaultSiteIndex(_ site: [SubtitleStore.Saved], preferredLanguages: [String] = Locale.preferredLanguages) -> Int {
         func base(_ tag: String?) -> String? { tag?.split(separator: "-").first.map { $0.lowercased() } }
         for language in preferredLanguages.compactMap(base) {
@@ -946,9 +904,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         CaptionPreference.Option(language: option.extendedLanguageTag ?? option.locale?.identifier, name: option.displayName)
     }
 
-    /// - Parameters:
-    ///   - releasingAudioSession: lets music or podcasts paused by playback resume.
-    ///   - kept: a video about to be opened again, so it isn't deleted as a finished episode.
+    /// `kept` is a video about to be reopened, so it isn't deleted as a finished episode.
     func close(releasingAudioSession: Bool = true, keeping kept: DownloadItem? = nil) {
         let wasInPiP = isInPiP
         let presented = presentsPlayer && controller.presentingViewController != nil
@@ -983,7 +939,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
     }
 
-    /// Everything tied to the current video, cleared on close and before the next episode.
     private func resetItemState() {
         if let timeObserver, let player = controller.player { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
@@ -1033,8 +988,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
     }
 
-    /// Closing in the last 10% (usually the credits) counts as watching to the end.
-    /// - Returns: whether closing counted as finishing the video.
+    /// Returns whether closing counted as finishing: in the last 10%, usually the credits.
     @discardableResult
     private func savePosition(closing: Bool = false) -> Bool {
         guard !playbackEnded, let item, let seconds = controller.player?.currentTime().seconds else { return false }
@@ -1054,8 +1008,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     // MARK: Finished episodes
 
-    /// The end of an episode, or the start of its marked credits. The Delete Finished Episodes
-    /// setting deletes it, or (Ask First) puts a tick box on the end card beside Next Episode.
     private func episodeFinished(_ item: DownloadItem, atCredits: Bool) {
         guard sleepTimerTick() else { return }
         // Nothing can be shown in Picture in Picture or the background.
@@ -1071,8 +1023,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         default:
             break
         }
-        // Off screen, the next episode starts at once at the end; from the credits, the episode
-        // plays on to its end first.
+        // Off screen the next episode starts at the end; from the credits, the episode plays on to its end first.
         guard onScreen else {
             if let next, !atCredits { playNext(next) }
             return
@@ -1080,7 +1031,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         if next != nil || offer != nil { showEndCard(next: next, offering: offer) }
     }
 
-    /// An episode closed once watched. Ask First asks once the player has gone, unless the end card offered already.
+    /// Ask First asks once the player has gone, unless the end card already offered.
     private func closedFinished(_ episode: DownloadItem, presented: Bool) {
         switch finishedEpisodeSetting(for: episode) {
         case .delete:
@@ -1097,12 +1048,10 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         }
     }
 
-    /// The setting applies to episodes of shows.
     private func finishedEpisodeSetting(for item: DownloadItem) -> FinishedEpisodes {
         item.showID == nil ? .keep : downloads?.finishedEpisodes ?? .keep
     }
 
-    /// The answer to the banner shown after the player closed.
     func answerFinishedEpisode(delete: Bool) {
         guard let episode = finishedEpisode else { return }
         finishedEpisode = nil
@@ -1124,10 +1073,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
 
     // MARK: End card
 
-    /// Netflix-style: Watch Credits and a Next Episode button that fills as it counts down, and
-    /// with Ask First a tick box to delete the finished episode. The box's state is applied
-    /// however the card goes (Next Episode, the countdown, Watch Credits, Done or closing),
-    /// once the player has let go of the episode.
+    /// The tick box applies however the card goes, once the player has let go of the episode.
     private func showEndCard(next: DownloadItem?, offering episode: DownloadItem?) {
         hideUpNext()
         upNextItem = next
@@ -1150,8 +1096,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         if upNextCountdown <= 0, let next = upNextItem { playNext(next) } else { updateUpNextCountdown(); animateFill() }
     }
 
-    /// Moves the fill to the next second's mark. Short steps rather than one long animation, so
-    /// the app is idle in between (UI tests snapshot an animating card without its buttons).
+    /// Short steps keep the app idle between them; UI tests snapshot an animating card without its buttons.
     private func animateFill() {
         guard let fill = upNextFill, let track = upNextButton?.superview, upNextTotal > 0 else { return }
         track.superview?.layoutIfNeeded()
@@ -1259,7 +1204,6 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         return stack
     }
 
-    /// Grey, with a white fill growing behind the black title as the countdown runs.
     private func makeNextEpisodeButton() -> UIView {
         let track = UIView()
         track.backgroundColor = UIColor(white: 0.62, alpha: 1)
@@ -1308,10 +1252,9 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         return button
     }
 
-    /// Whether the countdown for the next episode is showing.
     var isShowingUpNext: Bool { upNextItem != nil }
 
-    /// AVKit's close button. Picture in Picture also leaves full screen, but playback continues there.
+    /// AVKit's close button; Picture in Picture also ends full screen, but playback continues there.
     func playerViewController(_ playerViewController: AVPlayerViewController,
                               willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator) {
         coordinator.animate(alongsideTransition: nil) { [weak self] context in

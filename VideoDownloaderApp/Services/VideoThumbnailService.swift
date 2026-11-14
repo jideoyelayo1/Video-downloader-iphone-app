@@ -2,11 +2,9 @@ import AVFoundation
 import CoreImage
 import UIKit
 
-/// Extracts a still from a saved video. HLS packages often have no I-frame-only
-/// rendition, so AVAssetImageGenerator alone cannot provide their thumbnails.
-/// Not main-actor isolated: frame conversion and JPEG encoding run off the main thread.
+/// Not main-actor isolated, so frame conversion and JPEG encoding run off the main thread.
 enum VideoThumbnailService {
-    /// As wide as site posters (PosterImage), sharp enough for the full-width artwork in My Videos and on show pages.
+    /// Matches PosterImage's 640 width, sharp enough for the full-width artwork in My Videos and on show pages.
     private static let size = CGSize(width: 640, height: 360)
     private static let ciContext = CIContext()
 
@@ -32,7 +30,7 @@ enum VideoThumbnailService {
         return nil
     }
 
-    /// On the main actor, where AVPlayerItem must be made; it waits without blocking and decodes one frame.
+    /// AVPlayerItem must be made on the main actor; the loop waits without blocking it.
     @MainActor
     private static func playbackImage(for asset: AVAsset) async -> CGImage? {
         let item = AVPlayerItem(asset: asset)
@@ -45,8 +43,7 @@ enum VideoThumbnailService {
         player.play()
         defer { player.pause(); item.remove(output) }
 
-        // A player can decode regular HLS renditions even when image generation
-        // cannot. Wait for a non-initial frame, then take the first available one.
+        // A player decodes HLS renditions that image generation can't; wait past the initial frame.
         for _ in 0..<60 {
             if Task.isCancelled { return nil }
             let time = player.currentTime()

@@ -1,6 +1,5 @@
 import Foundation
 
-/// Subtitle files saved beside a download, with the labels the site's player gave them.
 /// Saved when the download starts, because the files' URLs expire like the stream's.
 enum SubtitleStore {
     struct Saved: Codable, Equatable {
@@ -33,8 +32,7 @@ enum SubtitleStore {
         try? FileManager.default.removeItem(at: directory(for: id, in: root))
     }
 
-    /// Fetches the tracks and replaces any saved earlier for this item. Files that aren't
-    /// readable WebVTT or SRT (an error page, an expired link) are skipped.
+    /// Skips files that aren't readable WebVTT or SRT, such as an error page or an expired link.
     @discardableResult
     static func save(_ tracks: [SubtitleTrack], for id: UUID, in root: URL = DownloadStorage.subtitlesDirectory,
                      session: URLSession = SubtitleStore.session,

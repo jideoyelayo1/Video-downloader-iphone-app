@@ -1,8 +1,6 @@
 import Foundation
 
-/// A subtitle file a page's player offers beside its video (an HTML `<track>`), such as
-/// ***REMOVED***'s per-language WebVTT files. These aren't part of the stream, so they are
-/// saved separately with a download.
+/// A page player's `<track>` file; not part of the stream, so it is saved separately with a download.
 struct SubtitleTrack: Codable, Hashable {
     let url: URL
     let label: String
@@ -41,8 +39,7 @@ struct SubtitleTrack: Codable, Hashable {
         }
     }
 
-    /// A file found by its download has no label; its name often is the language: `eng.vtt`,
-    /// `en.srt`, `English.vtt`, `?lang=fr`.
+    /// A file found by its download has no label, but its name often is the language (`eng.vtt`, `?lang=fr`).
     static func languageCode(in url: URL) -> String? {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
             .first { ["lang", "language"].contains($0.name.lowercased()) }?.value
@@ -52,8 +49,7 @@ struct SubtitleTrack: Codable, Hashable {
         return [query, stem, suffix].lazy.compactMap { $0.flatMap(languageCode(named:)) }.first
     }
 
-    /// "en", "eng" or "English" → "en". Only two-letter languages: three-letter codes like
-    /// "sub" are rare languages, not captions.
+    /// Only two-letter languages: three-letter codes like "sub" are rare languages, not captions.
     static func languageCode(named raw: String) -> String? {
         let name = raw.lowercased().trimmingCharacters(in: .whitespaces)
         let english = Locale(identifier: "en")

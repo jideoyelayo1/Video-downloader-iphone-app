@@ -6,7 +6,6 @@ struct SubtitleCue: Equatable {
     let text: String
 }
 
-/// Reads WebVTT and SRT subtitle files into plain-text cues for the player's overlay.
 enum SubtitleParser {
     private static let tagPattern = try! NSRegularExpression(pattern: "<[^>]*>")
     private static let entities: [(String, String)] = [
@@ -14,8 +13,7 @@ enum SubtitleParser {
         ("&lrm;", ""), ("&rlm;", ""), ("&amp;", "&")
     ]
 
-    /// Cues sorted by start time. Styling tags, cue identifiers, NOTE/STYLE/REGION blocks and
-    /// cue settings are dropped; cues without text are skipped.
+    /// Drops styling tags, cue identifiers, NOTE/STYLE/REGION blocks and cue settings; skips empty cues.
     static func cues(from text: String) -> [SubtitleCue] {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
             .replacingOccurrences(of: "\u{FEFF}", with: "")
@@ -42,7 +40,6 @@ enum SubtitleParser {
         return cues.sorted { $0.start < $1.start }
     }
 
-    /// Text of every cue showing at `time`, one per line, or nil when none is.
     static func text(at time: Double, in cues: [SubtitleCue]) -> String? {
         let showing = cues.lazy.prefix { $0.start <= time }.filter { time < $0.end }.map(\.text)
         let text = showing.joined(separator: "\n")

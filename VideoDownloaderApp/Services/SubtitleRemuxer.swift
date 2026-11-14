@@ -1,10 +1,7 @@
 import AVFoundation
 import CoreMedia
 
-/// Writes site subtitle files into a saved video as real subtitle tracks. The video and audio
-/// are copied into a QuickTime movie without re-encoding, with one 3GPP text track per
-/// language. iOS then lists the languages itself and shows them in Picture in Picture and on
-/// AirPlay, which the app's own subtitle overlay can't reach.
+/// Real subtitle tracks, copied in without re-encoding, reach Picture in Picture and AirPlay; the overlay can't.
 enum SubtitleRemuxer {
     struct Track {
         let language: String?
@@ -113,8 +110,7 @@ enum SubtitleRemuxer {
         guard writer.status == .completed else { throw Failure.writeFailed(writer.error?.localizedDescription ?? "writing failed") }
     }
 
-    /// 3GPP timed text: each sample is a 16-bit big-endian length and the UTF-8 text. Empty
-    /// samples fill the gaps between cues so each line clears when it should.
+    /// Empty samples fill the gaps between cues so each line clears when it should.
     static func samples(for cues: [SubtitleCue], until end: Double, format: CMFormatDescription) throws -> [CMSampleBuffer] {
         var buffers: [CMSampleBuffer] = []
         var time = 0.0

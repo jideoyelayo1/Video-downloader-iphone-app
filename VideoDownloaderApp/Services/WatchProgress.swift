@@ -1,7 +1,6 @@
 import Foundation
 
-/// When a video counts as watched: it played to the end, or it was closed in its last 10%,
-/// which is usually the end credits.
+/// Closing in the last 10% counts as watched, since that is usually the end credits.
 enum WatchProgress {
     static let finishedFraction = 0.9
 
@@ -18,8 +17,7 @@ extension DownloadItem {
         if watched { playbackPosition = 0 }
     }
 
-    /// Where playback got to, on the phone or a Chromecast; closing in the last 10% marks it watched instead.
-    /// - Returns: whether closing counted as finishing the video.
+    /// Returns whether closing counted as finishing, which marks it watched instead of saving a position.
     @discardableResult
     func recordPosition(_ seconds: Double, duration: Double?, closing: Bool) -> Bool {
         guard seconds.isFinite, seconds > 0 else { return false }
