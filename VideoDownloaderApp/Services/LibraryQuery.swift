@@ -1,6 +1,5 @@
 import Foundation
 
-/// Which saved videos My Videos lists, and in what order.
 struct LibraryQuery: Equatable {
     enum Sort: String, CaseIterable, Identifiable {
         case newest, oldest, title, recentlyWatched, largest
@@ -31,7 +30,6 @@ struct LibraryQuery: Equatable {
         }
     }
 
-    /// A place in My Videos, chosen like a folder.
     enum Group: String, CaseIterable, Identifiable {
         case all, movies, notInShow
 
@@ -57,14 +55,13 @@ struct LibraryQuery: Equatable {
     var group = Group.all
     /// Shows that exist, so an episode of a deleted show counts as not in a show.
     var showIDs: Set<UUID> = []
-    /// Videos with any of these labels.
     var labelIDs: Set<UUID> = []
     var folderID: UUID?
     var searchText = ""
     /// Show and label names by ID, so searching a show's or label's name finds its videos.
     var names: [UUID: String] = [:]
 
-    /// A status, label or group filter is narrowing the list (folders and search show themselves).
+    /// Folders and search aren't counted because they show themselves.
     var isFiltering: Bool { status != .all || !labelIDs.isEmpty || group != .all }
 
     func matches(_ item: DownloadItem) -> Bool {

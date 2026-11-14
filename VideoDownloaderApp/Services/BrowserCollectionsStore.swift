@@ -22,8 +22,7 @@ enum StarterBookmarks {
             preferences.set(true, forKey: "seededBookmarks")
         }
 
-        // Once, for everyone: the sites tested to work, unless a bookmark already opens that site.
-        // A later survey's sites are added the same way, so sites deleted since aren't added back.
+        // Each list is added once behind its own flag, so sites the user deleted since aren't added back.
         if !preferences.bool(forKey: "testedSiteBookmarksV3") {
             addMissingSites(Bookmark.testedSites, in: context)
             preferences.set(true, forKey: "testedSiteBookmarksV3")
@@ -66,8 +65,7 @@ final class BrowserHistoryStore {
 
     init(context: ModelContext) { self.context = context }
 
-    /// Runs on every page load and same-page navigation, so it looks up one row
-    /// rather than loading the whole history.
+    /// Runs on every page load, so it looks up one row rather than loading the whole history.
     func record(_ rawURL: URL, title: String, at date: Date = Date()) {
         guard let url = Self.pageURL(rawURL) else { return }
         let name = cleanTitle(title, for: url)

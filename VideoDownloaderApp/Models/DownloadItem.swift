@@ -7,7 +7,7 @@ enum DownloadStorage {
     static let libraryDirectory: URL = {
         var directory = applicationSupportDirectory.appendingPathComponent("VideoDownloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        // Videos can be downloaded again, so they stay out of iCloud and computer backups; the library store doesn't.
+        // Videos can be downloaded again, so they stay out of backups; the library store doesn't.
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? directory.setResourceValues(values)
@@ -36,18 +36,17 @@ enum DownloadStorage {
 
     static func storedURL(_ path: String) -> URL {
         if path.hasPrefix("@managed/") { return containerRoot.appendingPathComponent(String(path.dropFirst("@managed/".count))) }
-        // HLS packages saved before 2026-10-10 have absolute paths, into the container of the install that saved them.
+        // Older HLS packages saved absolute paths, into the container of the install that saved them.
         if path.hasPrefix("/") { return pathInContainer(path).map { containerRoot.appendingPathComponent($0) } ?? URL(fileURLWithPath: path) }
         return libraryDirectory.appendingPathComponent(path)
     }
 
-    /// The app container path changes between installs, so system-managed HLS packages are stored relative to it.
+    /// Container paths change between installs, so system-managed HLS packages are stored relative to it.
     static func managedPath(for location: URL) -> String {
         pathInContainer(location.path).map { "@managed/" + $0 } ?? location.path
     }
 
-    /// The part of `path` below `containerRoot`, in this install's container or an earlier one's. iOS 27
-    /// reports HLS packages under /.nofollow/private/var/mobile/…, the same place as /var/mobile/….
+    /// Path below `containerRoot`, from any install's container; iOS 27 reports HLS paths under /.nofollow.
     static func pathInContainer(_ path: String) -> String? {
         guard let inside = afterContainer(path), let rootInside = afterContainer(containerRoot.path) else {
             let root = containerRoot.path.hasSuffix("/") ? containerRoot.path : containerRoot.path + "/"
@@ -57,7 +56,6 @@ enum DownloadStorage {
         return inside.hasPrefix(prefix) ? String(inside.dropFirst(prefix.count)) : nil
     }
 
-    /// "Library/…" from "…/Containers/Data/Application/<container>/Library/…".
     private static func afterContainer(_ path: String) -> Substring? {
         guard let marker = path.range(of: "/Containers/Data/Application/") else { return nil }
         let rest = path[marker.upperBound...]
@@ -87,7 +85,6 @@ enum DownloadStorage {
     }
 }
 
-/// Every model the library stores; the app and tests open the same schema.
 enum LibrarySchema {
     static let models: [any PersistentModel.Type] = [DownloadItem.self, Bookmark.self, DownloadFolder.self, BrowsingHistoryEntry.self,
                                                      VideoLabel.self, Show.self]
@@ -96,7 +93,7 @@ enum LibrarySchema {
         try ModelContainer(for: Schema(models), configurations: ModelConfiguration(isStoredInMemoryOnly: inMemory))
     }
 
-    /// Moves a library that won't open into Application Support/Library Recovery, so the next launch starts afresh.
+    /// Moves a store that won't open into Library Recovery, so the next launch starts afresh.
     static func setAsideSavedStore() throws -> URL {
         let store = ModelConfiguration().url
         let folder = DownloadStorage.applicationSupportDirectory
@@ -133,28 +130,21 @@ final class DownloadItem {
     var createdAt: Date
     var completedAt: Date?
     var fileSize: Int64?
-    /// Last watched position in seconds; zero starts from the beginning.
     var playbackPosition: Double?
-    /// Optional Library folder. Kept as an ID so deleting a folder never deletes media.
+    /// Kept as an ID so deleting a folder never deletes media.
     var folderID: UUID?
     /// Minimum HLS variant bitrate chosen by the user, if any.
     var preferredBitrate: Int?
     /// Relay HLS requests through the app when the host requires a Referer.
     var requiresRefererRaw: Bool?
-    /// When the video was finished; nil while unwatched.
     var watchedAt: Date?
-    /// When the video was last opened, for Continue Watching and the Recently Watched sort.
     var lastPlayedAt: Date?
-    /// Length in seconds, recorded when the video is played.
     var duration: Double?
-    /// Library labels. Kept as IDs, like `folderID`, so deleting a label never deletes media.
+    /// Kept as IDs so deleting a label never deletes media.
     var labelIDs: [UUID]?
-    /// The show this video is an episode of, and its place in the show's watch order.
     var showID: UUID?
     var showOrder: Int?
-    /// The page's poster or preview image, used as artwork.
     var posterURL: URL?
-    /// Listed under Movies, not as a video waiting for a show.
     var isMovieRaw: Bool?
 
     init(id: UUID = UUID(), title: String, remoteURL: URL, sourcePageURL: URL, refererURL: URL? = nil, kind: MediaKind,
@@ -198,15 +188,12 @@ final class DownloadItem {
         set { isMovieRaw = newValue }
     }
 
-    /// When the download finished, such as "today at 21:40" or "26 Sep 2026 at 09:05", in the
-    /// viewer's language and clock style. Downloads saved before this was recorded fall back to
-    /// when they were added.
+    /// Downloads saved before `completedAt` was recorded fall back to when they were added.
     var downloadedText: String {
         if let completedAt { return "Downloaded \(Self.dateTimeFormatter.string(from: completedAt))" }
         return "Added \(Self.dateTimeFormatter.string(from: createdAt))"
     }
 
-    /// The finish time on its own, for text that already says the download completed.
     var completedTimeText: String? { completedAt.map(Self.dateTimeFormatter.string(from:)) }
 
     private static let dateTimeFormatter: DateFormatter = {
@@ -232,8 +219,7 @@ final class DownloadFolder {
     }
 }
 
-/// A user's label for videos. Labels with `sites` are added automatically to downloads from
-/// those sites; site labels ("***REMOVED***") are created for each site the first time it is used.
+/// Labels with `sites` are added automatically to downloads from those sites.
 @Model
 final class VideoLabel {
     @Attribute(.unique) var id: UUID
@@ -241,7 +227,6 @@ final class VideoLabel {
     var colorName: String
     /// Hosts such as "***REMOVED***.to"; subdomains match too.
     var sites: [String]?
-    /// Created automatically for the site it is named after.
     var isSiteLabel: Bool?
     var createdAt: Date
 
@@ -255,30 +240,25 @@ final class VideoLabel {
     }
 }
 
-/// Episodes in the viewer's watch order (`DownloadItem.showOrder`), optionally playing on one after another.
 @Model
 final class Show {
     @Attribute(.unique) var id: UUID
     var title: String
     var autoplayNextRaw: Bool?
     var createdAt: Date
-    /// The intro, marked by the viewer in the player, in seconds from the start of an episode.
     var introStart: Double?
     var introEnd: Double?
     /// Where the credits start, in seconds before the end, so it fits episodes of any length.
     var creditsFromEnd: Double?
     var autoSkipIntroRaw: Bool?
-    /// Playback speed chosen in the player; nil is normal speed.
     var playbackRate: Double?
     /// The page of the latest episode, for checking whether the next one is out.
     var followSourceURL: URL?
     var notifyNewEpisodesRaw: Bool?
     var autoDownloadNewEpisodesRaw: Bool?
     var lastCheckedAt: Date?
-    /// The last check stopped at the site's "verify you're human" page; nil otherwise.
     var lastCheckNeededVerification: Bool?
-    /// When the most recently played of its deleted, watched episodes was played, so Continue
-    /// Watching still offers the episode after it.
+    /// Latest play of a deleted watched episode, so Continue Watching still offers the one after it.
     var deletedEpisodePlayedAt: Date?
 
     init(id: UUID = UUID(), title: String, autoplayNext: Bool = true, createdAt: Date = Date()) {
@@ -333,9 +313,6 @@ final class Bookmark {
         ("***REMOVED***", URL(string: "https://***REMOVED***.com/")!)
     ]
 
-    /// Sites whose episode pages gave a video the app can download in the 2026-10-03 survey
-    /// ***REMOVED*** and My***REMOVED*** first need their Cloudflare check passed in
-    /// Browse; ***REMOVED*** and ***REMOVED*** need a tap on their play button.
     static let testedSites: [(String, URL)] = [
         ("***REMOVED***", URL(string: "https://www.***REMOVED***.to/")!),
         ("***REMOVED***", URL(string: "https://***REMOVED***.to/anime")!),
@@ -348,18 +325,13 @@ final class Bookmark {
         ("***REMOVED***", URL(string: "https://***REMOVED***.ws/")!)
     ] + addedTestedSites + laterTestedSites
 
-    /// Sites found by the 2026-10-14 survey of a ***REMOVED***-alternatives list: the other 13 were
-    /// down, blocked in the UK, spam redirects or live-only. Each gave a finite HLS master marked
-    /// Ready after its play button was tapped. They are added once to libraries that already had
-    /// the earlier tested sites.
+    /// Added once to libraries that already had the earlier tested sites.
     static let addedTestedSites: [(String, URL)] = [
         ("***REMOVED***", URL(string: "https://***REMOVED***.onl/home")!),
         ("***REMOVED***", URL(string: "https://***REMOVED***.day/")!)
     ]
 
-    /// Sites found by the 2026-10-15 survey of ***REMOVED***.net's movies-and-TV list, added once the
-    /// same way: ***REMOVED*** and ***REMOVED*** gave an HLS master, ***REMOVED*** a direct video, ***REMOVED***s an
-    /// HLS playlist, all marked Ready after a title was opened and played.
+    /// Added once to existing libraries, like `addedTestedSites`.
     static let laterTestedSites: [(String, URL)] = [
         ("***REMOVED***", URL(string: "https://***REMOVED***.su/")!),
         ("***REMOVED***", URL(string: "https://***REMOVED***.org/")!),
@@ -367,12 +339,9 @@ final class Bookmark {
         ("***REMOVED***s", URL(string: "https://***REMOVED***s.ru/")!)
     ]
 
-    /// Every site the app ships a bookmark for, with its display name.
     static var knownSites: [(String, URL)] { starters + testedSites }
 
-    /// Groups in the bookmarks list, in the order shown. Auto-Download sites give a saveable
-    /// video and number their episode pages, so Download Next Episodes and a followed show's
-    /// automatic download work there (`EpisodeURL`).
+    /// Groups in the bookmarks list; case order is the order shown.
     enum Folder: String, CaseIterable {
         case autoDownload = "Auto-Download", downloadOnly = "Download Only", needsTap = "Needs a Tap",
              browseOnly = "Browse Only", mine = "My Sites"
@@ -388,7 +357,7 @@ final class Bookmark {
         }
     }
 
-    /// From the site surveys, keyed by the shipped site names above.
+    /// Keyed by the shipped site names above.
     private static let siteFolders: [String: Folder] = [
         "***REMOVED***": .autoDownload, "***REMOVED***": .autoDownload, "My***REMOVED***": .autoDownload, "***REMOVED***": .autoDownload,
         "***REMOVED***": .autoDownload, "***REMOVED***": .autoDownload,
@@ -398,7 +367,6 @@ final class Bookmark {
         "***REMOVED***": .browseOnly, "***REMOVED***": .browseOnly, "***REMOVED***": .browseOnly
     ]
 
-    /// A shipped site's folder, also for the user's own bookmarks of that site.
     var folder: Folder { url.host.flatMap { Self.siteFolders[SiteNames.name(for: $0)] } ?? .mine }
 
     static let oldStarterURLs: Set<String> = [

@@ -1,7 +1,6 @@
 import Foundation
 import SwiftData
 
-/// Creates shows and keeps their episodes in the viewer's watch order (`DownloadItem.showOrder`).
 @MainActor
 final class ShowStore: ObservableObject {
     private static let dismissedKey = "dismissedShowSuggestions"
@@ -20,7 +19,6 @@ final class ShowStore: ObservableObject {
 
     func episodes(of show: Show) -> [DownloadItem] { ShowPlaylist.episodes(of: show.id, in: videos()) }
 
-    /// A new show with these videos in the given order.
     @discardableResult
     func create(title: String, with items: [DownloadItem]) -> Show {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -36,7 +34,7 @@ final class ShowStore: ObservableObject {
         return show
     }
 
-    /// Adds videos after the show's last episode, in episode order. Videos move out of any other show.
+    /// Videos move out of any other show they were in.
     func add(_ items: [DownloadItem], to show: Show) {
         let current = episodes(of: show)
         let ids = Set(current.map(\.id))
@@ -52,8 +50,6 @@ final class ShowStore: ObservableObject {
         save()
     }
 
-    /// A new download joins the show its title belongs to, matched by the show's name or by its
-    /// episodes' series name.
     @discardableResult
     func addToMatchingShow(_ item: DownloadItem) -> Show? {
         guard item.showID == nil, !item.isMovie else { return nil }
@@ -68,9 +64,7 @@ final class ShowStore: ObservableObject {
         return show
     }
 
-    /// The page of the highest-numbered episode, from which the next one is looked for. The
-    /// number comes from the page's address, else the title; episodes without one don't count,
-    /// so an unnumbered older download can't send the checker back to an earlier episode.
+    /// Unnumbered episodes don't count, so an older download can't send the checker back an episode.
     private func updateFollowedPage(_ show: Show) {
         show.followSourceURL = Self.latestEpisodePage(in: episodes(of: show))
     }
@@ -95,7 +89,6 @@ final class ShowStore: ObservableObject {
         if changed { save() }
     }
 
-    /// Takes the video out of its show; the video stays in the library.
     func remove(_ item: DownloadItem) {
         guard let showID = item.showID, let show = shows.first(where: { $0.id == showID }) else {
             item.showID = nil
@@ -129,7 +122,6 @@ final class ShowStore: ObservableObject {
         save()
     }
 
-    /// Deletes the show; its videos stay in the library.
     func delete(_ show: Show) {
         for item in episodes(of: show) {
             item.showID = nil
@@ -139,8 +131,7 @@ final class ShowStore: ObservableObject {
         save()
     }
 
-    /// A watched episode is about to be deleted; its show remembers when it was played, for
-    /// Continue Watching. The caller saves.
+    /// Call before deleting a watched episode, so Continue Watching can find the next; the caller saves.
     func episodeDeleted(_ item: DownloadItem) {
         guard item.isWatched, let played = item.lastPlayedAt, let show = show(for: item) else { return }
         if show.deletedEpisodePlayedAt.map({ $0 < played }) ?? true { show.deletedEpisodePlayedAt = played }
@@ -151,7 +142,6 @@ final class ShowStore: ObservableObject {
         return shows.first { $0.id == showID }
     }
 
-    /// The episode `offset` places away in the watch order (1 is next, -1 previous), if its file is there.
     func episode(_ offset: Int, from item: DownloadItem) -> DownloadItem? {
         guard let showID = item.showID else { return nil }
         let episodes = ShowPlaylist.episodes(of: showID, in: videos())
@@ -161,7 +151,6 @@ final class ShowStore: ObservableObject {
         return episode
     }
 
-    /// The episode after this one when its show plays on automatically and the file is still there.
     func autoplayNext(after item: DownloadItem) -> DownloadItem? {
         guard let showID = item.showID, let show = shows.first(where: { $0.id == showID }), show.autoplayNext else { return nil }
         let episodes = ShowPlaylist.episodes(of: showID, in: videos())

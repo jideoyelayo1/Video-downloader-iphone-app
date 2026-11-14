@@ -1,8 +1,6 @@
 import Foundation
 import SwiftData
 
-/// Creates, applies and removes Library labels, including the automatic ones: a label named
-/// after each download's site ("***REMOVED***"), and labels the viewer gave sites to watch for.
 @MainActor
 final class LabelStore: ObservableObject {
     static let colorNames = ["blue", "purple", "pink", "red", "orange", "yellow", "green", "teal"]
@@ -17,7 +15,6 @@ final class LabelStore: ObservableObject {
         self.preferences = preferences
     }
 
-    /// Whether each download is labelled with its site's name. On unless the viewer turns it off.
     var labelsDownloadsWithSite: Bool {
         get { preferences.object(forKey: Self.siteLabelsKey) as? Bool ?? true }
         set {
@@ -42,7 +39,6 @@ final class LabelStore: ObservableObject {
         return label
     }
 
-    /// Removes the label from every video; the videos stay.
     func delete(_ label: VideoLabel) {
         let id = label.id
         for item in videos() where item.labelIDs?.contains(id) == true { item.labelIDs?.removeAll { $0 == id } }
@@ -55,7 +51,6 @@ final class LabelStore: ObservableObject {
         save()
     }
 
-    /// Adds the site label and any rule labels that match where the video came from.
     func applyAutomaticLabels(to item: DownloadItem) {
         guard let host = item.sourcePageURL.host else { return }
         for label in labels where !(label.isSiteLabel ?? false) && (label.sites ?? []).contains(where: { SiteMatch.matches(host: host, site: $0) }) {
@@ -65,7 +60,6 @@ final class LabelStore: ObservableObject {
         save()
     }
 
-    /// The label named after a site, created the first time a video comes from it.
     func siteLabel(for host: String) -> VideoLabel {
         let site = SiteNames.normalized(host)
         let siteLabels = labels.filter { $0.isSiteLabel ?? false }
@@ -81,7 +75,6 @@ final class LabelStore: ObservableObject {
         return label
     }
 
-    /// Videos already in the library that a label's sites match but that don't have the label yet.
     func unlabelledMatches(for label: VideoLabel) -> [DownloadItem] {
         let sites = label.sites ?? []
         guard !sites.isEmpty else { return [] }
@@ -106,7 +99,6 @@ final class LabelStore: ObservableObject {
         save()
     }
 
-    /// Sites to offer in a label's rules: the sites the app ships bookmarks for and every site in the library.
     var knownSites: [String] {
         let starters = Bookmark.knownSites.compactMap { $0.1.host.map(SiteNames.normalized) }
         let library = videos().compactMap { $0.sourcePageURL.host.map(SiteNames.normalized) }

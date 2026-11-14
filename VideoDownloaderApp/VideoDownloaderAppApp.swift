@@ -32,14 +32,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
-        // Without the saved library, finished files would be thrown away as unknown; iOS keeps the events for later.
+        // Without the saved library, finished files would be discarded as unknown; iOS keeps the events.
         guard AppServices.shared.libraryOpenError == nil else { return completionHandler() }
         // The app may be launched in the background just for this, before any scene exists.
         AppServices.shared.downloads.setBackgroundCompletionHandler(completionHandler, for: identifier)
     }
 }
 
-/// Long-lived services, created once per process.
 @MainActor
 final class AppServices {
     static let shared = AppServices()
@@ -54,10 +53,9 @@ final class AppServices {
     let subtitleEmbedder: SubtitleEmbedder
     let seasons: SeasonDownloader
     let newEpisodes: NewEpisodeChecker
-    /// App settings; a fresh, separate store when UI tests run with an in-memory library.
+    /// A fresh, separate store when UI tests run with an in-memory library.
     let preferences: UserDefaults
-    /// Why the saved library didn't open. The app then runs on an empty in-memory library that
-    /// leaves the saved one (and its settings) untouched, and ContentView asks what to do.
+    /// Why the saved library didn't open; the app then runs in memory and leaves the saved one untouched.
     let libraryOpenError: Error?
 
     private init() {
@@ -68,8 +66,7 @@ final class AppServices {
             libraryOpenError = nil
             recovering = false
         } catch {
-            // Crashing would repeat on every launch. An older build opening a newer store, or a launch
-            // before the iPhone's first unlock, fails here too, so nothing is moved without asking.
+            // A newer store or a launch before first unlock fails here too, so nothing is moved without asking.
             guard let fallback = try? LibrarySchema.container(inMemory: true) else { fatalError("Unable to open the download library: \(error)") }
             container = fallback
             libraryOpenError = error
@@ -115,7 +112,6 @@ final class AppServices {
     }
 }
 
-/// Process launch arguments used by tests and the site-compatibility runs.
 enum LaunchOptions {
     static var isRunningUnitTests: Bool { ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil }
 

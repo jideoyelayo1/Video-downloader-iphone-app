@@ -3,9 +3,7 @@ import Foundation
 import SwiftData
 import UniformTypeIdentifiers
 
-/// The library's records (not the video files): titles, sources, positions, watched state,
-/// labels, shows and folders. Restoring merges by ID; a video whose file isn't on this iPhone
-/// comes back under Needs Attention, with Open Page to download it again.
+/// Library records only, not the video files; restoring merges by ID.
 struct LibraryBackup: Codable {
     static let currentVersion = 1
     var version = currentVersion
@@ -53,7 +51,7 @@ struct LibraryBackup: Codable {
     static func make(from context: ModelContext) -> LibraryBackup {
         var backup = LibraryBackup()
         let items = (try? context.fetch(FetchDescriptor<DownloadItem>())) ?? []
-        // Every video not on its way, including ones a restore left to download again.
+        // Skips only active downloads, so videos a restore left to download again are kept.
         backup.videos = items.filter { !$0.isActive }.map {
             Video(id: $0.id, title: $0.title, remoteURL: $0.remoteURL, sourcePageURL: $0.sourcePageURL, refererURL: $0.refererURL, kind: $0.kindRaw,
                   localFileName: $0.localFileName, createdAt: $0.createdAt, completedAt: $0.completedAt, fileSize: $0.fileSize,

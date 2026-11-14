@@ -1,8 +1,6 @@
 import Foundation
 
-/// What the library holds and the space it takes, for Settings.
 struct LibraryStats: Equatable {
-    /// Saved videos of one show or from one site.
     struct Group: Equatable, Identifiable {
         let id: String
         let name: String
@@ -12,19 +10,14 @@ struct LibraryStats: Equatable {
 
     var videos = 0
     var watched = 0
-    /// Started but not finished, as the In Progress filter counts them.
     var inProgress = 0
     var bytes: Int64 = 0
     var watchedBytes: Int64 = 0
     var addedThisWeek = 0
     var addedThisWeekBytes: Int64 = 0
-    /// Shows with saved episodes, largest first.
     var shows: [Group] = []
-    /// Videos marked as movies, which My Videos keeps out of Not in a Show.
     var movies = Group(id: "movies", name: "Movies", count: 0, bytes: 0)
-    /// Videos that aren't episodes of a show or movies.
     var notInShow = Group(id: "notInShow", name: "Not in a show", count: 0, bytes: 0)
-    /// Largest first.
     var sites: [Group] = []
 
     var unwatched: Int { videos - watched }

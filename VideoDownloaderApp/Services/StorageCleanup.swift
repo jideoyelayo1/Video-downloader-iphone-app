@@ -1,33 +1,29 @@
 import Foundation
 
-/// Which watched videos to delete to save space.
 enum StorageCleanup {
     static let autoDeleteKey = "deleteWatchedAfterDays"
     static let lastCleanupKey = "lastWatchedCleanup"
     static let cleanupTotalsKey = "watchedCleanupTotals"
 
-    /// The choices in Settings, in days; 0 keeps watched videos.
+    /// In days; 0 keeps watched videos.
     static let dayChoices = [0, 1, 3, 7, 14, 30]
 
-    /// "1 day", "3 days", "1 week", "2 weeks".
     static func periodText(days: Int) -> String {
         if days % 7 == 0 { return days == 7 ? "1 week" : "\(days / 7) weeks" }
         return days == 1 ? "1 day" : "\(days) days"
     }
 
-    /// "Never", "After 3 Days", "After 1 Week".
     static func choiceName(days: Int) -> String {
         days > 0 ? "After " + periodText(days: days).capitalized : "Never"
     }
 
-    /// What automatic cleanups deleted: the last one, or all of them since `date`.
+    /// Used for both the last cleanup and the running total since `date`.
     struct Cleanup: Codable, Equatable {
         var date: Date
         var count: Int
         var bytes: Int64
     }
 
-    /// Completed videos watched at least `days` ago.
     static func watched(_ items: [DownloadItem], olderThan days: Int, now: Date = Date()) -> [DownloadItem] {
         let cutoff = now.addingTimeInterval(-Double(days) * 86_400)
         return items.filter { $0.status == .completed && ($0.watchedAt.map { $0 <= cutoff } ?? false) }
@@ -39,15 +35,13 @@ enum StorageCleanup {
         ByteCountFormatter.string(fromByteCount: totalSize(items), countStyle: .file)
     }
 
-    /// "It frees 350 MB on this iPhone.", for a question about deleting the video.
     static func freedText(_ item: DownloadItem) -> String {
         guard let size = item.fileSize, size > 0 else { return "It is removed from this iPhone." }
         return "It frees \(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)) on this iPhone."
     }
 }
 
-/// What happens to an episode of a show once it has been watched in the player: played to the
-/// end, through to its marked credits, or closed in its last 10%.
+/// An episode counts as watched when played to the end, through its credits, or closed in its last 10%.
 enum FinishedEpisodes: String, CaseIterable, Identifiable {
     case keep, ask, delete
 
@@ -64,7 +58,6 @@ enum FinishedEpisodes: String, CaseIterable, Identifiable {
 }
 
 extension DownloadManager {
-    /// Off unless chosen in Downloads.
     var finishedEpisodes: FinishedEpisodes {
         get { preferences.string(forKey: FinishedEpisodes.key).flatMap(FinishedEpisodes.init) ?? .keep }
         set {
@@ -73,7 +66,7 @@ extension DownloadManager {
         }
     }
 
-    /// Deletes the show and its episodes' videos, including any still downloading.
+    /// Also deletes episodes that are still downloading.
     func deleteShowAndEpisodes(_ show: Show) {
         guard let showStore else { return }
         let episodes = showStore.episodes(of: show)
@@ -82,7 +75,7 @@ extension DownloadManager {
         diagnostics?.record(event: "storage", url: "app://shows", note: "Deleted \(show.title) and its \(episodes.count) episodes")
     }
 
-    /// Watched videos are deleted this many days after they were watched; 0 (the default) keeps them.
+    /// 0 (the default) keeps watched videos.
     var deleteWatchedAfterDays: Int {
         get { max(preferences.integer(forKey: StorageCleanup.autoDeleteKey), 0) }
         set {
@@ -92,14 +85,12 @@ extension DownloadManager {
     }
 
     var lastCleanup: StorageCleanup.Cleanup? { cleanup(forKey: StorageCleanup.lastCleanupKey) }
-    /// Every automatic cleanup since the first.
     var cleanupTotals: StorageCleanup.Cleanup? { cleanup(forKey: StorageCleanup.cleanupTotalsKey) }
 
     private func cleanup(forKey key: String) -> StorageCleanup.Cleanup? {
         preferences.data(forKey: key).flatMap { try? JSONDecoder().decode(StorageCleanup.Cleanup.self, from: $0) }
     }
 
-    /// Run at launch.
     @discardableResult
     func deleteOldWatchedVideos(now: Date = Date()) -> Int {
         let days = deleteWatchedAfterDays
@@ -119,7 +110,6 @@ extension DownloadManager {
         return old.count
     }
 
-    /// Deletes every watched video, from Settings.
     func deleteWatchedVideos() {
         let watched = allItems().filter { $0.status == .completed && $0.isWatched }
         delete(watched)
