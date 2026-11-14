@@ -73,6 +73,7 @@ if [[ ! -d $WORK/.git ]]; then
 fi
 git -C "$WORK" fetch -q origin "$BRANCH" && git -C "$WORK" checkout -q --detach -f FETCH_HEAD && git -C "$WORK" clean -fdq -e build ||
     fail "Couldn't update the project copy for the automatic update."
+if [[ -f $SUPPORT/Local.xcconfig ]]; then cp "$SUPPORT/Local.xcconfig" "$WORK/Config/Local.xcconfig"; fi
 building=$(git -C "$WORK" rev-parse --short HEAD)
 log "Building $building ($BRANCH)…"
 

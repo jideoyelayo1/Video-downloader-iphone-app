@@ -31,6 +31,7 @@
 		C10000000000000000000001 /* VideoDownloaderApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VideoDownloaderApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10000000000000000000002 /* VideoDownloaderAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VideoDownloaderAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10000000000000000000003 /* VideoDownloaderAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VideoDownloaderAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C10000000000000000000004 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -103,6 +104,7 @@
 				E10000000000000000000008 /* VideoDownloaderAppTests */,
 				E10000000000000000000020 /* VideoDownloaderAppUITests */,
 				E10000000000000000000026 /* Shared test support */,
+				C10000000000000000000004 /* Base.xcconfig */,
 				E1000000000000000000000A /* Products */,
 			);
 			sourceTree = "<group>";
@@ -302,7 +304,6 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
-				DEVELOPMENT_TEAM = ***REMOVED***;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = VideoDownloaderApp/Info.plist;
@@ -330,7 +331,6 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
-				DEVELOPMENT_TEAM = ***REMOVED***;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = VideoDownloaderApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Video Downloader";
@@ -382,6 +382,7 @@
 		};
 		E10000000000000000000014 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = C10000000000000000000004 /* Base.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -427,6 +428,7 @@
 		};
 		E10000000000000000000015 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = C10000000000000000000004 /* Base.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;

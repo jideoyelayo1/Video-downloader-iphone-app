@@ -51,6 +51,8 @@ chmod +x "$HOOK"
 
 cp "$REPO/scripts/device-reinstall/reinstall.sh" "$SUPPORT/reinstall.sh"
 chmod +x "$SUPPORT/reinstall.sh"
+# The team ID is untracked, so the job gets its own copy.
+if [[ -f $REPO/Config/Local.xcconfig ]]; then cp "$REPO/Config/Local.xcconfig" "$SUPPORT/Local.xcconfig"; fi
 print -r -- "DEVICE=$DEVICE BRANCH=$BRANCH INTERVAL_DAYS=$INTERVAL_DAYS" > "$SUPPORT/config"
 
 # Every 6 hours; reinstall.sh decides whether an install is due.

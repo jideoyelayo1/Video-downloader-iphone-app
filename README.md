@@ -25,7 +25,7 @@ The only dependency, Google's Cast SDK, is fetched by Swift Package Manager when
 ## Setup
 
 1. Clone the repository and open `VideoDownloaderApp.xcodeproj`.
-2. Select the **VideoDownloaderApp** target, open *Signing & Capabilities* and choose your **Team**.
+2. Copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` and set `DEVELOPMENT_TEAM` to your Apple team ID. The copy is ignored by git, so your team ID stays out of the repository.
 3. If Xcode says the bundle identifier `com.jideoyelayo.VideoDownloader` is taken, change it to one of your own.
 4. Choose an iPhone or a simulator and press **Run**. On a device, turn on Developer Mode and trust your certificate under *Settings → General → VPN & Device Management*.
 
@@ -33,7 +33,7 @@ No API keys or other secrets are needed. Signing is the only configuration.
 
 ### Free Apple ID builds
 
-A free account's build stops opening after 7 days, and My Videos warns two days before. Running the app from Xcode again renews it and keeps the library. `scripts/device-reinstall/setup.sh` can do this for you: it installs a LaunchAgent on the Mac that rebuilds `master` and reinstalls it on the iPhone over Wi-Fi every 5 days. `setup.sh --uninstall` removes it, and the log is in `~/Library/Logs/VideoDownloaderReinstall.log`.
+A free account's build stops opening after 7 days, and My Videos warns two days before. Running the app from Xcode again renews it and keeps the library. `scripts/device-reinstall/setup.sh` can do this for you: it installs a LaunchAgent on the Mac that rebuilds `master` and reinstalls it on the iPhone over Wi-Fi every 5 days. It copies your `Config/Local.xcconfig` for the job, so run it again if you change that file. `setup.sh --uninstall` removes it, and the log is in `~/Library/Logs/VideoDownloaderReinstall.log`.
 
 ## Project structure
 

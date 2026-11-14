@@ -24,6 +24,7 @@ Direct downloads are saved in Application Support. HLS packages stay where AVFou
 
 ## Project settings
 
+- Signing: the project's base configuration, `Config/Base.xcconfig`, includes the untracked `Config/Local.xcconfig`, which sets `DEVELOPMENT_TEAM`. The project file holds no team ID.
 - `Info.plist` allows plain-HTTP loads, because the user chooses the sites. It also declares Google Cast's Bonjour services and the local-network prompt.
 - The new-episode background task's identifier is in `Info.plist` (`BGTaskSchedulerPermittedIdentifiers`) and in `NewEpisodeChecker.backgroundTaskID`. The two must match.
 - `Services/BuildExpiry.swift` reads the embedded provisioning profile so that My Videos can warn before a free-account build expires.

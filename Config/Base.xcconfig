@@ -1,0 +1,2 @@
+// Signing values live in the untracked Local.xcconfig (copy Local.xcconfig.example).
+#include? "Local.xcconfig"

@@ -31,3 +31,6 @@ node_modules/
 __pycache__/
 *.pyc
 .venv/
+
+# Local signing settings
+Config/Local.xcconfig
