@@ -60,7 +60,6 @@ final class SeasonDownloaderTests: XCTestCase {
         }
     }
 
-    /// From episode 1, "the next 3 episodes" finds 2 and 3, then stops because 4 isn't out.
     func testNextEpisodesAreFoundAndDownloaded() async throws {
         let server = try LocalMediaServer()
         try server.start()
@@ -87,8 +86,7 @@ final class SeasonDownloaderTests: XCTestCase {
         for item in items { manager.delete(item) }
     }
 
-    /// An ad in the player isn't the episode, and an episode that isn't out isn't found on the
-    /// page the site sends it to instead (***REMOVED*** opens episode 1).
+    /// Neither a player ad nor the page a site sends an unreleased episode to (***REMOVED***: ep 1) is the episode.
     func testAdsAndRedirectedPagesAreNotTheEpisode() async throws {
         let server = try LocalMediaServer()
         try server.start()

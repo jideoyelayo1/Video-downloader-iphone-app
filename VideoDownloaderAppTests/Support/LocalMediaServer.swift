@@ -2,33 +2,6 @@ import Foundation
 import Network
 import UIKit
 
-/// A tiny HTTP/1.1 server on 127.0.0.1 (ephemeral port) serving fixture media for integration and UI tests.
-///
-/// Every response carries `Content-Length` and `Connection: close`. GET and HEAD are supported; other methods get 405.
-/// Routes marked (Range) honour `Range: bytes=a-b`, `bytes=a-` and `bytes=-n` with 206 + `Content-Range` (416 if unsatisfiable).
-///
-/// - `/video.mp4` — MP4 fixture, video/mp4 (Range).
-/// - `/noext/stream?id=1` — same MP4 bytes with no extension, video/mp4 (Range).
-/// - `/hls/master.m3u8` — master playlist, two variants (500 kbps 320x180, 900 kbps 640x360) both pointing at `media.m3u8`.
-/// - `/hls/media.m3u8` — finite VOD media playlist (`#EXT-X-ENDLIST`); segments served at `/hls/<segment name>` (Range).
-/// - `/hls/live.m3u8` — the same media playlist without `#EXT-X-ENDLIST` / `#EXT-X-PLAYLIST-TYPE`.
-/// - `/hls/drm.m3u8` — the media playlist with `#EXT-X-KEY:METHOD=SAMPLE-AES,URI="skd://key"`.
-/// - `/cookie/video.mp4` — MP4 only if the Cookie header contains `session=ok`, else 403 (Range).
-/// - `/referer/video.mp4` — MP4 only if Referer starts with `<baseURL>page`, else 403 (Range).
-/// - `/redirect/video.mp4` — 302 to `/video.mp4`.
-/// - `/redirect-cross/video.mp4` — 302 to `http://localhost:<port>/echo-cookie` (same server, different host string).
-/// - `/echo-cookie` — 200 text/plain; body is the received Cookie header (empty if none).
-/// - `/expired/video.mp4` — 410.
-/// - `/missing.mp4` — 404.
-/// - `/html/video.mp4` — 200 text/html fake error page.
-/// - `/drop/video.mp4` — full Content-Length header, then about half the body, then the connection closes (Range).
-/// - `/slow/video.mp4` — MP4 streamed in ~24 chunks, 100 ms apart (~2.4 s total) (Range).
-/// - `/page/basic.html` — `<video src="/video.mp4" controls>`.
-/// - `/page/dynamic.html` — inserts `<video src="/noext/stream?id=1">` via JS after 500 ms.
-/// - `/page/iframe.html` — `<iframe src="/page/basic.html">`.
-/// - `/page/hls.html` — `<video src="/hls/master.m3u8">`.
-/// - `/page/links.html` — index linking to every page above.
-/// - anything else — 404.
 final class LocalMediaServer {
     struct RecordedRequest {
         let method: String
@@ -71,7 +44,6 @@ final class LocalMediaServer {
 
     deinit { stop() }
 
-    /// Starts listening and returns the base URL `http://127.0.0.1:<port>/`.
     @discardableResult
     func start() throws -> URL {
         if let baseURL { return baseURL }
@@ -106,7 +78,6 @@ final class LocalMediaServer {
         DispatchQueue.getSpecific(key: queueKey) == nil ? queue.sync(execute: cancelAll) : cancelAll()
     }
 
-    /// Absolute URL for a route path such as `"/video.mp4"` or `"noext/stream?id=1"`.
     func url(_ path: String) -> URL {
         guard let baseURL else { fatalError("LocalMediaServer.url(_:) called before start()") }
         return URL(string: path.hasPrefix("/") ? String(path.dropFirst()) : path, relativeTo: baseURL)!.absoluteURL
@@ -249,8 +220,7 @@ final class LocalMediaServer {
             if request.path.hasPrefix("/page/"), let html = Self.pages[String(request.path.dropFirst(6))] {
                 return .text(html, "text/html; charset=utf-8")
             }
-            // A three-episode series with numbered pages, for season downloads. Episode 4 isn't
-            // out: like ***REMOVED***, the site sends its page to episode 1.
+            // Episode 4 isn't out: like ***REMOVED***, the site sends its page to episode 1.
             if let number = Self.seriesEpisode(request.path) {
                 guard (1...3).contains(number) else { return .redirect(origin + "series/ep-1.html") }
                 return .text(Self.page("Fixture Series Ep. \(number)", #"<video src="/series/video-\#(number).mp4" controls playsinline width="320" height="180"></video>"#),
@@ -338,7 +308,6 @@ final class LocalMediaServer {
         return lines.joined(separator: "\n")
     }
 
-    /// A 1280×720 orange image, for poster artwork.
     static let posterPNG: Data = UIGraphicsImageRenderer(size: CGSize(width: 1280, height: 720), format: {
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
@@ -348,7 +317,6 @@ final class LocalMediaServer {
         context.fill(CGRect(x: 0, y: 0, width: 1280, height: 720))
     }
 
-    /// `/series/ep-2.html` → 2.
     private static func seriesEpisode(_ path: String) -> Int? {
         guard path.hasPrefix("/series/ep-"), path.hasSuffix(".html") else { return nil }
         return Int(path.dropFirst("/series/ep-".count).dropLast(".html".count))
@@ -471,7 +439,6 @@ final class LocalMediaServer {
         })
     }
 
-    /// Parses a single `bytes=` range; nil when unsatisfiable or malformed.
     static func byteRange(_ header: String, length: Int) -> Range<Int>? {
         let spec = header.trimmingCharacters(in: .whitespaces)
         guard spec.lowercased().hasPrefix("bytes="), length > 0 else { return nil }
@@ -489,7 +456,6 @@ final class LocalMediaServer {
     }
 }
 
-/// Fixture bytes served by `LocalMediaServer`.
 struct FixtureSet {
     var mp4: Data
     /// `fixture.mp4` plus an English `mov_text` subtitle track.
@@ -502,7 +468,6 @@ struct FixtureSet {
     var hlsMediaPlaylist: String
     var hlsSegments: [String: Data]
 
-    /// Loads `fixture.mp4`, `fixture_media.m3u8` and its segments from the bundle containing `LocalMediaServer`.
     static func bundled(in bundle: Bundle = Bundle(for: LocalMediaServer.self)) throws -> FixtureSet {
         let playlist = String(decoding: try load("fixture_media.m3u8", in: bundle), as: UTF8.self)
         var segments: [String: Data] = [:]

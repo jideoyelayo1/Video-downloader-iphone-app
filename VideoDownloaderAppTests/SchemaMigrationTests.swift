@@ -2,10 +2,7 @@ import SwiftData
 import XCTest
 @testable import VideoDownloaderApp
 
-/// A library saved by an earlier build must still open after the models change. The fixture was
-/// written by the models at b9fabea (before movies): that commit's Models/DownloadItem.swift built
-/// for macOS with a short main.swift that saves one show, episode and label. Add one like it from
-/// the last release before changing the models again.
+/// Fixture saved by the models at b9fabea (before movies); add one from the last release before model changes.
 @MainActor
 final class SchemaMigrationTests: XCTestCase {
     func testALibrarySavedBeforeMoviesOpensWithItsVideos() throws {

@@ -83,7 +83,6 @@ final class ShowTests: XCTestCase {
         store.orderByEpisodeNumber(show)
         XCTAssertEqual(order(), [1, 2, 3])
 
-        // A newer download of the same series is offered to the show, then appended.
         let fourth = video("***REMOVED*** Ep. 4 · ***REMOVED***")
         let suggestion = try XCTUnwrap(store.suggestions.first)
         XCTAssertTrue(suggestion.existingShow === show)
@@ -185,8 +184,7 @@ final class ShowTests: XCTestCase {
         XCTAssertEqual(store.episodes(of: show).count, 1)
     }
 
-    /// Older downloads without an episode number can't send the new-episode check back to an
-    /// earlier episode, and shows made before checks existed get their followed page.
+    /// Unnumbered downloads can't move the check back an episode; shows made before checks get a followed page.
     func testTheFollowedPageIsTheHighestNumberedEpisode() {
         let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
         func episode(_ title: String, _ page: String) -> DownloadItem {

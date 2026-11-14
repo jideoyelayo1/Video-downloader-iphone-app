@@ -109,7 +109,6 @@ final class SubtitleStoreTests: XCTestCase {
         XCTAssertEqual(SubtitleParser.cues(from: english).first?.text, "Fixture English line")
         XCTAssertEqual(server.requests(to: "/subs/en.vtt").last?.header("user-agent"), "SubtitleFixture/1")
 
-        // Saving again (a retried download) replaces the earlier set.
         _ = await SubtitleStore.save([track("/subs/es.vtt", "Español", "es")], for: id, in: root) { _ in nil }
         XCTAssertEqual(SubtitleStore.saved(for: id, in: root).map(\.label), ["Español"])
 

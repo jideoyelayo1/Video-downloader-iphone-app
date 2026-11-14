@@ -3,7 +3,6 @@ import XCTest
 import UIKit
 @testable import VideoDownloaderApp
 
-/// Drives the real download delegate code against `LocalMediaServer` using a foreground session.
 @MainActor
 final class DownloadIntegrationTests: XCTestCase {
     private var server: LocalMediaServer!
@@ -54,7 +53,6 @@ final class DownloadIntegrationTests: XCTestCase {
 
     // MARK: Direct files
 
-    /// Downloads beyond the limit wait as queued and start as others finish.
     func testDownloadsBeyondTheLimitWaitTheirTurn() async throws {
         let suite = "DownloadIntegrationTests-\(UUID().uuidString)"
         manager.preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -267,8 +265,7 @@ final class DownloadIntegrationTests: XCTestCase {
     }
 
     func testCancelledContextLookupCannotStartAfterRetry() async throws {
-        // Hold both browser-context lookups. Resuming the first after cancel +
-        // retry must not create a stale task for the same item.
+        // Hold both context lookups: resuming the first after cancel + retry must not create a stale task.
         var calls = 0
         var pending: [CheckedContinuation<RequestContext?, Never>] = []
         manager.requestContextProvider = { _, _ in
@@ -311,8 +308,7 @@ final class DownloadIntegrationTests: XCTestCase {
         manager.retry(item)
         try await waitUntil { calls == 2 }
 
-        // The cancelled task's completion can arrive while the retry is still
-        // waiting for browser context. It must not cancel the new attempt.
+        // The cancelled task's completion can arrive while the retry awaits context; it must not cancel it.
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(item.status, .downloading)
 
@@ -402,7 +398,6 @@ final class DownloadIntegrationTests: XCTestCase {
     }
 }
 
-/// Probes run before a candidate is offered.
 final class CandidateValidatorTests: XCTestCase {
     private var server: LocalMediaServer!
     private let validator = CandidateValidator()

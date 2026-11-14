@@ -36,8 +36,6 @@ final class BrowserCollectionsStoreTests: XCTestCase {
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Bookmark>()), bookmarks.count)
     }
 
-    /// A library that already had the earlier tested sites gets only the newer ones, once; one
-    /// bookmark deleted since isn't added back.
     func testSitesFromALaterSurveyAreAddedWithoutRestoringDeletedOnes() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -57,8 +55,6 @@ final class BrowserCollectionsStoreTests: XCTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<Bookmark>()).map(\.title).sorted(), ["***REMOVED***", "Mine", "***REMOVED***", "***REMOVED***s"])
     }
 
-    /// A library with its own bookmarks gets each tested site once, unless a bookmark already
-    /// opens that site; nothing is removed, and it happens only once.
     func testTestedSitesAreAddedOnceBesideExistingBookmarks() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -147,7 +143,6 @@ final class BrowserCollectionsStoreTests: XCTestCase {
         XCTAssertTrue(try context.fetch(FetchDescriptor<BrowsingHistoryEntry>()).map(\.url.absoluteString).contains("https://example.com/page/3"))
     }
 
-    /// Every shipped site is filed; the user's own bookmarks of a shipped site join its folder.
     func testBookmarksAreGroupedIntoFolders() {
         for (title, url) in Bookmark.knownSites {
             XCTAssertNotEqual(Bookmark(title: title, url: url).folder, .mine, "\(title) has no folder")

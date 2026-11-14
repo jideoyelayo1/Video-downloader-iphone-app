@@ -1,7 +1,6 @@
 import XCTest
 @testable import VideoDownloaderApp
 
-/// Streams seen on bookmarked sites that can't be saved should say why.
 final class CandidateValidatorReasonTests: XCTestCase {
     private var server: LocalMediaServer!
 

@@ -75,8 +75,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(values.isExcludedFromBackup, true)
     }
 
-    /// iOS 27 reports an HLS package under /.nofollow/private/var/…, and every install moves the app's
-    /// container. A path saved on the iPhone that way (2026-10-09) finds the package in this install's container.
+    /// iOS 27 reports HLS packages under /.nofollow/private/var/…, and every install moves the app's container.
     func testHLSPackagesAreFoundAfterAnInstallMovesTheContainer() throws {
         let package = "com.apple.UserManagedAssets.5BGDwz/Aniwave%20-%20Code%20Geass:%20Lelouch%20of%20the%20Rebellion%20R2.movpkg"
         let reported = "/.nofollow/private/var/mobile/Containers/Data/Application/E51660F9-E96F-4CDB-8E9B-D64DA8A449F2/Library/" + package
@@ -93,7 +92,6 @@ final class PersistenceTests: XCTestCase {
             + file.lastPathComponent
         XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(item.localURL).path), "so it plays instead of 'file is missing'")
 
-        // Paths outside the app's container stay as they are.
         XCTAssertEqual(DownloadStorage.storedURL("/tmp/video.mp4").path, "/tmp/video.mp4")
         let shared = "/var/mobile/Containers/Shared/AppGroup/E51660F9-E96F-4CDB-8E9B-D64DA8A449F2/Library/video.mp4"
         XCTAssertEqual(DownloadStorage.storedURL(shared).path, shared)

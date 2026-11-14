@@ -3,8 +3,7 @@ import SwiftData
 import XCTest
 @testable import VideoDownloaderApp
 
-/// Site subtitles moved into the video file, so iOS lists and draws them itself (including in
-/// Picture in Picture and on AirPlay).
+/// Site subtitles go inside the video file so iOS draws them itself, including in Picture in Picture and AirPlay.
 @MainActor
 final class SubtitleRemuxerTests: XCTestCase {
     private func fixture(_ name: String = "fixture.mp4") throws -> URL {
@@ -57,7 +56,6 @@ final class SubtitleRemuxerTests: XCTestCase {
         XCTAssertTrue(verified)
     }
 
-    /// A finished download with saved site subtitles is rewritten as a .mov with them inside.
     func testDownloadsWithSiteSubtitlesAreRewritten() async throws {
         let server = try LocalMediaServer()
         try server.start()

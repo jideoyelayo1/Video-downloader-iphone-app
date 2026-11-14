@@ -1,6 +1,5 @@
 import XCTest
 
-/// Browse → detect → download → library → playback, against pages served by `LocalMediaServer` from the test runner.
 final class DownloadFlowUITests: XCTestCase {
     private var server: LocalMediaServer!
     private var app: XCUIApplication!
@@ -17,11 +16,9 @@ final class DownloadFlowUITests: XCTestCase {
         server?.stop()
     }
 
-    /// `keepOverlay`: site subtitles stay drawn by the app, whose text tells where playback is,
-    /// instead of moving into the video file.
-    /// Added to the next launch, for one test's needs.
     private var extraLaunchArguments: [String] = []
 
+    /// `keepOverlay`: the app keeps drawing site subtitles, whose text tells where playback is.
     private func launch(at path: String, keepOverlay: Bool = true) {
         app.launchArguments = ["-UITestInMemory", "-StartURL", server.url(path).absoluteString] + (keepOverlay ? ["-KeepSiteSubtitleOverlay"] : [])
             + extraLaunchArguments
@@ -36,7 +33,6 @@ final class DownloadFlowUITests: XCTestCase {
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count + 5) + text)
     }
 
-    /// Waits until the Found videos button reports at least `count` validated candidates.
     @discardableResult
     private func waitForReadyCandidates(_ count: Int, timeout: TimeInterval = 20) -> XCUIElement {
         let button = app.buttons["browser.foundVideos"]
@@ -46,7 +42,6 @@ final class DownloadFlowUITests: XCTestCase {
         return button
     }
 
-    /// Downloads the page's first ready video and waits for it to complete.
     private func downloadFirstCandidate() {
         waitForReadyCandidates(1).tap()
         app.buttons["candidate.download"].firstMatch.tap()
@@ -69,7 +64,6 @@ final class DownloadFlowUITests: XCTestCase {
         address.typeText(server.url(path).absoluteString + "\n")
     }
 
-    /// Two 5-second videos: "Basic Video Page", then "Captioned Video Page". Ends in My Videos.
     private func downloadBasicAndCaptioned() {
         launch(at: "/page/basic.html")
         downloadFirstCandidate()
@@ -97,7 +91,6 @@ final class DownloadFlowUITests: XCTestCase {
              timeout: 5, "renamed to \(title)")
     }
 
-    /// The two 5-second videos as episodes 1 and 2 of "Fixture Show", made into a show from its suggestion.
     private func makeTwoEpisodeShow() {
         downloadBasicAndCaptioned()
         renameVideo(at: 1, to: "Fixture Show Ep. 1")
@@ -112,17 +105,14 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.buttons["library.show"].firstMatch.waitForExistence(timeout: 5))
     }
 
-    /// Where a player control is, if it's showing. AVKit's controls fade in and out, and reading a
-    /// vanished control's `frame` or `isHittable` fails the test, while a snapshot only throws.
-    /// Since Xcode 27, hidden controls can also stay in the tree with an infinite frame.
+    /// A faded AVKit control's `frame` fails the test but a snapshot only throws; Xcode 27 adds infinite frames.
     private func shownFrame(of element: XCUIElement) -> CGRect? {
         guard let frame = try? element.snapshot().frame,
               frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { return nil }
         return frame
     }
 
-    /// A tap at a control's position, not on the element: if the controls hid first, the tap only
-    /// shows them again instead of failing the test.
+    /// Taps a position, not the element, so if the controls hid first the tap only shows them again.
     private func tap(at frame: CGRect) {
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
     }
@@ -139,8 +129,7 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertNotNil(shownFrame(of: close), "AVKit's controls should appear after a tap")
     }
 
-    /// Taps a control that shows and hides with AVKit's (they hide about 2 s after appearing),
-    /// trying again if they hid first.
+    /// AVKit's controls hide about 2 s after appearing, so this retries if they hid before the tap.
     private func tapPlayerControl(_ control: XCUIElement, opening result: XCUIElement) {
         for _ in 0..<3 {
             revealPlayerControls()
@@ -150,7 +139,6 @@ final class DownloadFlowUITests: XCTestCase {
         XCTFail("\(control) didn't open \(result)")
     }
 
-    /// Closes the player with AVKit's own close button, the only way out, the same way.
     private func closePlayer() {
         let video = app.otherElements["player.video"]
         for _ in 0..<3 {
@@ -161,8 +149,7 @@ final class DownloadFlowUITests: XCTestCase {
         XCTFail("the player should close")
     }
 
-    /// AVKit's Off item: identified on iOS 26 (beside On (Language)), labelled on iOS 18
-    /// (beside Auto (Recommended) and the languages).
+    /// AVKit's Off item is identified on iOS 26 but only labelled on iOS 18.
     private var subtitlesOffItem: XCUIElement {
         let identified = app.buttons["AVSubtitlesOffAction"]
         return identified.exists ? identified : app.buttons.matching(NSPredicate(format: "label == 'Off'")).firstMatch
@@ -197,7 +184,6 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(libraryItem.label.contains("Basic Video Page"), libraryItem.label)
         XCTAssertTrue(libraryItem.label.contains("Downloaded today at "), libraryItem.label)
 
-        // Playback
         libraryItem.tap()
         XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
         revealPlayerControls()
@@ -219,7 +205,6 @@ final class DownloadFlowUITests: XCTestCase {
         if !shareSheet.waitForNonExistence(timeout: 3) { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)).tap() }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: libraryItem)], timeout: 5), .completed)
 
-        // Rename
         app.buttons["library.moreOptions"].firstMatch.tap()
         app.buttons["Rename"].firstMatch.tap()
         let field = app.alerts.textFields.firstMatch
@@ -230,7 +215,6 @@ final class DownloadFlowUITests: XCTestCase {
         let hasNewTitle = NSPredicate(format: "label CONTAINS 'Renamed episode'")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: hasNewTitle, object: renamed)], timeout: 5), .completed, renamed.label)
 
-        // Delete
         app.buttons["library.item"].firstMatch.press(forDuration: 1.2)
         app.buttons["Delete…"].firstMatch.tap()
         let confirm = app.alerts["Delete this video?"]
@@ -306,7 +290,6 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'HLS stream'")).firstMatch.exists)
         // HLS offline downloads need a physical device; here we only check the quality menu.
         download.tap()
-        // Each quality carries its estimated size: "360p · about 563 KB".
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '360p · about '")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '180p · about '")).firstMatch.exists)
     }
@@ -319,7 +302,6 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["candidate.audio-only.m3u8"].exists)
     }
 
-    /// Built-in caption tracks use AVKit's own subtitle menu; turning them off there is remembered.
     func testCaptionChoiceIsRememberedForTheNextPlayback() throws {
         launch(at: "/page/captions.html")
         downloadFirstCandidate()
@@ -342,7 +324,6 @@ final class DownloadFlowUITests: XCTestCase {
         closePlayer()
     }
 
-    /// ***REMOVED***-style subtitles (separate <track> files) are saved with the download and shown over the saved video.
     func testSiteSubtitlesAreSavedAndShownInTheSavedVideo() throws {
         launch(at: "/page/tracks.html")
         downloadFirstCandidate()
@@ -379,7 +360,6 @@ final class DownloadFlowUITests: XCTestCase {
         closePlayer()
     }
 
-    /// A 60-second video with one subtitle line per 10 s, so the line shown tells where playback is.
     func testWatchedAtTheEndAndByHand() throws {
         launch(at: "/page/basic.html")
         downloadFirstCandidate()
@@ -441,7 +421,6 @@ final class DownloadFlowUITests: XCTestCase {
         app.buttons["Oldest Downloads"].tap()
         wait(for: app.buttons["library.item"].firstMatch, "label CONTAINS 'Basic Video Page'", timeout: 5, libraryTitles.joined(separator: ", "))
 
-        // Watched filter, shown as a removable chip.
         app.buttons.matching(identifier: "library.moreOptions").element(boundBy: 0).tap()
         app.buttons["Mark as Watched"].tap()
         menu.tap()
@@ -452,7 +431,6 @@ final class DownloadFlowUITests: XCTestCase {
         chip.tap()
         wait(for: app.buttons.matching(identifier: "library.item").element(boundBy: 1), "exists == true", timeout: 5, "both listed again")
 
-        // A label filter.
         app.buttons.matching(identifier: "library.moreOptions").element(boundBy: 1).tap()
         app.buttons["Labels"].tap()
         app.buttons["New Label…"].tap()
@@ -492,7 +470,6 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 1"), episodes.element(boundBy: 0).label)
         XCTAssertTrue(app.buttons["show.playNext"].label.contains("Play Ep. 1"), app.buttons["show.playNext"].label)
 
-        // Drag episode 2 above episode 1.
         app.buttons["Edit"].tap()
         let handles = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Reorder'"))
         wait(for: handles.element(boundBy: 1), "exists == true", timeout: 5, "reorder handles")
@@ -511,8 +488,7 @@ final class DownloadFlowUITests: XCTestCase {
         app.tabBars.buttons["My Videos"].tap()
         app.buttons["library.item"].firstMatch.tap()
         XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
-        // Paused playback keeps AVKit's controls visible while we inspect their values.
-        // The sleep countdown must still advance while the video is paused.
+        // Paused keeps AVKit's controls visible for inspection; the sleep countdown must still advance.
         tapPlayerControl(app.buttons["Pause"], opening: app.buttons["Play"])
         let timer = app.buttons["player.sleepTimer"]
         XCTAssertTrue(timer.waitForExistence(timeout: 5))
@@ -546,8 +522,6 @@ final class DownloadFlowUITests: XCTestCase {
         closePlayer()
     }
 
-    /// Locked, taps where AVKit's controls and Pause sit reach nothing, and the video plays on;
-    /// two taps on the lock unlock it.
     func testScreenLockIgnoresTouchesUntilUnlockedTwice() throws {
         launch(at: "/page/long.html")
         downloadFirstCandidate()
@@ -583,29 +557,24 @@ final class DownloadFlowUITests: XCTestCase {
         app.buttons["show.playNext"].tap()
         XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
 
-        // Episode 1 (5 s) ends: the Up Next countdown appears, then episode 2 plays in the same player.
         let playNow = app.buttons["player.upNext.play"]
         XCTAssertTrue(playNow.waitForExistence(timeout: 15), "Up Next appears when episode 1 ends")
         XCTAssertTrue(app.staticTexts["Fixture Show Ep. 2"].exists)
         wait(for: playNow, "exists == false", timeout: 8, "the countdown starts episode 2")
         XCTAssertTrue(app.otherElements["player.video"].exists, "the player stays open")
 
-        // Episode 2 is the last: no Up Next after it.
         sleep(7)
         XCTAssertFalse(app.buttons["player.upNext.play"].exists)
         closePlayer()
-        // "2 of 2 watched · 460 KB".
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '2 of 2 watched'")).firstMatch.waitForExistence(timeout: 5))
     }
 
-    /// The intro is marked once from the player, then offered as Skip Intro on the next viewing.
     func testIntroMarkedInThePlayerIsSkipped() throws {
         launch(at: "/page/long.html")
         downloadFirstCandidate()
         app.tabBars.buttons["My Videos"].tap()
         let item = app.buttons["library.item"].firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5))
-        // A show of one video, made from its menu.
         app.buttons["library.moreOptions"].firstMatch.tap()
         app.buttons["Add to Show"].tap()
         app.buttons["New Show…"].firstMatch.tap()
@@ -630,8 +599,7 @@ final class DownloadFlowUITests: XCTestCase {
         closePlayer()
 
         item.tap()
-        // Closed before the end, it offers to resume. When the menu was slow, the player can
-        // close in the last seconds, which counts as watched: it then starts again by itself.
+        // It offers to resume, unless a slow menu let it close in the last seconds: watched, so it restarts.
         let restart = app.buttons["Start from Beginning"]
         if restart.waitForExistence(timeout: 5) { restart.tap() }
         let skip = app.buttons["player.skipIntro"]
@@ -645,8 +613,6 @@ final class DownloadFlowUITests: XCTestCase {
         closePlayer()
     }
 
-    /// Site subtitles move into a direct download, so iOS lists them itself (and shows them in
-    /// Picture in Picture), instead of the app's separate Subtitles button.
     func testSiteSubtitlesMoveIntoTheVideoFile() throws {
         launch(at: "/page/tracks.html", keepOverlay: false)
         downloadFirstCandidate()
@@ -701,7 +667,6 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 2"), episodes.element(boundBy: 0).label)
     }
 
-    /// A watched episode has its own Delete button, which asks first; any episode's menu can delete it too.
     func testDeleteOneEpisodeAfterConfirming() throws {
         makeTwoEpisodeShow()
         app.buttons["library.show"].firstMatch.tap()
@@ -727,7 +692,6 @@ final class DownloadFlowUITests: XCTestCase {
         wait(for: episodes.element(boundBy: 1), "exists == false", timeout: 5, "episode 1 deleted")
         XCTAssertTrue(episodes.element(boundBy: 0).label.contains("Ep. 2"), episodes.element(boundBy: 0).label)
 
-        // An unwatched episode, from its menu.
         episodes.element(boundBy: 0).press(forDuration: 1.2)
         app.buttons["Delete Episode…"].tap()
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
@@ -737,8 +701,7 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Your library is empty"].waitForExistence(timeout: 5), "the videos are gone from My Videos too")
     }
 
-    /// A show's menu, or a swipe on it in My Videos, deletes it with or without its episodes.
-    /// (iOS 26's dialogs have no Cancel button, so each one is answered.)
+    /// iOS 26's dialogs have no Cancel button, so each one is answered.
     func testDeleteAShowAndItsEpisodes() throws {
         makeTwoEpisodeShow()
         let show = app.buttons["library.show"].firstMatch
@@ -768,8 +731,6 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertFalse(show.exists)
     }
 
-    /// Settings → Delete Finished Episodes → Ask First: the end card has a Delete box beside
-    /// Next Episode, applied when the card goes, and an episode deleted there leaves the show.
     func testFinishedEpisodeIsDeletedWhenTickedOnTheEndCard() throws {
         // XCUITest can take longer than the card's 10 seconds to find and tap the box.
         extraLaunchArguments = ["-UpNextSeconds", "120"]
@@ -788,7 +749,6 @@ final class DownloadFlowUITests: XCTestCase {
         app.buttons["show.playNext"].tap()
         XCTAssertTrue(app.otherElements["player.video"].waitForExistence(timeout: 10))
 
-        // Episode 1 (5 s) ends: one card with Next Episode and an unticked Delete box.
         let toggle = app.buttons["player.deleteEpisode.toggle"]
         let playNow = app.buttons["player.upNext.play"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 15), "offered when episode 1 ends")
@@ -801,7 +761,6 @@ final class DownloadFlowUITests: XCTestCase {
         playNow.tap()
         wait(for: playNow, "exists == false", timeout: 10, "Next Episode starts episode 2")
 
-        // Episode 2, the last, ends: Done instead of Next Episode, and left unticked it's kept.
         XCTAssertTrue(toggle.waitForExistence(timeout: 15), "offered when episode 2 ends")
         XCTAssertTrue(app.buttons["player.endCard.done"].exists)
         XCTAssertFalse(playNow.exists, "nothing follows the last episode")
@@ -812,7 +771,6 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '1 of 1 watched'")).firstMatch.waitForExistence(timeout: 5))
     }
 
-    /// Settings sums up the library, deletes watched videos when asked, and keeps the cleanup period.
     func testSettingsSumUpTheLibrary() throws {
         downloadBasicAndCaptioned()
         app.buttons.matching(identifier: "library.moreOptions").element(boundBy: 0).tap()
@@ -833,7 +791,6 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(site.label.hasSuffix("2 videos"), site.label)
         app.navigationBars.buttons["Settings"].tap()
 
-        // The cleanup period is a choice of days.
         let period = app.buttons["settings.deleteWatched"]
         for _ in 0..<4 where !(period.exists && period.isHittable) { app.swipeUp() }
         period.tap()
@@ -877,8 +834,7 @@ final class DownloadFlowUITests: XCTestCase {
         XCTAssertTrue(subtitle.waitForExistence(timeout: 10))
         XCTAssertEqual(subtitle.label, "Ten to twenty", "should resume near 12 s, not from the start")
 
-        // Seeking with AVKit's controls moves the subtitle with it. Paused, so the position is exact:
-        // about 12 s, +20 s, then -10 s.
+        // Paused, so the position is exact: about 12 s, +20 s, then -10 s.
         revealPlayerControls()
         app.buttons["Play/Pause"].tap()
         app.buttons["Skip Forward"].tap()
