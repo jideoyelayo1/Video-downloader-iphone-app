@@ -14,26 +14,21 @@ final class DownloadManager: NSObject, ObservableObject {
 
     /// Progress is kept in memory and only persisted occasionally, so ticks don't hit the store.
     let progressStore = DownloadProgressStore()
-    /// A start that was refused before any item was created (e.g. insufficient storage).
     @Published var startError: String?
 
     let context: ModelContext
     var requestContextProvider: ContextProvider?
     var diagnostics: DiagnosticsLog?
-    /// Adds the site and rule labels to each new download.
     var labelStore: LabelStore?
     /// Moves site subtitles into finished direct downloads, for Picture in Picture and AirPlay.
     var subtitleEmbedder: SubtitleEmbedder?
-    /// Puts new downloads into the show they belong to.
     var showStore: ShowStore?
-    /// Download settings; a separate store in tests.
     var preferences: UserDefaults = .standard
 
     private static let concurrentKey = "maxConcurrentDownloads"
     private static let wifiOnlyKey = "downloadOnWiFiOnly"
     private static let notifyKey = "notifyWhenDownloadsFinish"
 
-    /// At most this many downloads run at once; the rest wait as queued.
     var maxConcurrentDownloads: Int {
         get { min(max(preferences.object(forKey: Self.concurrentKey) as? Int ?? 2, 1), 4) }
         set {
@@ -43,7 +38,6 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    /// New transfers wait for Wi-Fi instead of using mobile data.
     var downloadsOnWiFiOnly: Bool {
         get { preferences.bool(forKey: Self.wifiOnlyKey) }
         set {
@@ -51,7 +45,6 @@ final class DownloadManager: NSObject, ObservableObject {
             preferences.set(newValue, forKey: Self.wifiOnlyKey)
         }
     }
-    /// A notification when a download finishes or fails while the app is in the background.
     var notifiesWhenFinished: Bool {
         get { preferences.bool(forKey: Self.notifyKey) }
         set {
@@ -59,7 +52,6 @@ final class DownloadManager: NSObject, ObservableObject {
             preferences.set(newValue, forKey: Self.notifyKey)
         }
     }
-    /// Seconds before the first automatic retry of a dropped transfer; each later one waits 4× longer.
     var automaticRetryDelay: TimeInterval = 10
     private let directConfiguration: URLSessionConfiguration
     private var directTasks: [UUID: URLSessionDownloadTask] = [:]
@@ -68,16 +60,11 @@ final class DownloadManager: NSObject, ObservableObject {
     private var hlsLocations: [UUID: URL] = [:]
     private var injectedCookies: [UUID: [HTTPCookie]] = [:]
     private var userCancelled: Set<UUID> = []
-    /// Identity of the most recent start attempt for each item. A context lookup can
-    /// suspend after `begin` marks an item downloading; this token prevents that old
-    /// lookup from starting a task after the user cancels and retries the item.
+    /// Latest start attempt per item, so a suspended lookup can't start a task after a cancel and retry.
     private var attemptIDs: [UUID: UUID] = [:]
-    /// The attempt whose cancellation is allowed to persist resume data. A late
-    /// callback from an older cancellation must not overwrite a newer retry's data.
+    /// The attempt whose cancellation may save resume data, so an older callback can't overwrite a retry's.
     private var cancelledAttempts: [UUID: UUID] = [:]
-    /// Context lookups that have marked an item downloading but have not created a
-    /// URLSession task yet. Relaunch reconciliation must not call these attempts
-    /// orphaned while their browser lookup is still suspended.
+    /// Lookups that marked an item downloading but have no task yet, so relaunch doesn't call them orphaned.
     private var pendingBegins: [UUID: UUID] = [:]
     private var backgroundCompletionHandlers: [String: () -> Void] = [:]
     private var lastProgressSave: [UUID: Date] = [:]
@@ -85,8 +72,7 @@ final class DownloadManager: NSObject, ObservableObject {
     private var resumedTransfers: Set<UUID> = []
     private var networkObservation: AnyCancellable?
     private var progressSamples: [UUID: (date: Date, progress: Double)] = [:]
-    /// Automatic retries used since the user last started, retried or deleted each download, and the
-    /// pending one's token: a retry the user has overtaken mustn't fire as well.
+    /// Automatic retries since the user last acted, with a token so a retry the user overtook doesn't also fire.
     private var automaticRetries: [UUID: (count: Int, token: UUID)] = [:]
     /// Sizes expected when downloads were started, so several at once can't promise more space than there is.
     private var expectedSizes: [UUID: Int64] = [:]
@@ -131,8 +117,7 @@ final class DownloadManager: NSObject, ObservableObject {
             return nil
         }
         let title = EpisodeURL.title(candidate.title.trimmingCharacters(in: .whitespacesAndNewlines), numberedFrom: candidate.sourcePageURL)
-        // A fresh tap on the same source should repair its existing row rather than
-        // create another identical failure in Downloads. Rows are saved under the numbered title.
+        // Repair the source's failed row instead of adding a duplicate; rows are saved under the numbered title.
         let prior = allItems().first {
             ($0.status == .failed || $0.status == .cancelled) &&
             ($0.remoteURL == candidate.url || ($0.sourcePageURL == candidate.sourcePageURL && ($0.title == title || $0.title == candidate.title)))
@@ -164,14 +149,12 @@ final class DownloadManager: NSObject, ObservableObject {
         return item
     }
 
-    /// What the downloads under way still expect to write.
     private func committedBytes() -> Int64 {
         allItems().filter(\.isActive).reduce(0) { total, item in
             total + Int64(Double(expectedSizes[item.id] ?? 0) * (1 - progress(of: item)))
         }
     }
 
-    /// The page's poster becomes the video's thumbnail, fetched now with the page as Referer.
     private func savePoster(_ poster: URL?, for item: DownloadItem) {
         guard let poster else { return }
         item.posterURL = poster
@@ -250,7 +233,6 @@ final class DownloadManager: NSObject, ObservableObject {
         delete(item, thenStartQueued: true)
     }
 
-    /// Deleting many at once starts the queue only after the last.
     func delete(_ items: [DownloadItem]) {
         items.forEach { delete($0, thenStartQueued: false) }
         startQueued()
@@ -306,15 +288,13 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func allItems() -> [DownloadItem] { (try? context.fetch(FetchDescriptor<DownloadItem>())) ?? [] }
 
-    /// A video already saved, or on its way, from this episode page, so a season run or a
-    /// followed show doesn't download it again.
+    /// Saved or in-progress video from this page, so a season run or followed show doesn't fetch it again.
     func savedOrActiveEpisode(atPage page: URL) -> DownloadItem? {
         let key = MediaDiscovery.normalizedURL(page)
         return allItems().first { ($0.status == .completed || $0.isActive) && MediaDiscovery.normalizedURL($0.sourcePageURL) == key }
     }
 
-    /// Resumed transfers keep the request they began with, which may allow mobile data, so with
-    /// Wi-Fi Only they wait for Wi-Fi and are paused if the iPhone leaves it.
+    /// Resumed transfers keep their original request, which may allow mobile data, so Wi-Fi Only holds them.
     private func mustWaitForWiFi(_ item: DownloadItem) -> Bool {
         downloadsOnWiFiOnly && !NetworkMonitor.shared.isOnWiFi && item.kind != .hls
             && FileManager.default.fileExists(atPath: item.resumeDataURL.path)
@@ -340,7 +320,6 @@ final class DownloadManager: NSObject, ObservableObject {
         startQueued()
     }
 
-    /// Starts queued downloads, oldest first, while fewer than the limit are running.
     func startQueued() {
         let items = allItems()
         var running = items.filter { $0.status == .downloading }.count
@@ -351,7 +330,6 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
-    /// Marks the item as downloading immediately, then creates the task once the browser context is gathered.
     private func begin(_ item: DownloadItem) {
         if item.kind == .hls || !FileManager.default.fileExists(atPath: item.resumeDataURL.path) { item.progress = 0 }
         let attemptID = UUID()
@@ -378,8 +356,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func beginDirect(_ item: DownloadItem, _ requestContext: RequestContext?, attemptID: UUID) {
-        // Cookies go through the session's cookie storage rather than a header, so the URL loading
-        // system scopes them per host on redirects (background sessions don't call the redirect delegate).
+        // Cookie storage, not a header, scopes cookies per host on redirects background sessions can't intercept.
         let cookies = RequestContext.cookies(from: requestContext?.cookies ?? [], for: item.remoteURL)
         if !cookies.isEmpty {
             cookieStorage.setCookies(cookies, for: item.remoteURL, mainDocumentURL: item.remoteURL)
@@ -404,8 +381,7 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func beginHLS(_ item: DownloadItem, _ requestContext: RequestContext?, attemptID: UUID) async {
-        // Do not let a package path reported by an older task become the location
-        // for this retry before AVFoundation reports the new task's package.
+        // Clear so an older task's package path can't become this retry's before AVFoundation reports the new one.
         hlsLocations[item.id] = nil
         var assetOptions: [String: Any] = [:]
         if let cookies = requestContext?.cookies, !cookies.isEmpty { assetOptions[AVURLAssetHTTPCookiesKey] = cookies }
@@ -451,7 +427,6 @@ final class DownloadManager: NSObject, ObservableObject {
                 ]
             }
         }
-        // Include the default audible rendition in every caption selection.
         let mediaSelections = await HLSMediaSelections.forDownload(asset: asset)
         if !mediaSelections.isEmpty { configuration.primaryContentConfiguration.mediaSelections = mediaSelections }
         if let captionGroup = try? await asset.loadMediaSelectionGroup(for: .legible) {
@@ -526,9 +501,7 @@ final class DownloadManager: NSObject, ObservableObject {
         if item.isActive {
             guard associate(task, item: item, id: id, isHLS: task is AVAssetDownloadTask) else { return }
         } else {
-            // A direct task can call didComplete(nil) after didFinishDownloadingTo
-            // has already marked it complete. A cancelled task still gets a
-            // cleanup callback, but only for the attempt that was cancelled.
+            // didComplete(nil) can follow a finished direct task; a cancelled task's cleanup must match its attempt.
             guard let taskAttemptID = Self.attemptID(task),
                   attemptIDs[id] == taskAttemptID || cancelledAttempts[id] == taskAttemptID else {
                 // After a force-quit, relaunch can mark the transfer interrupted before iOS hands over its resume data.
@@ -711,8 +684,7 @@ final class DownloadManager: NSObject, ObservableObject {
             directTasks[id] = downloadTask
             item.status = .downloading
         }
-        // Browser cookies put in for a previous launch's transfers are released only when those
-        // finish in the same launch; with none carrying on, they would stay in the jar for good.
+        // Earlier launches' cookies are released only when their transfers finish here; with none left they'd stay.
         if directTasks.isEmpty { cookieStorage.cookies?.forEach(cookieStorage.deleteCookie) }
         for task in await hlsSession.allTasks {
             guard let id = Self.itemID(task), let item = item(id), let assetTask = task as? AVAssetDownloadTask,
@@ -750,8 +722,7 @@ final class DownloadManager: NSObject, ObservableObject {
         removeUnusedPackages()
     }
 
-    /// HLS packages no download refers to, left by an attempt that was replaced or a crash. Only those
-    /// a day old go, so a package a task is just starting to write is never caught.
+    /// Only packages a day old go, so one a task has just started writing is never removed.
     private func removeUnusedPackages(now: Date = Date()) {
         // An empty test library refers to nothing, and a failed fetch must not look like one.
         guard !context.container.configurations.contains(where: \.isStoredInMemoryOnly),
@@ -802,9 +773,7 @@ final class DownloadManager: NSObject, ObservableObject {
         do { try context.save() } catch { startError = "Couldn't save the download list: \(error.localizedDescription)" }
     }
 
-    /// Associates a delegate callback with its persisted item when the callback
-    /// races startup restoration. Once a task is cancelled or superseded, its
-    /// attempt token must match before it can be reattached.
+    /// Reattaches a callback racing startup restoration; a cancelled or superseded task's attempt must match.
     private func associate(_ task: URLSessionTask, item: DownloadItem, id: UUID, isHLS: Bool) -> Bool {
         guard item.isActive else { return false }
         let attemptID = Self.attemptID(task) ?? attemptIDs[id] ?? UUID()
@@ -823,7 +792,6 @@ final class DownloadManager: NSObject, ObservableObject {
         return true
     }
 
-    /// Removes cookies this manager placed in the session's storage once no other in-flight task needs them.
     private func releaseCookies(for id: UUID) {
         guard let cookies = injectedCookies.removeValue(forKey: id) else { return }
         let stillNeeded = Set(injectedCookies.values.flatMap { $0 }.map { "\($0.domain)|\($0.path)|\($0.name)" })
@@ -884,9 +852,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
         guard totalBytesExpectedToWrite > 0, let id = Self.itemID(downloadTask) else { return }
         let value = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
         MainActor.assumeIsolated {
-            // A cancelled task can still deliver progress after a retry has
-            // installed a new task for the same item. The registered task needs
-            // no store lookup; this callback fires every few kilobytes.
+            // A cancelled task can report after a retry replaced it; the registered task skips the per-few-KB lookup.
             if directTasks[id] !== downloadTask {
                 guard let item = self.item(id), associate(downloadTask, item: item, id: id, isHLS: false) else { return }
             }

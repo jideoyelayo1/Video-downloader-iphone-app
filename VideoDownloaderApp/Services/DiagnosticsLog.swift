@@ -2,7 +2,6 @@ import CoreTransferable
 import Foundation
 import UniformTypeIdentifiers
 
-/// Raw record of what pages and player frames load, for diagnosing site compatibility.
 @MainActor
 final class DiagnosticsLog: ObservableObject {
     struct Entry: Identifiable {
@@ -14,7 +13,7 @@ final class DiagnosticsLog: ObservableObject {
         let isMainFrame: Bool
         let contentType: String?
         let note: String?
-        /// The persisted form. Built once when recorded, because verbose browsing can log many entries a second.
+        /// Built once when recorded, because verbose browsing can log many entries a second.
         let line: String
         /// Lines read back from an earlier launch keep only their text.
         let isPreviousSession: Bool
@@ -84,8 +83,7 @@ final class DiagnosticsLog: ObservableObject {
             entries.removeFirst(entries.count - Self.maxEntries)
             entriesSinceCompaction += 1
         }
-        // Compaction is a full-file write. Batch it so a burst of browser
-        // events cannot rewrite the entire log once per event.
+        // Compaction rewrites the whole file, so batch it rather than rewrite once per browser event.
         if entriesSinceCompaction >= 100 {
             writer.replace(with: text + "\n")
             entriesSinceCompaction = 0
@@ -100,12 +98,10 @@ final class DiagnosticsLog: ObservableObject {
         writer.remove()
     }
 
-    /// Waits until every recorded entry is on disk.
     func flush() { writer.flush() }
 
     var text: String { entries.map(\.line).joined(separator: "\n") }
 
-    /// Writes the log to a shareable temporary file.
     func exportFile() -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("VideoDownloader-diagnostics.txt")
         try? text.write(to: url, atomically: true, encoding: .utf8)
@@ -131,10 +127,7 @@ final class DiagnosticsLog: ObservableObject {
         return result
     }
 
-    /// Keeps file I/O off the main thread. Entries are still written one by one, so a
-    /// crash loses at most the writes queued at that moment. The queue is shared by
-    /// every log so a new instance reading the same file sees what earlier ones wrote.
-    /// `@unchecked Sendable`: `handle` is only read or written on the serial queue.
+    /// One queue for every log, so a new instance reading the same file sees what earlier ones wrote.
     private final class Writer: @unchecked Sendable {
         private static let queue = DispatchQueue(label: "DiagnosticsLog.writer", qos: .utility)
         private let fileURL: URL

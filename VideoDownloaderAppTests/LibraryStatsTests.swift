@@ -5,7 +5,7 @@ import XCTest
 final class LibraryStatsTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 2_000_000_000)
 
-    private func video(_ title: String, site: String = "***REMOVED***.to", size: Int64? = 100, status: DownloadStatus = .completed,
+    private func video(_ title: String, site: String = "showsite.example", size: Int64? = 100, status: DownloadStatus = .completed,
                        watched: Bool = false, position: Double? = nil, show: Show? = nil, daysAgo: Double = 30) -> DownloadItem {
         let item = DownloadItem(title: title, remoteURL: URL(string: "https://cdn.example/\(UUID().uuidString).mp4")!,
                                 sourcePageURL: URL(string: "https://\(site)/watch")!, kind: .video, status: status,
@@ -22,8 +22,8 @@ final class LibraryStatsTests: XCTestCase {
         let items = [
             video("Ep. 1", size: 300, watched: true, show: show),
             video("Ep. 2", size: 300, position: 120, show: show, daysAgo: 2),
-            video("Film", site: "www.***REMOVED***.to", size: 500),
-            video("Barely started", site: "***REMOVED***.to", size: 50, position: 5),
+            video("Film", site: "www.animesite.example", size: 500),
+            video("Barely started", site: "animesite.example", size: 50, position: 5),
             video("Downloading", size: nil, status: .downloading, daysAgo: 0),
             video("Failed", size: nil, status: .failed)
         ]
@@ -45,7 +45,7 @@ final class LibraryStatsTests: XCTestCase {
         XCTAssertEqual(stats.notInShow.count, 2)
         XCTAssertEqual(stats.notInShow.bytes, 550)
 
-        XCTAssertEqual(stats.sites.map(\.name), ["***REMOVED***", "***REMOVED***"], "largest first, with www. folded in")
+        XCTAssertEqual(stats.sites.map(\.name), ["Showsite", "Animesite"], "largest first, with www. folded in")
         XCTAssertEqual(stats.sites.map(\.count), [2, 2])
         XCTAssertEqual(stats.sites.map(\.bytes), [600, 550])
     }

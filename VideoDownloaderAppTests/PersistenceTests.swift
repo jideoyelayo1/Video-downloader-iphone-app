@@ -33,10 +33,10 @@ final class PersistenceTests: XCTestCase {
     func testWatchedLabelsAndShowsPersist() throws {
         let container = try makeContainer()
         let context = container.mainContext
-        let label = VideoLabel(name: "***REMOVED***", colorName: "purple", sites: ["***REMOVED***.to"], isSiteLabel: true)
-        let show = Show(title: "***REMOVED***")
-        let item = DownloadItem(title: "***REMOVED*** Ep. 2 · ***REMOVED***", remoteURL: URL(string: "https://cdn.example/2.mp4")!,
-                                sourcePageURL: URL(string: "https://***REMOVED***.to/anime/x/p-2-dub")!, kind: .video)
+        let label = VideoLabel(name: "Showsite", colorName: "purple", sites: ["showsite.example"], isSiteLabel: true)
+        let show = Show(title: "Sample Show")
+        let item = DownloadItem(title: "Sample Show Ep. 2 · Showsite", remoteURL: URL(string: "https://cdn.example/2.mp4")!,
+                                sourcePageURL: URL(string: "https://showsite.example/anime/x/p-2-dub")!, kind: .video)
         let watched = Date(timeIntervalSince1970: 1_790_000_000)
         item.watchedAt = watched
         item.lastPlayedAt = watched
@@ -58,7 +58,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(fetched.showID, show.id)
         XCTAssertEqual(fetched.showOrder, 1)
         let fetchedLabel = try XCTUnwrap(fresh.fetch(FetchDescriptor<VideoLabel>()).first)
-        XCTAssertEqual(fetchedLabel.sites, ["***REMOVED***.to"])
+        XCTAssertEqual(fetchedLabel.sites, ["showsite.example"])
         XCTAssertEqual(fetchedLabel.isSiteLabel, true)
         XCTAssertTrue(try XCTUnwrap(fresh.fetch(FetchDescriptor<Show>()).first).autoplayNext, "autoplay is on for new shows")
     }
@@ -75,8 +75,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(values.isExcludedFromBackup, true)
     }
 
-    /// iOS 27 reports an HLS package under /.nofollow/private/var/…, and every install moves the app's
-    /// container. A path saved on the iPhone that way (2026-10-09) finds the package in this install's container.
+    /// iOS 27 reports HLS packages under /.nofollow/private/var/…, and every install moves the app's container.
     func testHLSPackagesAreFoundAfterAnInstallMovesTheContainer() throws {
         let package = "com.apple.UserManagedAssets.5BGDwz/Aniwave%20-%20Code%20Geass:%20Lelouch%20of%20the%20Rebellion%20R2.movpkg"
         let reported = "/.nofollow/private/var/mobile/Containers/Data/Application/E51660F9-E96F-4CDB-8E9B-D64DA8A449F2/Library/" + package
@@ -93,14 +92,13 @@ final class PersistenceTests: XCTestCase {
             + file.lastPathComponent
         XCTAssertTrue(FileManager.default.fileExists(atPath: try XCTUnwrap(item.localURL).path), "so it plays instead of 'file is missing'")
 
-        // Paths outside the app's container stay as they are.
         XCTAssertEqual(DownloadStorage.storedURL("/tmp/video.mp4").path, "/tmp/video.mp4")
         let shared = "/var/mobile/Containers/Shared/AppGroup/E51660F9-E96F-4CDB-8E9B-D64DA8A449F2/Library/video.mp4"
         XCTAssertEqual(DownloadStorage.storedURL(shared).path, shared)
     }
 
     func testOldSegmentDownloadIsRecognisedAsAFragment() {
-        let item = DownloadItem(title: "Episode", remoteURL: URL(string: "https://***REMOVED***.top/vd/episode/seg-57-s1080p-v1-a1.m4s")!,
+        let item = DownloadItem(title: "Episode", remoteURL: URL(string: "https://segments.example/vd/episode/seg-57-s1080p-v1-a1.m4s")!,
                                 sourcePageURL: URL(string: "https://example.com/watch")!, kind: .video)
         XCTAssertTrue(item.isStreamFragment)
     }

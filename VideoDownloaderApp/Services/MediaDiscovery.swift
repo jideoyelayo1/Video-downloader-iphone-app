@@ -24,11 +24,9 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
       let pendingMediaNodes = new Set();
       let mediaScanTimer = null;
       let reportedTracks = new Set();
-      // Network resources include ad clips and tracking previews. A playlist may be
-      // prepared before playback, but ordinary file requests must follow a real tap.
+      // Resource timing includes ad clips; a playlist may load before playback, but files must follow a real tap.
       const relevantResource = (url, startedAt) => {
-        // Resource timing also contains images, scripts and ad requests. Avoid
-        // parsing each of those URLs on busy pages.
+        // Cheap extension test first, so busy pages don't parse every image, script and ad URL.
         if (!/\.(m3u8|mp4|m4v|mov|webm|mkv|m4s|ts)(?:[?#]|$)/i.test(url)) return false;
         let path;
         try { path = new URL(url, document.baseURI).pathname.toLowerCase(); } catch (_) { return false; }
@@ -39,9 +37,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         if (event && event.isTrusted === false) return;
         if (interactionTime !== null) return;
         interactionTime = performance.now();
-        // One catch-up scan covers resources loaded before the first tap. New
-        // requests are handled by PerformanceObserver without rescanning on
-        // every subsequent interaction.
+        // One catch-up scan for resources loaded before the first tap; PerformanceObserver handles later ones.
         scanResources();
       };
       const classify = (absolute, contentType) => {
@@ -69,8 +65,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         }
         const kind = classify(absolute, contentType);
         if (!mediaElement && kind === 'unknown') return;
-        // A playlist is often seen twice (its XHR response and its resource
-        // timing entry); report it again only if it is classified differently.
+        // A playlist is often seen twice (XHR and resource timing); re-report only if classified differently.
         const key = absolute + '|' + mediaElement + '|' + kind;
         if (seen.has(key)) return;
         seen.add(key);
@@ -95,8 +90,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         if (!src || typeof src !== 'string' || src.startsWith('blob:') || src.startsWith('data:')) return null;
         try { return new URL(src, document.baseURI).href; } catch (_) { return null; }
       };
-      // Players such as Plyr show subtitles from <track> files that aren't part of the
-      // stream; report them with their labels so a download can keep them.
+      // <track> subtitles (e.g. Plyr) aren't in the stream, so report them with labels for the download to keep.
       const reportTracks = video => {
         if (!video || !video.querySelectorAll) return;
         const tracks = [];
@@ -110,8 +104,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         });
         postTracks(tracks);
       };
-      // JW Player keeps its subtitle list in its playlist, not in <track> elements, and
-      // fetches only the language being shown.
+      // JW Player keeps subtitles in its playlist, not <track>, and fetches only the language shown.
       const reportPlayerTracks = () => {
         try {
           if (typeof window.jwplayer !== 'function') return;
@@ -127,8 +120,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
           postTracks(tracks);
         } catch (_) {}
       };
-      // Other players fetch a whole WebVTT or SRT file by script. HLS subtitle segments are
-      // .vtt too, but carry X-TIMESTAMP-MAP and are saved with the stream, so they're skipped.
+      // Script-fetched WebVTT/SRT; HLS .vtt segments carry X-TIMESTAMP-MAP and are saved with the stream.
       const reportSubtitleFile = (url, contentType, body) => {
         const type = (contentType || '').toLowerCase();
         if (!type.includes('text/vtt') && !type.includes('subrip') && !/\.(vtt|srt)(?:[?#]|$)/i.test(url || '')) return;
@@ -138,12 +130,10 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         const absolute = absoluteURL(url);
         if (absolute) postTracks([{ url: absolute, label: '', language: '', isDefault: false }]);
       };
-      // Some players fetch a JSON list of subtitle files and download only the language picked:
-      // ***REMOVED***'s [{ label, file }] ("Arabic", "Arabic2", …) and ***REMOVED***'s [{ url, display, language,
-      // format }]. One file per language is kept.
+      // JSON subtitle lists ({ label, file } or { url, display, language }); one file per language.
       const reportSubtitleList = (url, contentType, body) => {
         if (!/json/i.test(contentType || '') || body === null || body === undefined) return;
-        const subtitleRequest = /sub|caption|***REMOVED***/i.test(url || '');
+        const subtitleRequest = /sub|caption/i.test(url || '');
         let data = body;
         if (typeof body === 'string') {
           if (body.length > 2000000 || (!subtitleRequest && !/\.(vtt|srt)\b|"format"\s*:\s*"(srt|vtt)"/i.test(body))) return;
@@ -172,7 +162,6 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         visit(data, 0);
         postTracks(tracks);
       };
-      // Artwork for the library: a player's poster, or the page's preview image.
       let reportedPosters = new Set();
       const reportPoster = (src, kind) => {
         if (!src || src.startsWith('data:') || src.startsWith('blob:')) return;
@@ -211,9 +200,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
           pendingMediaNodes.clear();
         }, 100);
       };
-      // Diagnostics come only from the PerformanceObserver below, which is
-      // buffered and so already reports every entry once. Re-posting the whole
-      // buffer here would repeat every request on each tap or Refresh.
+      // No diagnostics here: the buffered PerformanceObserver already reports each entry once.
       const scanResources = () => {
         try {
           performance.getEntriesByType('resource').forEach(e => {
@@ -314,8 +301,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
     })();
     """#
 
-    /// Starts muted playback so players reveal their streams: for the hidden browser that finds
-    /// episodes, and in Debug builds for site checks (`-DiagnosticsAutoplay`).
+    /// Muted autoplay makes players reveal their streams (hidden episode browser; Debug `-DiagnosticsAutoplay`).
     static let autoplaySource = #"""
     (() => {
       const tryPlay = () => {
@@ -323,7 +309,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         const videos = Array.from(document.querySelectorAll('video'));
         if (videos.some(v => !v.paused && v.currentTime > 0)) return;
         videos.forEach(v => { try { v.muted = true; const p = v.play(); if (p) p.catch(() => {}); } catch (_) {} });
-        // Overlay play buttons of common players, and of site templates (***REMOVED***, ***REMOVED***: #player .play).
+        // Overlay play buttons of common players and common site templates.
         const button = document.querySelector('.jw-icon-display, .jw-display-icon-container, .vjs-big-play-button, .plyr__control--overlaid, media-play-button, [aria-label="Play"], .play-button, #play, #player .play, #w-player .play, .player-wrapper .play, .btn-play, .play-btn, [class*="big-play"]');
         if (button) { try { button.click(); } catch (_) {} }
       };
@@ -343,7 +329,6 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         return scripts
     }
 
-    /// Asks the page and its player frames to report their media again.
     func rescan() {
         webView?.evaluateJavaScript("window.__vdaRescan && window.__vdaRescan()")
     }

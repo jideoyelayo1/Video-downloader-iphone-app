@@ -1,12 +1,7 @@
 import AVFoundation
 import UIKit
 
-/// Thumbnails and durations for Library rows.
-///
-/// A row can appear twice (Continue Watching and All Videos) and reappears while
-/// scrolling, and the HLS fallback decodes video with a playing `AVPlayer`. So each
-/// video gets one extraction in flight, failures are remembered for the session,
-/// extractions run one at a time, and file reads and image decoding stay off the main thread.
+/// Rows repeat and reappear, and HLS frames need a playing AVPlayer, so extractions are deduped and serialized.
 @MainActor
 final class ThumbnailCache {
     typealias Generator = (_ mediaURL: URL, _ kind: MediaKind) async -> Data?

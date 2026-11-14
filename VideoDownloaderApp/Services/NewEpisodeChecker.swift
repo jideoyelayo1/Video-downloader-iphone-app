@@ -2,10 +2,7 @@ import BackgroundTasks
 import Foundation
 import UserNotifications
 
-/// Checks whether the next episode of a followed show is out: it looks for a video on the page
-/// after the show's latest episode, the way "Download Next Episodes" does. It then notifies, or
-/// downloads the episode, as the show is set to. Runs when the app becomes active and in iOS's
-/// background refresh, which iOS schedules as it sees fit.
+/// Checks followed shows on app activation and in background refresh, which iOS schedules as it sees fit.
 @MainActor
 final class NewEpisodeChecker {
     static let backgroundTaskID = "com.jideoyelayo.VideoDownloader.newEpisodes"
@@ -15,11 +12,9 @@ final class NewEpisodeChecker {
     private let downloads: DownloadManager
     private let preferences: UserDefaults
     private let find: (URL) async -> SeasonDownloader.PageResult
-    /// Downloads a found episode (`SeasonDownloader.download`).
     private let download: (SeasonDownloader.PageResult) -> DownloadItem?
     private let notify: (String, String) async -> Void
     var diagnostics: DiagnosticsLog?
-    /// A show isn't checked again sooner than this, unless asked.
     var interval: TimeInterval = 6 * 3600
     private var checking = false
 
@@ -35,7 +30,6 @@ final class NewEpisodeChecker {
         self.notify = notify
     }
 
-    /// Checks the followed shows that are due; returns how many new episodes were found.
     @discardableResult
     func checkFollowedShows(force: Bool = false, now: Date = Date()) async -> Int {
         guard !checking else { return 0 }

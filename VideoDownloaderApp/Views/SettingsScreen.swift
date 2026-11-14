@@ -1,7 +1,6 @@
 import SwiftData
 import SwiftUI
 
-/// Download, storage and label settings, under a summary of the library.
 struct SettingsScreen: View {
     @EnvironmentObject private var downloads: DownloadManager
     @EnvironmentObject private var labelStore: LabelStore
@@ -120,7 +119,7 @@ struct SettingsScreen: View {
         } header: {
             Text("Labels")
         } footer: {
-            Text("Each new download gets a label named after the site it came from, such as ***REMOVED***. My Videos → Folders → Manage Labels has the rest.")
+            Text("Each new download gets a label named after the site it came from. My Videos → Folders → Manage Labels has the rest.")
         }
     }
 
@@ -171,12 +170,10 @@ struct SettingsScreen: View {
         bytes > 0 ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) : "0 MB"
     }
 
-    /// "1 episode", "3 episodes".
     static func countText(_ count: Int, _ noun: String) -> String { "\(count.formatted()) \(noun)\(count == 1 ? "" : "s")" }
     static func videosText(_ count: Int) -> String { countText(count, "video") }
 }
 
-/// The library by show and by site, and what automatic cleanup has deleted.
 struct StatisticsScreen: View {
     @EnvironmentObject private var downloads: DownloadManager
     let stats: LibraryStats
@@ -234,7 +231,6 @@ struct StatisticsScreen: View {
         }
     }
 
-    /// "12 · 4.3 GB", or "12 videos · 4.3 GB".
     private func countAndSize(_ count: Int, _ bytes: Int64, videos: Bool = false) -> String {
         let number = videos ? SettingsScreen.videosText(count) : count.formatted()
         return count > 0 ? "\(number) · \(SettingsScreen.sizeText(bytes))" : number
@@ -266,7 +262,6 @@ private extension Color {
     static let freeSpace = Color(.systemGray4)
 }
 
-/// The space downloads take beside what's still free, like iPhone Storage in the Settings app.
 private struct StorageBar: View {
     let unwatched: Int64
     let watched: Int64
@@ -308,7 +303,7 @@ private struct StorageBar: View {
         .accessibilityIdentifier("settings.storageBar")
     }
 
-    /// Each part is as wide as its share, with 2-point gaps; a part too small to see still shows.
+    /// A part too small to see still shows, at least 3 points wide.
     @ViewBuilder private func bar(width: CGFloat) -> some View {
         let shown = parts.filter { ($0.bytes ?? 0) > 0 }
         let total = shown.reduce(Int64(0)) { $0 + ($1.bytes ?? 0) }
@@ -329,7 +324,6 @@ private struct StorageBar: View {
     }
 }
 
-/// A group's size, with a bar on a scale shared by the rows beside it.
 private struct SizeRow: View {
     let name: String
     let detail: String

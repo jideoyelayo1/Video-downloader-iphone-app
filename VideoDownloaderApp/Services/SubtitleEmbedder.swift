@@ -1,10 +1,7 @@
 import AVFoundation
 import SwiftData
 
-/// Moves a downloaded video's site subtitle files into the video itself (`SubtitleRemuxer`), so
-/// they show in Picture in Picture and on AirPlay. Only for direct files: HLS packages can't be
-/// rewritten and keep the app's subtitle overlay. The original is replaced only once the new
-/// file has checked out.
+/// Direct files only: HLS packages can't be rewritten, so they keep the app's subtitle overlay.
 @MainActor
 final class SubtitleEmbedder {
     private let context: ModelContext
@@ -83,7 +80,6 @@ final class SubtitleEmbedder {
         }
     }
 
-    /// Same length, and every subtitle language present.
     static func verify(_ output: URL, matches source: URL, subtitleTracks: Int) async throws -> Bool {
         let result = AVURLAsset(url: output)
         let original = AVURLAsset(url: source)

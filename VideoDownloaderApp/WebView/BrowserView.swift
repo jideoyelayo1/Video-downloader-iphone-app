@@ -7,8 +7,7 @@ struct BrowserView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
     func makeUIView(context: Context) -> WKWebView {
-        // The model owns the web view, so a SwiftUI re-creation reattaches the same
-        // page instead of starting a second, blank WebKit process.
+        // The model owns the web view so a SwiftUI re-creation reattaches the page instead of a blank new one.
         let webView = model.makeWebView()
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
@@ -62,13 +61,10 @@ final class BrowserViewModel: ObservableObject {
     @Published private(set) var candidates: [MediaCandidate] = []
     @Published private(set) var observedFragments = false
     @Published private(set) var statuses: [UUID: CandidateStatus] = [:]
-    /// Subtitle files the page's players offer; saved with a download from this page.
     @Published private(set) var subtitleTracks: [SubtitleTrack] = []
-    /// Artwork for downloads from this page: a player's poster, else the page's preview image.
     @Published private(set) var posterURL: URL?
     private var posterIsFromPlayer = false
     @Published private(set) var isLoading = false
-    /// Page load progress, published in coarse steps for the address bar's loading line.
     @Published private(set) var loadProgress = 0.0
     @Published var errorMessage: String?
     @Published private(set) var canGoBack = false
@@ -84,12 +80,10 @@ final class BrowserViewModel: ObservableObject {
     private var observations: [NSKeyValueObservation] = []
     private var pendingURL: URL?
     private var lastAutomaticReload: Date?
-    /// Whether the page is on screen: the Browse tab, in the foreground, with no saved video over it.
     var isVisible = true {
         didSet { if isVisible && !oldValue && pendingCrashReload { reloadAfterCrash(now: Date()) } }
     }
-    /// A page that crashed while hidden, often during Picture in Picture, reloads when it is shown
-    /// again instead of loading, and streaming, in the background.
+    /// A page that crashed while hidden (often during PiP) reloads once shown, not streaming in the background.
     private(set) var pendingCrashReload = false
     private let validator: CandidateValidator
     private let contextProvider: DownloadManager.ContextProvider
@@ -126,8 +120,6 @@ final class BrowserViewModel: ObservableObject {
 
     var isChecking: Bool { candidates.contains { statuses[$0.id] == nil || statuses[$0.id] == .checking } }
 
-    /// The video Found videos lists first: a master playlist, else the longest, then largest.
-    /// Videos known to be smaller than `minimumBytes` are left out.
     func bestReady(atLeast minimumBytes: Int64) -> (candidate: MediaCandidate, probe: ProbeResult)? {
         let ready = candidates.compactMap { candidate -> (MediaCandidate, ProbeResult)? in
             if case .ready(let probe)? = statuses[candidate.id], (probe.expectedBytes ?? .max) >= minimumBytes { return (candidate, probe) }
@@ -139,12 +131,10 @@ final class BrowserViewModel: ObservableObject {
         }
     }
 
-    /// Returns the browser's single web view, creating and loading it on first use.
     func makeWebView() -> WKWebView {
         if let webView { return webView }
         let configuration = WKWebViewConfiguration()
-        // Keep a site's player controls and external caption overlays with its
-        // video. Forcing native full screen hides JW Player subtitle layers.
+        // Inline keeps a site's caption overlays; forcing native full screen hides JW Player subtitle layers.
         configuration.allowsInlineMediaPlayback = true
         if autoplay { configuration.mediaTypesRequiringUserActionForPlayback = [] }
         let contentController = WKUserContentController()
@@ -173,8 +163,7 @@ final class BrowserViewModel: ObservableObject {
         }
     }
 
-    /// Navigation callbacks miss same-document changes (pushState) that some routers make
-    /// without going through the page's `history.pushState`, so the web view's own state is watched.
+    /// Navigation callbacks miss some routers' same-document changes, so the web view's own state is watched.
     private func observe(_ webView: WKWebView) {
         func watch<Value>(_ keyPath: KeyPath<WKWebView, Value>, _ update: @escaping @MainActor @Sendable (BrowserViewModel, WKWebView) -> Void) -> NSKeyValueObservation {
             webView.observe(keyPath, options: [.new]) { [weak self] webView, _ in
@@ -239,7 +228,6 @@ final class BrowserViewModel: ObservableObject {
     func reload() { webView?.reload() }
     func rescan() { discovery.rescan() }
 
-    /// Stops the page's audio and video, e.g. when the user leaves Browse or plays a saved video.
     func pauseMedia() {
         // The Objective-C completion-handler form; Swift-refined WebKit overlays crash at launch on iOS 18.
         webView?.pauseAllMediaPlayback(completionHandler: nil)
@@ -268,8 +256,7 @@ final class BrowserViewModel: ObservableObject {
         errorMessage = error.localizedDescription
     }
 
-    /// WebKit ends a page's content process when it uses too much memory, leaving a blank view.
-    /// Reload once automatically; a page that keeps crashing waits for the user.
+    /// WebKit kills a page's content process when it uses too much memory; reload once, then wait for the user.
     func webContentProcessDidTerminate(now: Date = Date()) {
         diagnostics?.record(event: "webcontent-terminated", url: url?.absoluteString ?? "about:blank",
                             note: isVisible ? nil : "Reloads when Browse is shown")
@@ -292,8 +279,7 @@ final class BrowserViewModel: ObservableObject {
         if webView.url != nil { webView.reload() } else if let url { webView.load(URLRequest(url: url)) }
     }
 
-    /// Clears candidates when the top-level page changes. Same-document history updates only count
-    /// when the path or query changed, because players often call replaceState for trivial reasons.
+    /// Same-document changes count only for a new path or query: players call replaceState for trivial reasons.
     func pageDidChange(to newURL: URL?, force: Bool) {
         if !force, let newURL, let url, MediaDiscovery.normalizedURL(newURL) == MediaDiscovery.normalizedURL(url) { return }
         generation += 1
@@ -344,8 +330,7 @@ final class BrowserViewModel: ObservableObject {
         switch status {
         case .ready(let probe):
             if let index = candidates.firstIndex(where: { $0.id == candidate.id }) { candidates[index].kind = probe.kind }
-            // A master stands in for its variants and its separate audio and subtitle
-            // playlists, which would otherwise be offered as (silent or audio-only) videos.
+            // The master's variants and renditions would otherwise be offered as silent or audio-only videos.
             let covered = Set((probe.variants.map(\.url) + probe.renditions).map(MediaDiscovery.normalizedURL))
             if !covered.isEmpty {
                 variantURLs.formUnion(covered)

@@ -2,12 +2,7 @@ import Foundation
 import Network
 import os
 
-/// Serves one HLS asset on loopback, forwarding each request to its original URL
-/// with the browser's scoped cookies, User-Agent and player Referer. AVFoundation's
-/// background HLS API cannot attach an arbitrary Referer to its own HTTP requests.
-/// This relay must remain alive while the download runs, so the UI asks the user
-/// to keep the app open for these streams.
-/// Its tables are guarded by `lock`, and the listener and its connections run on `queue`.
+/// Loopback relay adding the Referer AVFoundation's HLS API can't; `lock` guards tables, I/O runs on `queue`.
 final class HLSRefererProxy: @unchecked Sendable {
     enum ProxyError: Error { case couldNotStart }
 
@@ -15,8 +10,7 @@ final class HLSRefererProxy: @unchecked Sendable {
     private let queue = DispatchQueue(label: "HLSRefererProxy")
     private let lock = NSLock()
     private var routes: [UUID: URL] = [:]
-    /// AVFoundation fetches each playlist more than once (HEAD, GET, each rendition).
-    /// Reusing one route per URL keeps the table bounded and the rewritten bodies identical.
+    /// AVFoundation refetches each playlist; one route per URL keeps the table bounded and bodies identical.
     private var routeIDs: [URL: UUID] = [:]
     private let context: RequestContext
     private let session: URLSession
@@ -36,7 +30,6 @@ final class HLSRefererProxy: @unchecked Sendable {
 
     deinit { stop() }
 
-    /// Waits (without blocking the caller's thread) up to 5 s for the loopback listener.
     func start(for original: URL) async throws -> URL {
         let succeeded: Bool = await withCheckedContinuation { continuation in
             // Exactly one of the handlers below resumes.
@@ -119,8 +112,7 @@ final class HLSRefererProxy: @unchecked Sendable {
         }
         let isHead = parts[0] == "HEAD"
         var request = URLRequest(url: remote)
-        // Read the complete source even for HEAD so the rewritten playlist's
-        // Content-Length matches the GET response AVFoundation will receive.
+        // GET even for HEAD, so the rewritten playlist's Content-Length matches the GET AVFoundation will get.
         request.httpMethod = "GET"
         context.apply(to: &request)
         if let range = lines.first(where: { $0.lowercased().hasPrefix("range:") }) {
@@ -160,7 +152,6 @@ final class HLSRefererProxy: @unchecked Sendable {
         connection.send(content: Data(header.utf8) + (includeBody ? body : Data()), completion: .contentProcessed { _ in connection.cancel() })
     }
 
-    /// Rebase variant, segment, map, key and subtitle URLs to this relay.
     static func rewritePlaylist(_ text: String, baseURL: URL, map: (URL) -> URL) -> String {
         let pattern = try! NSRegularExpression(pattern: #"URI="([^"]+)""#)
         return text.components(separatedBy: "\n").map { line in

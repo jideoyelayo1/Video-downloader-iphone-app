@@ -1,12 +1,7 @@
 #!/bin/zsh
-# Sets up the background job that keeps Video Downloader installed on an iPhone signed with a
-# free developer account (whose builds stop opening after 7 days). See reinstall.sh.
-#
-#   scripts/device-reinstall/setup.sh [device]   install, or update after editing reinstall.sh
-#   scripts/device-reinstall/setup.sh --uninstall
-#
-# `device` is a name or identifier from `xcrun devicectl list devices`; by default, the first
-# reachable iPhone. The job needs Xcode signed in to the Apple ID that signs the app.
+# Installs a LaunchAgent that keeps the app installed on an iPhone signed with a free (7-day) account.
+# Usage: setup.sh [device]  (from `xcrun devicectl list devices`; default: first reachable iPhone)
+#        setup.sh --uninstall
 set -eu
 
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
@@ -41,8 +36,7 @@ fi
 
 mkdir -p "$SUPPORT" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 
-# A copy of the branch outside ~/Documents, which background jobs can't read, kept current by a
-# hook that runs whenever the branch moves (commit, merge, reset, …).
+# Background jobs can't read ~/Documents, so the job builds from a bare copy a git hook keeps current.
 [[ -d $SUPPORT/repo.git ]] || git init -q --bare "$SUPPORT/repo.git"
 git -C "$REPO" push -q --force "$SUPPORT/repo.git" "$BRANCH:$BRANCH"
 cat > "$HOOK" <<EOF
@@ -57,10 +51,11 @@ chmod +x "$HOOK"
 
 cp "$REPO/scripts/device-reinstall/reinstall.sh" "$SUPPORT/reinstall.sh"
 chmod +x "$SUPPORT/reinstall.sh"
+# The team ID is untracked, so the job gets its own copy.
+if [[ -f $REPO/Config/Local.xcconfig ]]; then cp "$REPO/Config/Local.xcconfig" "$SUPPORT/Local.xcconfig"; fi
 print -r -- "DEVICE=$DEVICE BRANCH=$BRANCH INTERVAL_DAYS=$INTERVAL_DAYS" > "$SUPPORT/config"
 
-# Every 6 hours; the script itself decides whether an install is due, so a sleeping Mac or an
-# out-of-reach phone just means a later attempt.
+# Every 6 hours; reinstall.sh decides whether an install is due.
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

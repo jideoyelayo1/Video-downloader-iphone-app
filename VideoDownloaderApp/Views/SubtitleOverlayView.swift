@@ -1,8 +1,6 @@
 import UIKit
 
-/// Draws site subtitles over a saved video. AVFoundation can't attach a separate WebVTT file
-/// to a downloaded movie or HLS package, so the player shows these cues itself. Installed in
-/// `AVPlayerViewController.contentOverlayView`, between the video and the playback controls.
+/// AVFoundation can't attach a separate WebVTT file to a downloaded movie or HLS package, so cues draw here.
 final class SubtitleOverlayView: UIView {
     private let bubble = UIView()
     private let label = UILabel()

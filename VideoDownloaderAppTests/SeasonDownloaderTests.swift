@@ -7,31 +7,31 @@ import XCTest
 final class SeasonDownloaderTests: XCTestCase {
     func testNextEpisodeAddressesOnTheBookmarkedSites() {
         func next(_ string: String) -> String? { EpisodeURL.next(after: URL(string: string)!)?.absoluteString }
-        XCTAssertEqual(next("https://***REMOVED***.to/anime/vpoY93SPHAQZP9soq/p-1-dub"), "https://***REMOVED***.to/anime/vpoY93SPHAQZP9soq/p-2-dub")
-        XCTAssertEqual(next("https://***REMOVED***.to/anime/3BK5BYwFE5YNPriHj/p-9-dub"), "https://***REMOVED***.to/anime/3BK5BYwFE5YNPriHj/p-10-dub",
+        XCTAssertEqual(next("https://showsite.example/anime/vpoY93SPHAQZP9soq/p-1-dub"), "https://showsite.example/anime/vpoY93SPHAQZP9soq/p-2-dub")
+        XCTAssertEqual(next("https://showsite.example/anime/3BK5BYwFE5YNPriHj/p-9-dub"), "https://showsite.example/anime/3BK5BYwFE5YNPriHj/p-10-dub",
                        "letters and digits in the series id are left alone")
-        XCTAssertEqual(next("https://www.***REMOVED***.to/watch/154587/frieren?ep=1"), "https://www.***REMOVED***.to/watch/154587/frieren?ep=2")
-        XCTAssertEqual(next("https://my***REMOVED***.lol/watch/tv/2190-free-south-park-hd/season-29/episode-2/"),
-                       "https://my***REMOVED***.lol/watch/tv/2190-free-south-park-hd/season-29/episode-3/")
-        XCTAssertEqual(next("https://***REMOVED***.ws/***REMOVED***/the-office/season/2/episode/9"), "https://***REMOVED***.ws/***REMOVED***/the-office/season/2/episode/10")
+        XCTAssertEqual(next("https://www.animesite.example/watch/154587/frieren?ep=1"), "https://www.animesite.example/watch/154587/frieren?ep=2")
+        XCTAssertEqual(next("https://seriessite.example/watch/tv/2190-free-south-park-hd/season-29/episode-2/"),
+                       "https://seriessite.example/watch/tv/2190-free-south-park-hd/season-29/episode-3/")
+        XCTAssertEqual(next("https://moviesite.example/series/the-office/season/2/episode/9"), "https://moviesite.example/series/the-office/season/2/episode/10")
         XCTAssertEqual(next("https://site.example/show-s01e09.html"), "https://site.example/show-s01e10.html")
         XCTAssertEqual(next("https://site.example/watch/one-piece/ep-1099"), "https://site.example/watch/one-piece/ep-1100")
-        XCTAssertNil(next("https://***REMOVED***.ru/play/8a3c/5f2d1e0b7a"), "no episode number in the address")
-        XCTAssertEqual(EpisodeURL.title("", numberedFrom: URL(string: "https://***REMOVED***.to/anime/x/p-9-dub")!), "", "an empty title stays empty")
-        XCTAssertEqual(EpisodeURL.number(in: URL(string: "https://www.***REMOVED***.to/watch/1/x?ep=7")!), 7)
-        XCTAssertEqual(next("https://***REMOVED***.su/watch/tv/213375/1/2"), "https://***REMOVED***.su/watch/tv/213375/1/3", "the last number is the episode")
-        XCTAssertEqual(EpisodeURL.number(in: URL(string: "https://***REMOVED***.su/watch/tv/213375/1/9")!), 9)
-        XCTAssertNil(next("https://***REMOVED***.su/watch/movie/213375"))
+        XCTAssertNil(next("https://pahesite.example/play/8a3c/5f2d1e0b7a"), "no episode number in the address")
+        XCTAssertEqual(EpisodeURL.title("", numberedFrom: URL(string: "https://showsite.example/anime/x/p-9-dub")!), "", "an empty title stays empty")
+        XCTAssertEqual(EpisodeURL.number(in: URL(string: "https://www.animesite.example/watch/1/x?ep=7")!), 7)
+        XCTAssertEqual(next("https://tvsite.example/watch/tv/213375/1/2"), "https://tvsite.example/watch/tv/213375/1/3", "the last number is the episode")
+        XCTAssertEqual(EpisodeURL.number(in: URL(string: "https://tvsite.example/watch/tv/213375/1/9")!), 9)
+        XCTAssertNil(next("https://tvsite.example/watch/movie/213375"))
         XCTAssertTrue(SeasonDownloader.isVerificationPage(title: "Just a moment..."))
 
-        let ***REMOVED*** = URL(string: "https://www.***REMOVED***.to/watch/W89s7g854PobER8iJIsw61vU_EkyYyOg/attack-on-titan?ep=2")!
-        XCTAssertEqual(EpisodeURL.title("Watch Attack on Titan · ***REMOVED***", numberedFrom: ***REMOVED***), "Watch Attack on Titan Ep. 2 · ***REMOVED***",
-                       "***REMOVED***'s titles don't say which episode")
-        XCTAssertEqual(ShowSuggestion.parse(DownloadItem.displayTitle("Watch Attack on Titan Ep. 2 · ***REMOVED***", host: "www.***REMOVED***.to")),
+        let animePage = URL(string: "https://www.animesite.example/watch/W89s7g854PobER8iJIsw61vU_EkyYyOg/attack-on-titan?ep=2")!
+        XCTAssertEqual(EpisodeURL.title("Watch Attack on Titan · Animesite", numberedFrom: animePage), "Watch Attack on Titan Ep. 2 · Animesite",
+                       "some sites' titles don't say which episode")
+        XCTAssertEqual(ShowSuggestion.parse(DownloadItem.displayTitle("Watch Attack on Titan Ep. 2 · Animesite", host: "www.animesite.example")),
                        .init(series: "Attack on Titan", season: nil, episode: 2))
-        let ***REMOVED*** = URL(string: "https://***REMOVED***.to/anime/x/p-9-dub")!
-        XCTAssertEqual(EpisodeURL.title("***REMOVED*** Ep. 9 · ***REMOVED***", numberedFrom: ***REMOVED***),
-                       "***REMOVED*** Ep. 9 · ***REMOVED***", "titles that have a number are left alone")
+        let showPage = URL(string: "https://showsite.example/anime/x/p-9-dub")!
+        XCTAssertEqual(EpisodeURL.title("Sample Show Ep. 9 · Showsite", numberedFrom: showPage),
+                       "Sample Show Ep. 9 · Showsite", "titles that have a number are left alone")
     }
 
     func testEpisodesAlreadyInTheLibraryAreSkipped() async throws {
@@ -60,7 +60,6 @@ final class SeasonDownloaderTests: XCTestCase {
         }
     }
 
-    /// From episode 1, "the next 3 episodes" finds 2 and 3, then stops because 4 isn't out.
     func testNextEpisodesAreFoundAndDownloaded() async throws {
         let server = try LocalMediaServer()
         try server.start()
@@ -87,8 +86,7 @@ final class SeasonDownloaderTests: XCTestCase {
         for item in items { manager.delete(item) }
     }
 
-    /// An ad in the player isn't the episode, and an episode that isn't out isn't found on the
-    /// page the site sends it to instead (***REMOVED*** opens episode 1).
+    /// Neither a player ad nor the page a site sends an unreleased episode to (such as ep 1) is the episode.
     func testAdsAndRedirectedPagesAreNotTheEpisode() async throws {
         let server = try LocalMediaServer()
         try server.start()

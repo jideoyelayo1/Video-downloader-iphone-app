@@ -36,7 +36,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
         }
     }
 
-    /// Opening and closing a saved video repeatedly must not keep old players alive.
     func testClosedPlayersAreReleased() async throws {
         let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         let suite = "PlaybackCoordinatorTests-\(UUID().uuidString)"
@@ -59,8 +58,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.controller.player)
     }
 
-    /// Re-hosting one player controller in every new presentation kept each earlier presentation's
-    /// views alive (about 0.75 MB per video opened). Each video now gets its own controller.
+    /// Re-hosting one player controller kept each earlier presentation's views alive (about 0.75 MB per video).
     func testEachVideoGetsItsOwnControllerAndThePreviousOneIsReleased() async throws {
         let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         let coordinator = PlaybackCoordinator(context: container.mainContext, diagnostics: log,
@@ -84,7 +82,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
         coordinator.close()
     }
 
-    /// ***REMOVED***-style subtitles saved beside the video are listed and drawn over it.
     func testSiteSubtitlesAreListedSelectedByDefaultAndDrawn() async throws {
         let server = try LocalMediaServer()
         try server.start()
@@ -101,8 +98,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
 
         coordinator.open(item, at: 0)
         try await waitUntil("player ready") { coordinator.controller.player != nil && !coordinator.isLoading }
-        // The captioned fixture has embedded English tracks; the site files follow them, and the
-        // site's English is told apart from the embedded one.
+        // Site files follow the fixture's embedded English tracks; the site's English is told apart.
         XCTAssertEqual(Array(coordinator.captionNames.suffix(2)), ["Español", "English (site)"])
         let english = coordinator.captionNames.count - 1
         coordinator.chooseCaption(english)
@@ -122,7 +118,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
 
     func testViewerLanguageThenSiteDefaultThenFirst() {
         let saved = { (language: String, isDefault: Bool) in SubtitleStore.Saved(fileName: "x", label: language, language: language, isDefault: isDefault) }
-        // ***REMOVED*** marks its first track (Arabic) as default; an English-speaking viewer gets English.
+        // A site marks its first track (Arabic) as default; an English-speaking viewer gets English.
         XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", true), saved("en", false)], preferredLanguages: ["en-GB"]), 1)
         XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", false), saved("en", true)], preferredLanguages: ["ja"]), 1)
         XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", false), saved("fr", false)], preferredLanguages: ["ja"]), 0)
@@ -142,7 +138,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.errorMessage)
     }
 
-    /// Built-in captions are chosen in AVKit's own menu; the app remembers that choice.
     func testChoiceInThePlayersOwnMenuIsRemembered() async throws {
         let log = DiagnosticsLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
         let suite = "PlaybackCoordinatorTests-menu-\(UUID().uuidString)"
@@ -155,8 +150,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         // Captions start on with full subtitles, not the forced-only track the system prefers.
         XCTAssertEqual(coordinator.captionNames, ["English"])
         XCTAssertEqual(coordinator.selectedCaption, 0)
-        // Changes just after opening are AVKit's automatic ones, which the app reverts; a viewer's
-        // tap in the menu comes later.
+        // AVKit's automatic changes come just after opening and are reverted; a viewer's tap comes later.
         try await Task.sleep(for: .seconds(2))
         XCTAssertNil(preferences.string(forKey: CaptionPreference.defaultsKey), "the app's own default isn't a viewer choice")
 
@@ -249,7 +243,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertTrue(item.isWatched)
     }
 
-    /// Closing during the credits (the last 10%) counts as watched; closing halfway keeps the resume point.
     func testClosingInTheLastTenPercentMarksTheVideoWatched() async throws {
         let coordinator = makeCoordinator()
         let item = makeItem(in: container.mainContext)
@@ -297,14 +290,12 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertNotNil(second.lastPlayedAt)
         XCTAssertFalse(coordinator.isShowingUpNext)
 
-        // The last episode ends the show.
         let secondItem = try XCTUnwrap(player.currentItem)
         NotificationCenter.default.post(name: AVPlayerItem.didPlayToEndTimeNotification, object: secondItem)
         try await waitUntil("episode 2 watched") { second.isWatched }
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertTrue(player.currentItem === secondItem)
 
-        // With autoplay off, the player stays on the finished episode.
         show.autoplayNext = false
         coordinator.open(first, at: 0)
         try await waitUntil("episode 1 ready again") { coordinator.controller.player?.currentItem != nil && !coordinator.isLoading }
@@ -316,7 +307,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
         coordinator.close()
     }
 
-    /// A show of two episodes, with Delete Finished Episodes set as given.
     private func makeShow(deleting setting: FinishedEpisodes, for coordinator: PlaybackCoordinator) throws -> (ShowStore, Show, DownloadItem, DownloadItem) {
         let suite = "PlaybackCoordinatorTests-\(UUID().uuidString)"
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -343,8 +333,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
         FileManager.default.fileExists(atPath: try XCTUnwrap(item.localURL).path)
     }
 
-    /// Delete Finished Episodes → Automatically: a finished episode is deleted once the player has
-    /// moved on from it; videos outside a show are kept.
     func testFinishedEpisodesAreDeletedOnceThePlayerMovesOn() async throws {
         let coordinator = makeCoordinator()
         let (shows, show, first, second) = try makeShow(deleting: .delete, for: coordinator)
@@ -372,7 +360,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertTrue(try exists(video), "not an episode of a show")
     }
 
-    /// A finished episode marked for deletion and opened again stays.
     func testAFinishedEpisodeOpenedAgainIsKept() async throws {
         let coordinator = makeCoordinator()
         let (_, show, first, _) = try makeShow(deleting: .delete, for: coordinator)
@@ -389,9 +376,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertTrue(try exists(first), "closed halfway the second time")
     }
 
-    /// Ask First: the player asks where Up Next appears. Off screen, as in Picture in Picture, it
-    /// can't, so the episode stays and the next one plays; one closed in its last 10% is asked
-    /// about once the player has gone.
+    /// Ask First can't ask while off screen (Picture in Picture), so the episode stays and the next one plays.
     func testAskFirstKeepsUnansweredEpisodesAndAsksAfterClosing() async throws {
         let coordinator = makeCoordinator()
         let (_, _, first, second) = try makeShow(deleting: .ask, for: coordinator)
@@ -444,7 +429,6 @@ final class PlaybackCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.sleepTimerOption)
         XCTAssertNil(coordinator.sleepTimerDeadline)
 
-        // Play explicitly resumes playback after sleeping; normal controls work again.
         player.play()
         try await waitUntil("resumed") { coordinator.sleepTimerTick() }
         XCTAssertGreaterThan(player.rate, 0)

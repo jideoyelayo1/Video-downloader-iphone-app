@@ -2,22 +2,17 @@ import SwiftData
 import UIKit
 import WebKit
 
-/// Downloads the episodes after the one open in Browse, and checks whether a followed show's
-/// next episode is out. Each episode page opens in a hidden browser that starts its player
-/// muted, so the same discovery and checks as Browse find its video. Pages behind a site's
-/// verification (Cloudflare) aren't bypassed: the run stops there.
+/// Finds episodes in a hidden, muted-autoplay browser; pages behind Cloudflare verification stop the run.
 @MainActor
 final class SeasonDownloader: ObservableObject {
-    /// "Finding episode 3 of 12…", or why the last run stopped.
     @Published private(set) var status: String?
     @Published private(set) var isRunning = false
 
     private let downloads: DownloadManager
     private let shows: ShowStore
     var diagnostics: DiagnosticsLog?
-    /// How long a page may take to offer a ready video.
     var pageTimeout: TimeInterval = 30
-    /// Smaller videos are a player's ads, not the episode (My***REMOVED*** showed 0.3 and 1.4 MB ones).
+    /// Smaller videos are a player's ads, not the episode.
     var minimumEpisodeBytes: Int64 = 5_000_000
     private var task: Task<Void, Never>?
 
@@ -41,7 +36,6 @@ final class SeasonDownloader: ObservableObject {
         }
     }
 
-    /// Downloads up to `count` episodes after `page`, one page at a time.
     func start(after page: URL, count: Int) {
         guard !isRunning else { return }
         isRunning = true
@@ -66,7 +60,6 @@ final class SeasonDownloader: ObservableObject {
                 return
             }
             current = next
-            // Already in the library (or downloading): nothing to fetch for this one.
             if downloads.savedOrActiveEpisode(atPage: next) != nil { continue }
             status = "Finding episode \(index) of \(count)…"
             let result = await findVideo(on: next)
@@ -85,7 +78,6 @@ final class SeasonDownloader: ObservableObject {
         finish("Queued \(Self.episodes(queued)).")
     }
 
-    /// Downloads a found page's video under the page's title, with its subtitles and poster.
     @discardableResult
     func download(_ result: PageResult) -> DownloadItem? {
         guard case .found(var candidate, let probe, let subtitles, let title, let poster) = result else { return nil }
@@ -95,8 +87,7 @@ final class SeasonDownloader: ObservableObject {
                                requiresReferer: probe.requiresReferer, subtitles: subtitles, poster: poster)
     }
 
-    /// A download whose link expired: its page is opened again in the hidden browser, and the
-    /// same row starts again from the fresh link. False if the page offers no video now.
+    /// Re-finds an expired link on its page and restarts the same row; false if the page has no video now.
     func refreshLink(of item: DownloadItem) async -> Bool {
         guard case .found(let found, let probe, let subtitles, _, let poster) = await findVideo(on: item.sourcePageURL) else { return false }
         // The row's page and title, so start() repairs this row instead of adding another.
@@ -116,12 +107,10 @@ final class SeasonDownloader: ObservableObject {
 
     // MARK: Finding a page's video
 
-    /// Opens the page in the hidden browser and waits for its best ready video.
     func findVideo(on page: URL) async -> PageResult {
         let model = BrowserViewModel(initialURL: page, diagnostics: diagnostics, history: nil, autoplay: true)
         let webView = model.makeWebView()
-        // Each search has its own window, so a season run and a new-episode check can't remove
-        // each other's, and nothing stays on screen afterwards.
+        // A window per search, so a season run and a new-episode check can't remove each other's.
         let window = Self.hostingWindow()
         webView.frame = window.bounds
         window.rootViewController?.view.addSubview(webView)
@@ -142,7 +131,7 @@ final class SeasonDownloader: ObservableObject {
             }
         }
         guard let best = model.bestReady(atLeast: minimumEpisodeBytes) else { return .noVideo }
-        // A site can send an episode that isn't out to another one: ***REMOVED*** opens episode 1.
+        // A site can send an episode that isn't out to another one, such as episode 1.
         if let wanted = EpisodeURL.number(in: page), EpisodeURL.number(in: best.candidate.sourcePageURL) != wanted { return .noVideo }
         return .found(best.candidate, best.probe, model.subtitleTracks, title: model.pageTitle, poster: model.posterURL)
     }

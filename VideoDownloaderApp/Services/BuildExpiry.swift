@@ -1,10 +1,6 @@
 import Foundation
 
-/// Builds signed with a free developer account stop opening when their provisioning profile
-/// expires, seven days after Xcode issued it; iOS then says the app "is no longer available".
-/// A copy that is already running (often kept alive by Picture in Picture) carries on until it
-/// is closed. The date comes from the profile embedded in the app; App Store and TestFlight
-/// builds, and simulator builds, have none.
+/// Free-account builds stop opening when their 7-day profile expires; App Store builds have no profile.
 enum BuildExpiry {
     static let date: Date? = {
         #if DEBUG
@@ -25,7 +21,6 @@ enum BuildExpiry {
         return object?["ExpirationDate"] as? Date
     }
 
-    /// A warning once less than two days remain.
     static func warning(expiry: Date?, now: Date = Date()) -> String? {
         guard let expiry, expiry.timeIntervalSince(now) < 48 * 3600 else { return nil }
         guard expiry > now else {

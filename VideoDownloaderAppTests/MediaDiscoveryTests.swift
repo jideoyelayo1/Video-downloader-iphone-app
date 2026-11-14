@@ -34,9 +34,9 @@ final class MediaDiscoveryRulesTests: XCTestCase {
     func testSegmentsAreNeverOfferedAsCompleteVideos() {
         XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/seg-001.ts", "kind": "video"], sourcePageURL: page))
         XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/seg-001.m4s"], sourcePageURL: page))
-        XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://***REMOVED***.top/vd/episode/seg-57-s1080p-v1-a1.m4s", "mediaElement": true], sourcePageURL: page))
+        XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://segments.example/vd/episode/seg-57-s1080p-v1-a1.m4s", "mediaElement": true], sourcePageURL: page))
         XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/movie.ts", "mediaElement": true], sourcePageURL: page))
-        XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://***REMOVED***.top/vd/episode/master.m3u8"], sourcePageURL: page))
+        XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://segments.example/vd/episode/master.m3u8"], sourcePageURL: page))
         XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/movie.mp4"], sourcePageURL: page))
     }
 
@@ -128,10 +128,10 @@ final class BrowserSessionTests: XCTestCase {
 }
 
 final class MediaDiscoveryAudioTests: XCTestCase {
-    let page = URL(string: "https://***REMOVED***.to/anime")!
+    let page = URL(string: "https://showsite.example/anime")!
 
     func testAudioOnlyFilesAreNotOfferedAsVideos() {
-        XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://aimgf.***REMOVED***.com/audios/jcBdahHBoSgKghASA/31830356.mp3", "mediaElement": true], sourcePageURL: page))
+        XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://audio.example/audios/jcBdahHBoSgKghASA/31830356.mp3", "mediaElement": true], sourcePageURL: page))
         XCTAssertNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/stream?id=4", "mediaElement": true, "contentType": "audio/mp4"], sourcePageURL: page))
         XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/stream?id=4", "mediaElement": true, "contentType": "video/mp4"], sourcePageURL: page))
         XCTAssertNotNil(MediaDiscovery.candidate(from: ["url": "https://cdn.example/audio/english.m3u8"], sourcePageURL: page), "HLS audio renditions are hidden behind their master instead")

@@ -4,9 +4,7 @@ import Network
 import SwiftData
 import UIKit
 
-/// Plays saved videos on a Chromecast. The Chromecast fetches the file from the phone
-/// (`CastMediaServer`), so while it plays, silent audio keeps the app running with the phone
-/// locked. Saved HLS packages can't be served yet; they go to the TV with AirPlay.
+/// The Chromecast fetches files from the phone (`CastMediaServer`); saved HLS can't be served yet.
 @MainActor
 final class CastController: NSObject, @preconcurrency GCKSessionManagerListener, @preconcurrency GCKRemoteMediaClientListener,
                             @preconcurrency GCKRequestDelegate, @preconcurrency GCKUICastButtonDelegate {
@@ -28,7 +26,6 @@ final class CastController: NSObject, @preconcurrency GCKSessionManagerListener,
     weak var playback: PlaybackCoordinator?
     private let context: ModelContext
     private let diagnostics: DiagnosticsLog
-    /// The video the phone is serving to the TV.
     private(set) var castItem: DownloadItem?
     private var server: CastMediaServer?
     private var loadRequest: GCKRequest?
@@ -85,8 +82,7 @@ final class CastController: NSObject, @preconcurrency GCKSessionManagerListener,
         return button
     }
 
-    /// Sends `item` to the connected Chromecast. Throws before anything changes, so the phone's
-    /// player can carry on.
+    /// Throws before anything changes, so the phone's player can carry on.
     func play(_ item: DownloadItem, from position: Double, show: String?) throws(Failure) {
         // Opening the video that's already on the TV brings its controls back.
         if castItem?.id == item.id { return GCKCastContext.sharedInstance().presentDefaultExpandedMediaControls() }
@@ -284,8 +280,7 @@ final class CastController: NSObject, @preconcurrency GCKSessionManagerListener,
         }
     }
 
-    /// iOS suspends an app in the background unless it's playing audio, and a suspended phone
-    /// stops serving the TV.
+    /// iOS suspends a background app unless it plays audio, and a suspended phone stops serving the TV.
     private func startKeepAlive() {
         guard keepAlive?.isPlaying != true else { return }
         do {

@@ -1,10 +1,7 @@
-# Builds the app and its tests with Xcode, then runs the unit tests in an iPhone simulator.
-# The UI tests take about half an hour and need a display that stays awake, so they run on the
-# Mac instead (see README → Testing); they are still compiled here.
+# Unit tests only: the UI tests take about 30 minutes and need an awake display, so they run locally.
 
 name: Tests
 
-# Changes to documentation alone (such as TEST_REPORT.md) don't need a run.
 on:
   push:
     branches: [ "master" ]
@@ -14,7 +11,7 @@ on:
     paths-ignore: [ "**.md" ]
   workflow_dispatch:
 
-# A newer push replaces a run still going: macOS minutes count ten times on a private repository.
+# A newer push cancels a run still going, to save macOS runner minutes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -59,8 +56,7 @@ jobs:
           -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" -derivedDataPath DerivedData \
           -enableCodeCoverage YES
 
-    # A test that fails once on a cold simulator (see SeasonDownloaderTests' page limit) gets a second go;
-    # a green run costs nothing extra.
+    # One retry: a cold simulator can miss SeasonDownloaderTests' page time limit once.
     - name: Unit tests
       run: |
         xcodebuild test-without-building -project VideoDownloaderApp.xcodeproj -scheme VideoDownloaderApp \

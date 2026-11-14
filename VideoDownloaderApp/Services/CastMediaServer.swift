@@ -2,12 +2,7 @@ import Foundation
 import Network
 import os
 
-/// Serves one saved video, with its poster and subtitle files, to a Chromecast on the same Wi-Fi:
-/// the Chromecast fetches what it plays by URL, so the phone has to be its web server.
-/// Only the files in a fixed table under a random token can be fetched, and only by the listed
-/// peers (the Chromecast and the phone itself).
-/// The table never changes after `init`; connections, refused peers, `stopped` and the file
-/// handle are only touched on `queue`.
+/// @unchecked Sendable: the file table never changes after `init`; all other state is only touched on `queue`.
 final class CastMediaServer: @unchecked Sendable {
     enum ServerError: Error { case couldNotStart }
 
@@ -32,10 +27,7 @@ final class CastMediaServer: @unchecked Sendable {
     /// Videos run to several GB, so they go out one chunk at a time.
     private static let chunkSize = 512 * 1024
 
-    /// - Parameters:
-    ///   - host: the phone's address on the Chromecast's network (`lanAddress(near:)`).
-    ///   - extras: small files by name, such as `"poster.jpg"` or `"subtitles/0.vtt"`.
-    ///   - refused: told the address of each connection turned away.
+    /// `host` is the phone's address on the Chromecast's network, from `lanAddress(near:)`.
     init(host: String, allowedPeers: [IPv4Address], video: URL, extras: [String: Extra],
          refused: @escaping @Sendable (String) -> Void) throws {
         self.host = host
@@ -51,8 +43,6 @@ final class CastMediaServer: @unchecked Sendable {
 
     deinit { listener.cancel() }
 
-    /// Waits (without blocking the caller's thread) up to 5 s for the listener.
-    /// - Returns: the folder URL the files are served under, ending in `/`.
     func start() async throws -> URL {
         let succeeded: Bool = await withCheckedContinuation { continuation in
             // Exactly one of the handlers below resumes.
@@ -214,8 +204,7 @@ final class CastMediaServer: @unchecked Sendable {
         return end >= start ? start..<(end + 1) : nil
     }
 
-    /// The phone's IPv4 address on the same subnet as `device`: Wi-Fi, or the phone's own
-    /// Personal Hotspot, and never a VPN's.
+    /// The phone's IPv4 address on `device`'s subnet: Wi-Fi or its own Personal Hotspot, never a VPN's.
     static func lanAddress(near device: String) -> String? {
         guard let target = IPv4Address(device)?.rawValue.withUnsafeBytes({ $0.loadUnaligned(as: UInt32.self) }) else { return nil }
         var list: UnsafeMutablePointer<ifaddrs>?

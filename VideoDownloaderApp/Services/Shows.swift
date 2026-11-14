@@ -1,7 +1,5 @@
 import Foundation
 
-/// Recognises episodes of one series from their titles, such as
-/// "***REMOVED*** Ep. 3 · ***REMOVED***" or "Watch South Park (1997) S29E2 - Watch Series".
 enum ShowSuggestion {
     struct Parsed: Equatable {
         let series: String
@@ -17,7 +15,6 @@ enum ShowSuggestion {
         let key: String
         /// In episode order.
         let items: [DownloadItem]
-        /// A show with this name that these newer episodes could join.
         let existingShow: Show?
         var id: String { key }
     }
@@ -25,7 +22,7 @@ enum ShowSuggestion {
     private static let seasonEpisode = try! NSRegularExpression(pattern: #"\bS(\d{1,2})\s*E(\d{1,4})\b"#, options: .caseInsensitive)
     private static let episodeMarker = try! NSRegularExpression(pattern: #"\b(?:Ep\.?|Episode|E)\s*(\d{1,4})\b"#, options: .caseInsensitive)
     private static let trailingNumber = try! NSRegularExpression(pattern: #"\s(\d{1,3})\s*$"#)  // not years
-    /// Words sites wrap around titles, such as My***REMOVED***' "Watch … - Watch Series".
+    /// Words sites wrap around titles, such as "Watch … - Watch Series".
     private static let noise = try! NSRegularExpression(pattern: #"^\s*watch\s+|\s+[-–|·]\s*watch (series|online|free).*$"#, options: .caseInsensitive)
 
     static func parse(_ title: String) -> Parsed {
@@ -49,7 +46,6 @@ enum ShowSuggestion {
         return Parsed(series: cleaned.trimmingCharacters(in: .whitespaces), season: nil, episode: nil)
     }
 
-    /// Episode order: season, then episode, then natural title order.
     static func inEpisodeOrder(_ items: [DownloadItem]) -> [DownloadItem] {
         items.map { ($0, parse($0.displayTitle)) }.sorted { a, b in
             let left = (a.1.season ?? 0, a.1.episode ?? Int.max), right = (b.1.season ?? 0, b.1.episode ?? Int.max)
@@ -58,8 +54,7 @@ enum ShowSuggestion {
         }.map(\.0)
     }
 
-    /// Two or more saved episodes of a series that isn't a show yet, or newer episodes of an
-    /// existing show (matched by name). Dismissed suggestions and movies stay hidden.
+    /// A new series needs two saved episodes; an existing show (matched by name) needs one.
     static func suggestions(items: [DownloadItem], shows: [Show], dismissed: Set<String>) -> [Suggestion] {
         let candidates = items.filter { $0.status == .completed && !$0.isStreamFragment && $0.showID == nil && !$0.isMovie }
         let parsed = candidates.map { ($0, parse($0.displayTitle)) }.filter { $0.1.episode != nil }
@@ -74,7 +69,6 @@ enum ShowSuggestion {
     }
 }
 
-/// A show's episodes in the viewer's watch order.
 enum ShowPlaylist {
     static func episodes(of showID: UUID, in items: [DownloadItem]) -> [DownloadItem] {
         items.filter { $0.showID == showID }.sorted { a, b in
@@ -89,8 +83,7 @@ enum ShowPlaylist {
         var id: Int { range.lowerBound }
     }
 
-    /// A show page's sections: one per season when every title names its season ("S2E3") and
-    /// there's more than one, else one. Each is a run of the watch order, so moves stay within it.
+    /// Each section is a run of the watch order, so moves stay within it.
     static func seasonRuns(_ episodes: [DownloadItem]) -> [SeasonRun] {
         var runs: [SeasonRun] = []
         for (index, item) in episodes.enumerated() {
@@ -110,8 +103,6 @@ enum ShowPlaylist {
         return episodes[index + 1]
     }
 
-    /// Videos started but not finished, plus the next episode of each show whose most recently
-    /// played episode was finished, even if that episode was deleted since; most recently played first.
     static func continueWatching(_ items: [DownloadItem], shows: [Show] = []) -> [DownloadItem] {
         let playable = items.filter { $0.status == .completed && !$0.isStreamFragment }
         var entries = playable.filter { !$0.isWatched && ($0.playbackPosition ?? 0) > 10 }
@@ -135,7 +126,7 @@ enum ShowPlaylist {
         return entries.sorted { ($0.played, $0.position) > ($1.played, $1.position) }.map(\.item)
     }
 
-    /// The first episode not yet watched (an in-progress one resumes); the first when all are watched.
+    /// An in-progress episode counts as not watched, so it resumes.
     static func upNext(in episodes: [DownloadItem]) -> DownloadItem? {
         episodes.first { !$0.isWatched } ?? episodes.first
     }

@@ -1,8 +1,6 @@
 import AVFoundation
 
-/// Keep the stream's default audio when requesting extra caption languages.
-/// A preferred media selection can leave an optional AUDIO group empty; copying
-/// that selection for every subtitle would save a playable but silent video.
+/// A preferred selection can leave an optional AUDIO group empty, so copying it per caption saves silent video.
 enum HLSMediaSelections {
     static func audibleOption(for asset: AVURLAsset, preferred: AVMediaSelection) async -> (AVMediaSelectionGroup, AVMediaSelectionOption)? {
         guard let group = try? await asset.loadMediaSelectionGroup(for: .audible) else { return nil }

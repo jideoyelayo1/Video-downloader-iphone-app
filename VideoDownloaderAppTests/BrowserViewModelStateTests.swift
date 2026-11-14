@@ -23,14 +23,14 @@ final class BrowserViewModelStateTests: XCTestCase {
 
     func testSubtitleTracksAreCollectedPerPage() {
         let model = makeModel()
-        let page = URL(string: "https://www.***REMOVED***.to/watch/abc/frieren?ep=1")!
+        let page = URL(string: "https://www.animesite.example/watch/abc/frieren?ep=1")!
         model.pageDidChange(to: page, force: true)
         let english = SubtitleTrack(url: URL(string: "https://s1.example/en/sub.vtt")!, label: "English", language: "en", isDefault: true, referer: nil)
         let arabic = SubtitleTrack(url: URL(string: "https://s1.example/ar/sub.vtt")!, label: "Arabic", language: "ar", isDefault: false, referer: nil)
         model.discovery.onSubtitles?([english])
         model.discovery.onSubtitles?([english, arabic])
         XCTAssertEqual(model.subtitleTracks.map(\.label), ["English", "Arabic"])
-        model.pageDidChange(to: URL(string: "https://www.***REMOVED***.to/watch/abc/frieren?ep=2"), force: false)
+        model.pageDidChange(to: URL(string: "https://www.animesite.example/watch/abc/frieren?ep=2"), force: false)
         XCTAssertTrue(model.subtitleTracks.isEmpty, "the next episode's tracks replace the previous ones")
     }
 
@@ -49,8 +49,7 @@ final class BrowserViewModelStateTests: XCTestCase {
         XCTAssertNil(model.errorMessage)
     }
 
-    /// WebKit ends hidden pages' processes during long Picture in Picture sessions. Reloading them
-    /// in the background spends memory and data on a page nobody is looking at.
+    /// WebKit ends hidden pages' processes in long PiP sessions; reloading them unseen wastes memory and data.
     func testAPageThatCrashesWhileHiddenReloadsWhenShown() {
         let model = makeModel()
         model.pageDidChange(to: URL(string: "https://site.example/watch?ep=1"), force: true)
@@ -66,9 +65,7 @@ final class BrowserViewModelStateTests: XCTestCase {
         XCTAssertNil(model.errorMessage)
     }
 
-    /// Routers such as SvelteKit's can change the URL without calling the page's
-    /// `history.pushState`, which the discovery script hooks. The model must still
-    /// follow the URL, title and Back state.
+    /// Routers such as SvelteKit's change the URL without calling the `history.pushState` the script hooks.
     func testSamePageNavigationThatBypassesTheScriptHookIsObserved() async throws {
         let server = try LocalMediaServer()
         try server.start()
@@ -127,7 +124,6 @@ final class BrowserViewModelStateTests: XCTestCase {
             model.candidates.count == 1 && model.readyCount == 1
         }
         XCTAssertEqual(model.candidates.first?.url.lastPathComponent, "separate-audio-master.m3u8")
-        // Reported again later (e.g. after Refresh), the rendition stays hidden.
         model.add(MediaCandidate(url: server.url("/hls/audio-only.m3u8"), sourcePageURL: page, kind: .hls))
         XCTAssertEqual(model.candidates.count, 1)
     }
@@ -142,8 +138,7 @@ final class BrowserViewModelStateTests: XCTestCase {
             let webView = model.makeWebView()
             let coordinator = BrowserView.Coordinator(model: model)
             webView.navigationDelegate = coordinator
-            // Hosted in a window, as the app does, so its content process isn't suspended. The first
-            // web view of a run can take a while to start on a freshly booted simulator, such as CI's.
+            // Hosted so the content process isn't suspended; a freshly booted CI simulator starts it slowly.
             let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
             webView.frame = window.bounds
             window.addSubview(webView)

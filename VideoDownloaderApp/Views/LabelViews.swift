@@ -18,7 +18,6 @@ extension VideoLabel {
     }
 }
 
-/// A video's labels as small capsules: the first three, then "+N".
 struct LabelChips: View {
     let labels: [VideoLabel]
 
@@ -59,7 +58,7 @@ struct ManageLabelsSheet: View {
                     Toggle("Label downloads with their site", isOn: Binding(get: { store.labelsDownloadsWithSite },
                                                                            set: { store.labelsDownloadsWithSite = $0 }))
                 } footer: {
-                    Text("Each new download gets a label named after the site it came from, such as ***REMOVED***.")
+                    Text("Each new download gets a label named after the site it came from.")
                 }
                 Section {
                     ForEach(labels) { label in
@@ -98,7 +97,6 @@ struct ManageLabelsSheet: View {
     private func count(for label: VideoLabel) -> Int { items.filter { $0.labelIDs?.contains(label.id) == true }.count }
 }
 
-/// Name, colour and the sites whose downloads get the label automatically.
 private struct LabelEditor: View {
     @Bindable var label: VideoLabel
     @EnvironmentObject private var store: LabelStore
@@ -131,7 +129,7 @@ private struct LabelEditor: View {
                     Toggle(site, isOn: Binding(get: { (label.sites ?? []).contains(site) }, set: { setSite(site, $0) }))
                 }
                 HStack {
-                    TextField("Another site, e.g. ***REMOVED***.to", text: $newSite)
+                    TextField("Another site, e.g. example.com", text: $newSite)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)

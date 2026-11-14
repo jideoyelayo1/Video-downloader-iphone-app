@@ -59,8 +59,7 @@ struct ContentView: View {
         .alert("Unable to play video", isPresented: Binding(get: { playback.errorMessage != nil }, set: { if !$0 { playback.clearError() } })) {
             Button("OK", role: .cancel) { playback.clearError() }
         } message: { Text(playback.errorMessage ?? "") }
-        // Delete Finished Episodes → Ask First, for an episode closed in its last 10%: a banner over
-        // the tab bar rather than a dialog. It waits while another video plays.
+        // Delete Finished Episodes → Ask First, for an episode closed in its last 10%; waits while a video plays.
         .overlay(alignment: .bottom) {
             if let episode = playback.finishedEpisode, !playback.isPresented {
                 FinishedEpisodeBanner(episode: episode) { playback.answerFinishedEpisode(delete: $0) }
@@ -81,7 +80,6 @@ struct ContentView: View {
 }
 
 extension Color {
-    /// The app's accent: a deep red on black, as on Netflix.
     static let brandRed = Color(red: 0.898, green: 0.035, blue: 0.078)
 }
 
@@ -122,7 +120,6 @@ private struct LibraryRecoveryView: View {
     }
 }
 
-/// "You finished … Delete it?" over the tab bar. Unanswered, it goes after a while and the episode is kept.
 private struct FinishedEpisodeBanner: View {
     let episode: DownloadItem
     let answer: (Bool) -> Void

@@ -19,7 +19,6 @@ struct HLSVariant: Equatable {
         return Int64(Double(bandwidth) / 8 * duration)
     }
 
-    /// "720p · about 351 MB".
     func menuTitle(duration: Double?) -> String {
         guard let bytes = estimatedBytes(duration: duration) else { return qualityLabel }
         return qualityLabel + " · about " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
@@ -71,9 +70,7 @@ enum HLSManifest: Equatable {
         return .media(isFinite: isFinite, isEncryptedWithDRM: isDRM, segmentCount: segments, totalDuration: duration)
     }
 
-    /// Playlists a master references besides its variants: separate audio, subtitle and
-    /// I-frame renditions. A player fetches them alongside the master, but none is a
-    /// complete video on its own.
+    /// Audio, subtitle and I-frame playlists a master references; none is a complete video on its own.
     static func renditionURLs(in text: String, baseURL: URL) -> [URL] {
         text.components(separatedBy: .newlines).compactMap { raw in
             let line = raw.trimmingCharacters(in: .whitespaces)

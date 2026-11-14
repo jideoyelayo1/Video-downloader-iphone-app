@@ -1,7 +1,6 @@
 import Foundation
 import WebKit
 
-/// Request context captured from the in-app browser for media downloads and probes.
 @MainActor
 enum BrowserSession {
     private static let userAgentKey = "BrowserSession.userAgent"
@@ -13,8 +12,7 @@ enum BrowserSession {
 
     static func requestContext(for mediaURL: URL, referer: URL?) async -> RequestContext {
         let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
-        // HLS child playlists and segments can live on a different host. Keep the
-        // browser's cookies in memory and scope them at each actual request.
+        // Child playlists and segments can be on other hosts, so keep all cookies and scope them per request.
         return RequestContext(cookies: cookies, userAgent: userAgent,
                               referer: referer.map { refererValue(for: $0, requesting: mediaURL) })
     }
