@@ -1,6 +1,6 @@
 import Foundation
 
-/// Headers/cookies captured from the browser for one media request. Never persisted.
+/// Browser headers and cookies for one media request; never persisted.
 struct RequestContext: Equatable {
     var cookies: [HTTPCookie]
     var userAgent: String?

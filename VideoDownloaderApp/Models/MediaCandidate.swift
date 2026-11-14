@@ -32,7 +32,6 @@ enum MediaKind: String, Codable, CaseIterable {
 struct MediaCandidate: Identifiable, Codable, Hashable {
     let id: UUID
     let url: URL
-    /// The top-level page the user was viewing.
     let sourcePageURL: URL
     /// The document (often a cross-origin player iframe) that referenced the media; used as Referer.
     let frameURL: URL?

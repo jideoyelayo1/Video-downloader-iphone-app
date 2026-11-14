@@ -97,7 +97,6 @@ enum DownloadError: Error, Equatable {
         return .other(error.localizedDescription)
     }
 
-    /// Nil if `availableBytes` covers `expectedBytes` plus a 200 MB safety margin. Unknown availability passes.
     static func storageCheck(expectedBytes: Int64?, availableBytes: Int64?) -> DownloadError? {
         guard let availableBytes else { return nil }
         let expected = max(expectedBytes ?? 0, 0)

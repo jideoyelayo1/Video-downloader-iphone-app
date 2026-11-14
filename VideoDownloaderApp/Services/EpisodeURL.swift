@@ -1,9 +1,6 @@
 import Foundation
 
-/// Works out the page of the next episode from an episode's address, for sites that number
-/// their episode pages: ***REMOVED*** `/p-9-dub`, ***REMOVED*** `?ep=9`, My***REMOVED*** `/episode-2/`,
-/// ***REMOVED*** `/episode/2`, ***REMOVED*** `/tv/<id>/<season>/2`, `S1E2`. Sites whose addresses don't
-/// contain the episode number (***REMOVED***'s `/play/<id>/<hash>`) return nil.
+/// Next-episode page from a numbered address (`?ep=9`, `/episode-2/`, `/tv/<id>/<s>/2`, `S1E2`), else nil.
 enum EpisodeURL {
     private static let queryNames = ["ep", "episode", "e"]
     private static let seasonEpisode = try! NSRegularExpression(pattern: #"(?i)(?<![A-Za-z0-9])(s\d{1,2})(e)(\d{1,4})(?![0-9])"#)
@@ -34,7 +31,6 @@ enum EpisodeURL {
         return components.url
     }
 
-    /// The episode number in an address, when there is one.
     static func number(in url: URL) -> Int? {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         if let item = components.queryItems?.first(where: { queryNames.contains($0.name.lowercased()) }), let value = Int(item.value ?? "") { return value }
@@ -45,9 +41,7 @@ enum EpisodeURL {
 }
 
 extension EpisodeURL {
-    /// Adds the address's episode number to a title that lacks one, before a trailing site
-    /// name: ***REMOVED*** titles every episode "Watch Attack on Titan · ***REMOVED***", so episode 2 becomes
-    /// "Watch Attack on Titan Ep. 2 · ***REMOVED***".
+    /// ***REMOVED*** titles every episode alike, so the address's episode number goes in before the site name.
     static func title(_ title: String, numberedFrom page: URL) -> String {
         guard !title.isEmpty, ShowSuggestion.parse(DownloadItem.displayTitle(title, host: page.host)).episode == nil,
               let number = number(in: page) else { return title }

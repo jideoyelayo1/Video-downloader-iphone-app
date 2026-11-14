@@ -3,8 +3,7 @@ import Foundation
 /// Pure URL/payload parsing shared by the WebKit bridge and SDK-free tests.
 enum MediaDiscovery {
     static let messageName = "mediaDiscovery"
-    /// Fragmented stream pieces are not standalone videos, even if a player
-    /// momentarily exposes one as an element's currentSrc.
+    /// Stream fragments aren't standalone videos, even when a player briefly exposes one as currentSrc.
     static let segmentExtensions: Set<String> = ["ts", "m4s"]
     /// Audio-only files, such as a site's theme-song preview, aren't videos.
     static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac"]
@@ -45,8 +44,7 @@ enum MediaDiscovery {
         return candidates.contains { normalizedURL($0.url) == normalized }
     }
 
-    /// A main-frame message is stale when it was sent by a document other than the one now shown
-    /// (e.g. a late message from the previous episode). Sub-frame players are judged by navigation clearing.
+    /// Main-frame messages from a previous document are stale; sub-frame players rely on navigation clearing.
     static func isStale(documentURL: URL?, isMainFrame: Bool, currentPageURL: URL) -> Bool {
         guard isMainFrame, let documentURL else { return false }
         return normalizedURL(documentURL) != normalizedURL(currentPageURL)
@@ -54,6 +52,5 @@ enum MediaDiscovery {
 }
 
 extension URL {
-    /// http or https: the only links the browser follows and downloads use.
     var isWeb: Bool { ["http", "https"].contains(scheme?.lowercased()) }
 }

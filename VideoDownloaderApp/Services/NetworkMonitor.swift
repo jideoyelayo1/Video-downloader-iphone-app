@@ -1,7 +1,6 @@
 import Foundation
 import Network
 
-/// Whether the iPhone is on Wi-Fi, for "Waiting for Wi-Fi" when downloads are limited to it.
 @MainActor
 final class NetworkMonitor: ObservableObject {
     static let shared = NetworkMonitor()

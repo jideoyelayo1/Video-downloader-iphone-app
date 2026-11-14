@@ -20,7 +20,6 @@ enum CandidateStatus: Equatable {
     var isReady: Bool { if case .ready = self { return true } else { return false } }
 }
 
-/// Checks a discovered URL before it is offered for download.
 struct CandidateValidator {
     static let refererRequiredMessage = "This stream requires the player's Referer header. Download it through the in-app stream relay and keep the app open."
 
@@ -88,8 +87,7 @@ struct CandidateValidator {
 
     // MARK: HLS
 
-    /// Probe without Referer first to determine whether AVFoundation can fetch the
-    /// stream directly. If Referer is required, validate it again for the relay.
+    /// Probe without Referer first (AVFoundation can't send one); retry with it to qualify for the relay.
     private func validateHLS(_ url: URL, context: RequestContext?) async throws -> CandidateStatus {
         var avContext = context
         avContext?.referer = nil
@@ -153,9 +151,7 @@ struct CandidateValidator {
             try await throwRefererBlockerIfNeeded(segmentURL, status: response.statusCode, fullContext: fullContext)
             throw error
         }
-        // A successful status is not enough: a CDN or anti-bot layer can return
-        // an HTML challenge (or another playlist) at the segment URL. Do not mark
-        // the HLS candidate ready unless the first segment looks like media data.
+        // A 2xx isn't enough: an anti-bot layer can serve an HTML challenge or playlist at the segment URL.
         let leadingText = String(data: prefix, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         if leadingText.hasPrefix("<!doctype html") || leadingText.hasPrefix("<html") || leadingText.hasPrefix("<script") || leadingText.hasPrefix("#extm3u") {
             throw DownloadError.notVideo
