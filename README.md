@@ -1,11 +1,12 @@
 # Video Downloader
 
-An iOS app with a built-in browser that finds the video a web page plays, downloads it and plays it offline. It is a general HLS and MP4 downloader for video you are entitled to save.
+A free iOS app for watching web video on your TV. It downloads HLS and MP4 video you are entitled to save, then plays it offline on the phone or casts it to a TV with AirPlay or Chromecast. No account is needed.
 
 ## What it does
 
+- **Cast to a TV:** saved videos play on a TV through AirPlay, from Apple's player, or on a Chromecast on the same Wi-Fi. For Chromecast the phone serves the downloaded file itself, so the TV never needs the original site. HLS downloads can use AirPlay only.
 - **Browse:** a web browser with bookmarks and history. It spots the videos a page's player loads and lists them under **Found videos**. Each one is checked first and marked *Ready* (with its size and HLS qualities), *Expired*, *Protected (DRM)*, *Live* or *Unavailable*.
-- **Downloads:** video files download in the background and can resume. HLS streams download through AVFoundation. Downloads carry on while the app is suspended and are picked up again after a relaunch.
+- **Downloads:** downloading is what makes offline playback and casting work. Video files download in the background and can resume. HLS streams download through AVFoundation. Downloads carry on while the app is suspended and are picked up again after a relaunch.
 - **My Videos:** an offline library with shows, labels, folders, watched state, Continue Watching, search, sorting and filters. Videos play in Apple's full-screen player, with Picture in Picture, AirPlay, Chromecast, subtitles, intro skipping, a sleep timer and autoplay of the next episode.
 - **Series:** on sites whose episode pages are numbered, it can download the next episodes and check a followed show for new ones.
 
