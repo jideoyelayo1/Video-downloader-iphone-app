@@ -76,7 +76,6 @@ final class AppServices {
         // One-time imports and settings flags must wait for the saved library.
         let throwaway = inMemory || recovering
         if !throwaway { LegacyDownloadImport.run(into: context) }
-        StarterBookmarks.install(in: context, inMemory: throwaway)
         history = BrowserHistoryStore(context: context)
         // Created once: an isolated test suite is cleared each time it is requested.
         preferences = LaunchOptions.preferences(isolated: throwaway)
@@ -126,7 +125,7 @@ enum LaunchOptions {
     /// `-StartURL <url>` opens a page at launch; `-NoInitialLoad` opens a blank browser.
     static var initialURL: URL? {
         if isRunningUnitTests || flag("-NoInitialLoad") { return nil }
-        return value("-StartURL").flatMap(URL.init(string:)) ?? Bookmark.starters.first?.1
+        return value("-StartURL").flatMap(URL.init(string:))
     }
 
     /// Debug-only: autoplay muted video in every frame so players reveal their stream URLs.

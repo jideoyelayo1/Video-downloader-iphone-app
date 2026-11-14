@@ -130,10 +130,10 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         const absolute = absoluteURL(url);
         if (absolute) postTracks([{ url: absolute, label: '', language: '', isDefault: false }]);
       };
-      // JSON subtitle lists (***REMOVED*** { label, file }, ***REMOVED*** { url, display, language }); one file per language.
+      // JSON subtitle lists ({ label, file } or { url, display, language }); one file per language.
       const reportSubtitleList = (url, contentType, body) => {
         if (!/json/i.test(contentType || '') || body === null || body === undefined) return;
-        const subtitleRequest = /sub|caption|***REMOVED***/i.test(url || '');
+        const subtitleRequest = /sub|caption/i.test(url || '');
         let data = body;
         if (typeof body === 'string') {
           if (body.length > 2000000 || (!subtitleRequest && !/\.(vtt|srt)\b|"format"\s*:\s*"(srt|vtt)"/i.test(body))) return;
@@ -309,7 +309,7 @@ final class MediaDiscoveryController: NSObject, WKScriptMessageHandler {
         const videos = Array.from(document.querySelectorAll('video'));
         if (videos.some(v => !v.paused && v.currentTime > 0)) return;
         videos.forEach(v => { try { v.muted = true; const p = v.play(); if (p) p.catch(() => {}); } catch (_) {} });
-        // Overlay play buttons of common players, and of site templates (***REMOVED***, ***REMOVED***: #player .play).
+        // Overlay play buttons of common players and common site templates.
         const button = document.querySelector('.jw-icon-display, .jw-display-icon-container, .vjs-big-play-button, .plyr__control--overlaid, media-play-button, [aria-label="Play"], .play-button, #play, #player .play, #w-player .play, .player-wrapper .play, .btn-play, .play-btn, [class*="big-play"]');
         if (button) { try { button.click(); } catch (_) {} }
       };

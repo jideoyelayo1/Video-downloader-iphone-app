@@ -13,7 +13,7 @@ final class SubtitleParserTests: XCTestCase {
         ])
     }
 
-    /// ***REMOVED***'s files wrap multi-line Arabic cues in <b> that opens and closes on different lines.
+    /// Some sites' files wrap multi-line Arabic cues in <b> that opens and closes on different lines.
     func testTagsSpanningLinesAreRemoved() {
         let vtt = "WEBVTT\n\n01:29.980 --> 01:39.740\n<b>في أقصى شمال \nالقارة</b>\n"
         XCTAssertEqual(SubtitleParser.cues(from: vtt).first?.text, "في أقصى شمال\nالقارة")
@@ -44,20 +44,20 @@ final class SubtitleParserTests: XCTestCase {
 
 final class SubtitleTrackTests: XCTestCase {
     func testTracksFromDiscoveryMessage() {
-        let frame = URL(string: "https://***REMOVED***/e/abc")!
+        let frame = URL(string: "https://embed.example/e/abc")!
         let tracks = SubtitleTrack.tracks(from: [
-            "event": "subtitles", "documentURL": "https://***REMOVED***/e/abc?ep=1",
+            "event": "subtitles", "documentURL": "https://embed.example/e/abc?ep=1",
             "tracks": [
-                ["url": "https://s1.***REMOVED***.top/x/sub.vtt", "label": " English ", "language": "en", "isDefault": true],
-                ["url": "https://s1.***REMOVED***.top/y/sub.vtt", "label": "", "language": ""],
-                ["url": "blob:https://***REMOVED***/1", "label": "Blob"]
+                ["url": "https://subs.example/x/sub.vtt", "label": " English ", "language": "en", "isDefault": true],
+                ["url": "https://subs.example/y/sub.vtt", "label": "", "language": ""],
+                ["url": "blob:https://embed.example/1", "label": "Blob"]
             ]
         ], frameURL: frame)
         XCTAssertEqual(tracks.count, 2)
         XCTAssertEqual(tracks[0].label, "English")
         XCTAssertEqual(tracks[0].language, "en")
         XCTAssertTrue(tracks[0].isDefault)
-        XCTAssertEqual(tracks[0].referer?.absoluteString, "https://***REMOVED***/e/abc?ep=1")
+        XCTAssertEqual(tracks[0].referer?.absoluteString, "https://embed.example/e/abc?ep=1")
         XCTAssertNil(tracks[1].language)
         XCTAssertEqual(tracks[1].displayName, "Subtitles")
         XCTAssertEqual(SubtitleTrack.displayName(label: "", language: "es"), Locale.current.localizedString(forIdentifier: "es"))
@@ -70,7 +70,7 @@ final class SubtitleTrackTests: XCTestCase {
     func testUnlabelledTrackTakesItsLanguageFromTheFileName() {
         let languages = ["https://c.example/subs/eng.vtt", "https://c.example/en.srt", "https://c.example/English.vtt",
                          "https://c.example/sub?lang=fr", "https://c.example/sub.vtt", "https://c.example/a8f3c1.vtt",
-                         "https://storage.***REMOVED***.cfd/uploads/subs/a6318f05-daa2.en.srt"]
+                         "https://storage.example/uploads/subs/a6318f05-daa2.en.srt"]
             .map { SubtitleTrack.languageCode(in: URL(string: $0)!) }
         XCTAssertEqual(languages, ["en", "en", "en", "fr", nil, nil, "en"])
         let labelled = SubtitleTrack.tracks(from: ["tracks": [["url": "https://c.example/eng.vtt", "label": "Forced"],

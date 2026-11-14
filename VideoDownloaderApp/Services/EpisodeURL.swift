@@ -41,7 +41,7 @@ enum EpisodeURL {
 }
 
 extension EpisodeURL {
-    /// ***REMOVED*** titles every episode alike, so the address's episode number goes in before the site name.
+    /// Some sites title every episode alike, so the address's episode number goes in before the site name.
     static func title(_ title: String, numberedFrom page: URL) -> String {
         guard !title.isEmpty, ShowSuggestion.parse(DownloadItem.displayTitle(title, host: page.host)).episode == nil,
               let number = number(in: page) else { return title }

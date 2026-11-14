@@ -22,7 +22,7 @@ enum ShowSuggestion {
     private static let seasonEpisode = try! NSRegularExpression(pattern: #"\bS(\d{1,2})\s*E(\d{1,4})\b"#, options: .caseInsensitive)
     private static let episodeMarker = try! NSRegularExpression(pattern: #"\b(?:Ep\.?|Episode|E)\s*(\d{1,4})\b"#, options: .caseInsensitive)
     private static let trailingNumber = try! NSRegularExpression(pattern: #"\s(\d{1,3})\s*$"#)  // not years
-    /// Words sites wrap around titles, such as My***REMOVED***' "Watch … - Watch Series".
+    /// Words sites wrap around titles, such as "Watch … - Watch Series".
     private static let noise = try! NSRegularExpression(pattern: #"^\s*watch\s+|\s+[-–|·]\s*watch (series|online|free).*$"#, options: .caseInsensitive)
 
     static func parse(_ title: String) -> Parsed {

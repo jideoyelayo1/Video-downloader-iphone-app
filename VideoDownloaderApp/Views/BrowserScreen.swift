@@ -458,12 +458,7 @@ private struct BrowserCollectionsSheet: View {
             ContentUnavailableView(searchText.isEmpty ? "No bookmarks" : "No matching bookmarks", systemImage: "bookmark",
                                    description: Text(searchText.isEmpty ? "Save a site or page to find it here." : "Try another search."))
         }
-        let groups = Dictionary(grouping: visibleBookmarks, by: \.folder)
-        ForEach(Bookmark.Folder.allCases.filter { groups[$0] != nil }, id: \.self) { folder in
-            Section {
-                bookmarkRows(groups[folder] ?? [])
-            } header: { Text(folder.rawValue) } footer: { if !folder.footer.isEmpty { Text(folder.footer) } }
-        }
+        Section { bookmarkRows(visibleBookmarks) }
     }
 
     @ViewBuilder private func bookmarkRows(_ bookmarks: [Bookmark]) -> some View {

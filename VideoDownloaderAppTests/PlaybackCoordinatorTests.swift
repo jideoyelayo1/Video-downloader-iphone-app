@@ -118,7 +118,7 @@ final class PlaybackCoordinatorTests: XCTestCase {
 
     func testViewerLanguageThenSiteDefaultThenFirst() {
         let saved = { (language: String, isDefault: Bool) in SubtitleStore.Saved(fileName: "x", label: language, language: language, isDefault: isDefault) }
-        // ***REMOVED*** marks its first track (Arabic) as default; an English-speaking viewer gets English.
+        // A site marks its first track (Arabic) as default; an English-speaking viewer gets English.
         XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", true), saved("en", false)], preferredLanguages: ["en-GB"]), 1)
         XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", false), saved("en", true)], preferredLanguages: ["ja"]), 1)
         XCTAssertEqual(PlaybackCoordinator.defaultSiteIndex([saved("ar", false), saved("fr", false)], preferredLanguages: ["ja"]), 0)

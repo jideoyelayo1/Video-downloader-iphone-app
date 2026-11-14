@@ -32,57 +32,57 @@ final class LabelStoreTests: XCTestCase {
     }
 
     func testSiteNamesReadWell() {
-        XCTAssertEqual(SiteNames.name(for: "***REMOVED***.to"), "***REMOVED***", "starter bookmarks give the name")
-        XCTAssertEqual(SiteNames.name(for: "www.***REMOVED***.to"), "***REMOVED***")
-        XCTAssertEqual(SiteNames.name(for: "***REMOVED***.ws"), "***REMOVED***")
-        XCTAssertEqual(SiteNames.name(for: "my***REMOVED***.lol"), "My***REMOVED***")
-        XCTAssertEqual(SiteNames.name(for: "tools.***REMOVED***.rsvp"), "***REMOVED***")
+        XCTAssertEqual(SiteNames.name(for: "showsite.example"), "Showsite", "the domain, capitalised")
+        XCTAssertEqual(SiteNames.name(for: "www.animesite.example"), "Animesite")
+        XCTAssertEqual(SiteNames.name(for: "moviesite.example"), "Moviesite")
+        XCTAssertEqual(SiteNames.name(for: "seriessite.example"), "Seriessite")
+        XCTAssertEqual(SiteNames.name(for: "tools.cdnhost.example"), "Cdnhost")
         XCTAssertEqual(SiteNames.name(for: "127.0.0.1"), "127.0.0.1")
         XCTAssertEqual(SiteNames.name(for: "localhost"), "localhost")
     }
 
     func testDisplayTitlesDropTheSiteNameTheLabelShows() {
-        XCTAssertEqual(DownloadItem.displayTitle("Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 5 · ***REMOVED***", host: "***REMOVED***.to"),
+        XCTAssertEqual(DownloadItem.displayTitle("Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 5 · Showsite", host: "showsite.example"),
                        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 5")
-        XCTAssertEqual(DownloadItem.displayTitle("Watch South Park (1997) S29E2 - Watch Series - My***REMOVED***", host: "my***REMOVED***.lol"),
+        XCTAssertEqual(DownloadItem.displayTitle("Watch South Park (1997) S29E2 - Watch Series - Seriessite", host: "seriessite.example"),
                        "Watch South Park (1997) S29E2 - Watch Series")
-        XCTAssertEqual(DownloadItem.displayTitle("Frieren · ***REMOVED***", host: "***REMOVED***.to"), "Frieren · ***REMOVED***", "only the video's own site")
-        XCTAssertEqual(DownloadItem.displayTitle("***REMOVED***", host: "***REMOVED***.to"), "***REMOVED***")
+        XCTAssertEqual(DownloadItem.displayTitle("Frieren · Showsite", host: "animesite.example"), "Frieren · Showsite", "only the video's own site")
+        XCTAssertEqual(DownloadItem.displayTitle("Showsite", host: "showsite.example"), "Showsite")
     }
 
     func testSitesFromTypedAddresses() {
-        XCTAssertEqual(SiteNames.site(fromInput: "https://www.***REMOVED***.to/watch/1?ep=2"), "***REMOVED***.to")
-        XCTAssertEqual(SiteNames.site(fromInput: " ***REMOVED***.to "), "***REMOVED***.to")
-        XCTAssertEqual(SiteNames.site(fromInput: "***REMOVED***.to/home"), "***REMOVED***.to")
+        XCTAssertEqual(SiteNames.site(fromInput: "https://www.animesite.example/watch/1?ep=2"), "animesite.example")
+        XCTAssertEqual(SiteNames.site(fromInput: " Showsite.example "), "showsite.example")
+        XCTAssertEqual(SiteNames.site(fromInput: "othersite.example/home"), "othersite.example")
         XCTAssertNil(SiteNames.site(fromInput: "anime"))
         XCTAssertNil(SiteNames.site(fromInput: ""))
-        XCTAssertTrue(SiteMatch.matches(host: "watch.***REMOVED***.to", site: "***REMOVED***.to"))
-        XCTAssertTrue(SiteMatch.matches(host: "www.***REMOVED***.to", site: "***REMOVED***.to"))
-        XCTAssertFalse(SiteMatch.matches(host: "not***REMOVED***.to", site: "***REMOVED***.to"))
-        XCTAssertFalse(SiteMatch.matches(host: "***REMOVED***.to", site: ""))
+        XCTAssertTrue(SiteMatch.matches(host: "watch.Showsite.example", site: "showsite.example"))
+        XCTAssertTrue(SiteMatch.matches(host: "www.showsite.example", site: "showsite.example"))
+        XCTAssertFalse(SiteMatch.matches(host: "notshowsite.example", site: "showsite.example"))
+        XCTAssertFalse(SiteMatch.matches(host: "showsite.example", site: ""))
     }
 
     func testDownloadsGetTheirSiteLabelAndMatchingRules() throws {
         let store = makeStore()
-        store.create(name: "Anime", sites: ["***REMOVED***.to", "***REMOVED***.to"])
-        let ***REMOVED*** = video("***REMOVED*** Ep. 1 · ***REMOVED***", from: "https://***REMOVED***.to/anime/vpoY93SPHAQZP9soq/p-1-dub")
-        let ***REMOVED*** = video("Frieren Ep. 1", from: "https://www.***REMOVED***.to/watch/154587/frieren?ep=1")
-        let hydra = video("Movie", from: "https://***REMOVED***.ws/movie/1")
-        [***REMOVED***, ***REMOVED***, hydra].forEach(store.applyAutomaticLabels)
-        XCTAssertEqual(names(***REMOVED***, store), ["Anime", "***REMOVED***"])
-        XCTAssertEqual(names(***REMOVED***, store), ["Anime", "***REMOVED***"])
-        XCTAssertEqual(names(hydra, store), ["***REMOVED***"])
-        let second = video("***REMOVED*** Ep. 2 · ***REMOVED***", from: "https://***REMOVED***.to/anime/vpoY93SPHAQZP9soq/p-2-dub")
+        store.create(name: "Anime", sites: ["showsite.example", "animesite.example"])
+        let showPage = video("Sample Show Ep. 1 · Showsite", from: "https://showsite.example/anime/vpoY93SPHAQZP9soq/p-1-dub")
+        let animePage = video("Frieren Ep. 1", from: "https://www.animesite.example/watch/154587/frieren?ep=1")
+        let hydra = video("Movie", from: "https://moviesite.example/movie/1")
+        [showPage, animePage, hydra].forEach(store.applyAutomaticLabels)
+        XCTAssertEqual(names(showPage, store), ["Anime", "Showsite"])
+        XCTAssertEqual(names(animePage, store), ["Anime", "Animesite"])
+        XCTAssertEqual(names(hydra, store), ["Moviesite"])
+        let second = video("Sample Show Ep. 2 · Showsite", from: "https://showsite.example/anime/vpoY93SPHAQZP9soq/p-2-dub")
         store.applyAutomaticLabels(to: second)
-        XCTAssertEqual(store.labels.filter { $0.name == "***REMOVED***" }.count, 1, "one site label per site")
-        XCTAssertEqual(***REMOVED***.labelIDs?.count, 2)
+        XCTAssertEqual(store.labels.filter { $0.name == "Showsite" }.count, 1, "one site label per site")
+        XCTAssertEqual(showPage.labelIDs?.count, 2)
     }
 
     func testSiteLabelsCanBeTurnedOff() {
         let store = makeStore()
         store.labelsDownloadsWithSite = false
-        store.create(name: "Anime", sites: ["***REMOVED***.to"])
-        let item = video("Episode", from: "https://***REMOVED***.to/anime/x")
+        store.create(name: "Anime", sites: ["showsite.example"])
+        let item = video("Episode", from: "https://showsite.example/anime/x")
         store.applyAutomaticLabels(to: item)
         XCTAssertEqual(names(item, store), ["Anime"])
         XCTAssertFalse(makeStore().labelsDownloadsWithSite, "the setting is remembered")
@@ -90,11 +90,11 @@ final class LabelStoreTests: XCTestCase {
 
     func testExistingVideosGetSiteLabelsOnce() {
         let store = makeStore()
-        let first = video("Episode 1", from: "https://***REMOVED***.to/anime/x/p-1-dub")
-        let other = video("South Park S29E2", from: "https://my***REMOVED***.lol/watch/tv/2190")
+        let first = video("Episode 1", from: "https://showsite.example/anime/x/p-1-dub")
+        let other = video("South Park S29E2", from: "https://seriessite.example/watch/tv/2190")
         store.backfillSiteLabelsIfNeeded()
-        XCTAssertEqual(names(first, store), ["***REMOVED***"])
-        XCTAssertEqual(names(other, store), ["My***REMOVED***"])
+        XCTAssertEqual(names(first, store), ["Showsite"])
+        XCTAssertEqual(names(other, store), ["Seriessite"])
         first.labelIDs = []
         makeStore().backfillSiteLabelsIfNeeded()
         XCTAssertEqual(first.labelIDs, [], "a label the viewer removed isn't added back")
@@ -102,10 +102,10 @@ final class LabelStoreTests: XCTestCase {
 
     func testRulesCanBeAppliedToSavedVideosAndDeletingKeepsVideos() throws {
         let store = makeStore()
-        let item = video("Episode", from: "https://***REMOVED***.to/anime/x")
+        let item = video("Episode", from: "https://showsite.example/anime/x")
         let label = try XCTUnwrap(store.create(name: "Anime"))
         XCTAssertTrue(store.unlabelledMatches(for: label).isEmpty)
-        label.sites = ["***REMOVED***.to"]
+        label.sites = ["showsite.example"]
         XCTAssertEqual(store.unlabelledMatches(for: label).count, 1)
         store.applyToExisting(label)
         XCTAssertEqual(item.labelIDs, [label.id])

@@ -58,7 +58,7 @@ struct ManageLabelsSheet: View {
                     Toggle("Label downloads with their site", isOn: Binding(get: { store.labelsDownloadsWithSite },
                                                                            set: { store.labelsDownloadsWithSite = $0 }))
                 } footer: {
-                    Text("Each new download gets a label named after the site it came from, such as ***REMOVED***.")
+                    Text("Each new download gets a label named after the site it came from.")
                 }
                 Section {
                     ForEach(labels) { label in
@@ -129,7 +129,7 @@ private struct LabelEditor: View {
                     Toggle(site, isOn: Binding(get: { (label.sites ?? []).contains(site) }, set: { setSite(site, $0) }))
                 }
                 HStack {
-                    TextField("Another site, e.g. ***REMOVED***.to", text: $newSite)
+                    TextField("Another site, e.g. example.com", text: $newSite)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)

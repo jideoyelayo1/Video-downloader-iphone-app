@@ -225,7 +225,7 @@ final class VideoLabel {
     @Attribute(.unique) var id: UUID
     var name: String
     var colorName: String
-    /// Hosts such as "***REMOVED***.to"; subdomains match too.
+    /// Hosts such as "example.com"; subdomains match too.
     var sites: [String]?
     var isSiteLabel: Bool?
     var createdAt: Date
@@ -303,76 +303,6 @@ final class Bookmark {
         self.createdAt = createdAt
     }
 
-    static let starters: [(String, URL)] = [
-        ("***REMOVED***", URL(string: "https://***REMOVED***tv.to/home")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.to/home")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.to/")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.to/anime")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.ws/")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.live/")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.com/")!)
-    ]
-
-    static let testedSites: [(String, URL)] = [
-        ("***REMOVED***", URL(string: "https://www.***REMOVED***.to/")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.to/anime")!),
-        ("My***REMOVED***", URL(string: "https://my***REMOVED***.lol/home/")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.one/home")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.ru/home")!),
-        ("***REMOVED***", URL(string: "https://www.***REMOVED***.com/")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.com.lv/")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***tv.to/home")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.ws/")!)
-    ] + addedTestedSites + laterTestedSites
-
-    /// Added once to libraries that already had the earlier tested sites.
-    static let addedTestedSites: [(String, URL)] = [
-        ("***REMOVED***", URL(string: "https://***REMOVED***.onl/home")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.day/")!)
-    ]
-
-    /// Added once to existing libraries, like `addedTestedSites`.
-    static let laterTestedSites: [(String, URL)] = [
-        ("***REMOVED***", URL(string: "https://***REMOVED***.su/")!),
-        ("***REMOVED***", URL(string: "https://***REMOVED***.org/")!),
-        ("***REMOVED***", URL(string: "https://ww1.***REMOVED***.to/")!),
-        ("***REMOVED***s", URL(string: "https://***REMOVED***s.ru/")!)
-    ]
-
-    static var knownSites: [(String, URL)] { starters + testedSites }
-
-    /// Groups in the bookmarks list; case order is the order shown.
-    enum Folder: String, CaseIterable {
-        case autoDownload = "Auto-Download", downloadOnly = "Download Only", needsTap = "Needs a Tap",
-             browseOnly = "Browse Only", mine = "My Sites"
-
-        var footer: String {
-            switch self {
-            case .autoDownload: "Episode pages are numbered: follow a show here to download each new episode automatically."
-            case .downloadOnly: "Videos save, but episode pages aren't numbered, so the next episode can't be found automatically."
-            case .needsTap: "Tap the site's own play button before the video can be found, so automatic downloads can't run."
-            case .browseOnly: "Lists of sites, or players whose streams can't be saved (DASH or scrambled)."
-            case .mine: ""
-            }
-        }
-    }
-
-    /// Keyed by the shipped site names above.
-    private static let siteFolders: [String: Folder] = [
-        "***REMOVED***": .autoDownload, "***REMOVED***": .autoDownload, "My***REMOVED***": .autoDownload, "***REMOVED***": .autoDownload,
-        "***REMOVED***": .autoDownload, "***REMOVED***": .autoDownload,
-        "***REMOVED***": .downloadOnly, "***REMOVED***s": .downloadOnly, "***REMOVED***": .downloadOnly, "***REMOVED***": .downloadOnly,
-        "***REMOVED***": .downloadOnly, "***REMOVED***": .downloadOnly, "***REMOVED***": .downloadOnly,
-        "***REMOVED***": .needsTap, "***REMOVED***": .needsTap,
-        "***REMOVED***": .browseOnly, "***REMOVED***": .browseOnly, "***REMOVED***": .browseOnly
-    ]
-
-    var folder: Folder { url.host.flatMap { Self.siteFolders[SiteNames.name(for: $0)] } ?? .mine }
-
-    static let oldStarterURLs: Set<String> = [
-        "https://my***REMOVED***.lol/watch/tv/95350-free-lanterns-hd/season-1/episode-1/",
-        "https://www.***REMOVED***.tv/watch/178789/mushoku-tensei-iii-isekai-ittara-honki-dasu?ep=13"
-    ]
 }
 
 @Model

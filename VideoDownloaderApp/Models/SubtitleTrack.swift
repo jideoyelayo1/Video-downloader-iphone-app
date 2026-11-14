@@ -18,7 +18,7 @@ struct SubtitleTrack: Codable, Hashable {
         return language ?? "Subtitles"
     }
 
-    /// Tidies labels such as ***REMOVED***'s "Portuguese (- Portuguese(Brazil))" to "Portuguese (Brazil)".
+    /// Tidies labels such as "Portuguese (- Portuguese(Brazil))" to "Portuguese (Brazil)".
     static func cleanLabel(_ raw: String) -> String {
         raw.replacingOccurrences(of: #"\s*\(-\s*[^()]*\(([^()]*)\)\s*\)"#, with: " ($1)", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)

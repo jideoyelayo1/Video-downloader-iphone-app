@@ -163,7 +163,7 @@ final class LocalMediaServer {
         switch request.path {
         case "/video.mp4", "/noext/stream": return mp4
         case "/captions/video.mp4": return .data(fixtures.captionedMP4, "video/mp4")
-        // Site subtitle files, like the per-language WebVTT tracks ***REMOVED***'s Plyr player loads.
+        // Site subtitle files, like the per-language WebVTT tracks a Plyr player loads.
         case "/subs/en.vtt": return .text("WEBVTT\n\nNOTE fixture\n\n1\n00:00.000 --> 00:30.000 line:85%\n<b>Fixture English line</b>\n", "text/vtt")
         case "/subs/es.vtt": return .text("WEBVTT\n\n00:00.000 --> 00:30.000\nLínea de prueba &amp; más\n", "text/vtt")
         case "/long/video.mp4": return .data(fixtures.longMP4, "video/mp4")
@@ -181,9 +181,9 @@ final class LocalMediaServer {
                 : .text("Forbidden", "text/plain", status: 403)
         case "/hls/captions-master.m3u8": return .text(captionMasterPlaylist, Self.hlsType)
         case "/hls/separate-audio-master.m3u8": return .text(separateAudioMasterPlaylist, Self.hlsType)
-        // Like ***REMOVED***: labelled as a playlist, but only the site's player can decode the body.
+        // Labelled as a playlist, but only the site's player can decode the body.
         case "/hls/scrambled.m3u8": return .text("lOd3dA1id49b7zjrlyMAkfBqsyDeJeE6n6EXDwKudaPj431nBQVm0CrrNPb1NRfx", Self.hlsType)
-        // Like the ***REMOVED*** proxy: an MPEG-DASH manifest without an extension.
+        // Like some proxies: an MPEG-DASH manifest without an extension.
         case "/dash/manifest": return .text(#"<?xml version="1.0" encoding="utf-8"?><MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static"></MPD>"#, "application/dash+xml")
         case "/hls/video-only.m3u8": return .text("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXTINF:5,\nvideo-only.ts\n#EXT-X-ENDLIST\n", Self.hlsType)
         case "/hls/audio-only.m3u8": return .text("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXTINF:5,\naudio-only.ts\n#EXT-X-ENDLIST\n", Self.hlsType)
@@ -220,7 +220,7 @@ final class LocalMediaServer {
             if request.path.hasPrefix("/page/"), let html = Self.pages[String(request.path.dropFirst(6))] {
                 return .text(html, "text/html; charset=utf-8")
             }
-            // Episode 4 isn't out: like ***REMOVED***, the site sends its page to episode 1.
+            // Episode 4 isn't out: like some sites, it sends its page to episode 1.
             if let number = Self.seriesEpisode(request.path) {
                 guard (1...3).contains(number) else { return .redirect(origin + "series/ep-1.html") }
                 return .text(Self.page("Fixture Series Ep. \(number)", #"<video src="/series/video-\#(number).mp4" controls playsinline width="320" height="180"></video>"#),

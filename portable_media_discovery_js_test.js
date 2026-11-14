@@ -57,8 +57,8 @@ setTimeout(() => {
   if (messages[2].kind !== 'unknown') throw new Error('query-string extension false positive');
   messages.length = 0;
   context.window.top = {};
-  resources.push({ name: 'https://***REMOVED***.top/vd/episode/seg-57-s1080p-v1-a1.m4s', startTime: 1002, initiatorType: 'fetch' });
-  resources.push({ name: 'https://***REMOVED***.top/vd/episode/master.m3u8', startTime: 6, initiatorType: 'fetch' });
+  resources.push({ name: 'https://segments.example/vd/episode/seg-57-s1080p-v1-a1.m4s', startTime: 1002, initiatorType: 'fetch' });
+  resources.push({ name: 'https://segments.example/vd/episode/master.m3u8', startTime: 6, initiatorType: 'fetch' });
   context.window.__vdaRescan();
   if (!messages.some(message => message.url === resources[4].name && !message.event) ||
       messages.some(message => message.url === resources[3].name && !message.event) ||
@@ -245,18 +245,18 @@ setTimeout(() => {
   }, 0));
 })();
 
-// JSON subtitle lists (***REMOVED***'s and ***REMOVED***'s formats) are reported; video source lists are not.
+// JSON subtitle lists in both formats are reported; video source lists are not.
 (() => {
   const posted = [];
   const lists = {
-    'https://sub.***REMOVED***.site/v1/tv/1396/1/1': JSON.stringify([
-      { label: 'Arabic', file: 'https://cache.***REMOVED***.site/v1/vtt/tv/1396/1/1/Arabic.vtt' },
-      { label: 'Arabic2', file: 'https://cache.***REMOVED***.site/v1/vtt/tv/1396/1/1/Arabic2.vtt' },
-      { label: 'English', file: 'https://cache.***REMOVED***.site/v1/vtt/tv/1396/1/1/English.vtt' }]),
-    'https://***REMOVED***.vc/***REMOVED***': JSON.stringify([
-      { url: 'https://sub.***REMOVED***.ru/c/abc/id/1?format=srt', display: 'English', language: 'en', format: 'srt', isHearingImpaired: false },
-      { url: 'https://sub.***REMOVED***.ru/c/abc/id/2?format=srt', display: 'English', language: 'en', format: 'srt', isHearingImpaired: false },
-      { url: 'https://sub.***REMOVED***.ru/c/abc/id/3?format=srt', display: 'English', language: 'en', format: 'srt', isHearingImpaired: true }]),
+    'https://subtitles.example/v1/tv/1396/1/1': JSON.stringify([
+      { label: 'Arabic', file: 'https://cache.example/v1/vtt/tv/1396/1/1/Arabic.vtt' },
+      { label: 'Arabic2', file: 'https://cache.example/v1/vtt/tv/1396/1/1/Arabic2.vtt' },
+      { label: 'English', file: 'https://cache.example/v1/vtt/tv/1396/1/1/English.vtt' }]),
+    'https://player.example/subtitles': JSON.stringify([
+      { url: 'https://subfiles.example/c/abc/id/1?format=srt', display: 'English', language: 'en', format: 'srt', isHearingImpaired: false },
+      { url: 'https://subfiles.example/c/abc/id/2?format=srt', display: 'English', language: 'en', format: 'srt', isHearingImpaired: false },
+      { url: 'https://subfiles.example/c/abc/id/3?format=srt', display: 'English', language: 'en', format: 'srt', isHearingImpaired: true }]),
     'https://api.example/sources': JSON.stringify({ sources: [{ file: 'https://cdn.example/master.m3u8', label: '1080p' }] })
   };
   const win = {
@@ -265,8 +265,8 @@ setTimeout(() => {
     fetch: url => Promise.resolve({ url, headers: { get: () => 'application/json' }, clone() { return { text: () => Promise.resolve(lists[url]) }; } })
   };
   const ctx = {
-    document: { baseURI: 'https://***REMOVED***.su/watch/tv/1396/1/1', title: 'Player', documentElement: {}, querySelectorAll: () => [], addEventListener: () => {} },
-    location: { href: 'https://***REMOVED***.su/watch/tv/1396/1/1' },
+    document: { baseURI: 'https://tvsite.example/watch/tv/1396/1/1', title: 'Player', documentElement: {}, querySelectorAll: () => [], addEventListener: () => {} },
+    location: { href: 'https://tvsite.example/watch/tv/1396/1/1' },
     window: win,
     history: { pushState: function () {}, replaceState: function () {} },
     MutationObserver: class { observe() {} },

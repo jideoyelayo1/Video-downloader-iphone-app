@@ -2,63 +2,6 @@ import Foundation
 import SwiftData
 
 @MainActor
-enum StarterBookmarks {
-    /// Upgrade only the two episode links shipped by older builds. Personal sites stay untouched.
-    static func install(in context: ModelContext, preferences: UserDefaults = .standard, inMemory: Bool = false) {
-        guard let existing = try? context.fetch(FetchDescriptor<Bookmark>()) else { return }
-        if inMemory {
-            if existing.isEmpty { addMissing(in: context, existing: []) }
-            return
-        }
-
-        if !preferences.bool(forKey: "starterBookmarksV2") {
-            let old = existing.filter { Bookmark.oldStarterURLs.contains($0.url.absoluteString) }
-            old.forEach(context.delete)
-            if !old.isEmpty || (existing.isEmpty && !preferences.bool(forKey: "seededBookmarks")) {
-                addMissing(in: context, existing: existing.filter { bookmark in !old.contains(where: { $0 === bookmark }) })
-            }
-            try? context.save()
-            preferences.set(true, forKey: "starterBookmarksV2")
-            preferences.set(true, forKey: "seededBookmarks")
-        }
-
-        // Each list is added once behind its own flag, so sites the user deleted since aren't added back.
-        if !preferences.bool(forKey: "testedSiteBookmarksV3") {
-            addMissingSites(Bookmark.testedSites, in: context)
-            preferences.set(true, forKey: "testedSiteBookmarksV3")
-            preferences.set(true, forKey: "testedSiteBookmarksV4")
-            preferences.set(true, forKey: "testedSiteBookmarksV5")
-        } else {
-            if !preferences.bool(forKey: "testedSiteBookmarksV4") {
-                addMissingSites(Bookmark.addedTestedSites, in: context)
-                preferences.set(true, forKey: "testedSiteBookmarksV4")
-            }
-            if !preferences.bool(forKey: "testedSiteBookmarksV5") {
-                addMissingSites(Bookmark.laterTestedSites, in: context)
-                preferences.set(true, forKey: "testedSiteBookmarksV5")
-            }
-        }
-    }
-
-    private static func addMissingSites(_ sites: [(String, URL)], in context: ModelContext) {
-        let hosts = ((try? context.fetch(FetchDescriptor<Bookmark>())) ?? []).compactMap(\.url.host)
-        for (title, url) in sites {
-            guard let site = url.host, !hosts.contains(where: { SiteMatch.matches(host: $0, site: site) }) else { continue }
-            context.insert(Bookmark(title: title, url: url))
-        }
-        try? context.save()
-    }
-
-    private static func addMissing(in context: ModelContext, existing: [Bookmark]) {
-        let urls = Set(existing.map { $0.url.absoluteString })
-        for (title, url) in Bookmark.starters where !urls.contains(url.absoluteString) {
-            context.insert(Bookmark(title: title, url: url))
-        }
-        try? context.save()
-    }
-}
-
-@MainActor
 final class BrowserHistoryStore {
     static let maximumEntries = 500
     private let context: ModelContext

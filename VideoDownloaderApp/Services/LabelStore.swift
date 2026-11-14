@@ -65,7 +65,7 @@ final class LabelStore: ObservableObject {
         let siteLabels = labels.filter { $0.isSiteLabel ?? false }
         if let existing = siteLabels.first(where: { ($0.sites ?? []).contains { SiteMatch.matches(host: site, site: $0) } }) { return existing }
         let name = SiteNames.name(for: site)
-        // Another domain of a site already labelled, such as ***REMOVED***.tv beside ***REMOVED***.to.
+        // Another domain of a site already labelled, such as example.net beside example.com.
         if let sameName = labels.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
             if sameName.isSiteLabel ?? false { sameName.sites = (sameName.sites ?? []) + [site] }
             return sameName
@@ -100,9 +100,7 @@ final class LabelStore: ObservableObject {
     }
 
     var knownSites: [String] {
-        let starters = Bookmark.knownSites.compactMap { $0.1.host.map(SiteNames.normalized) }
-        let library = videos().compactMap { $0.sourcePageURL.host.map(SiteNames.normalized) }
-        return Array(Set(starters + library)).sorted()
+        Array(Set(videos().compactMap { $0.sourcePageURL.host.map(SiteNames.normalized) })).sorted()
     }
 
     func save() { try? context.save() }

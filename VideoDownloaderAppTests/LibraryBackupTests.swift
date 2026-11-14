@@ -11,21 +11,21 @@ final class LibraryBackupTests: XCTestCase {
         let file = DownloadStorage.libraryDirectory.appendingPathComponent(fileName)
         try Data("x".utf8).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
-        let label = VideoLabel(name: "***REMOVED***", sites: ["***REMOVED***.to"], isSiteLabel: true)
-        let show = Show(title: "***REMOVED***")
+        let label = VideoLabel(name: "Showsite", sites: ["showsite.example"], isSiteLabel: true)
+        let show = Show(title: "Sample Show")
         show.introStart = 10
         show.introEnd = 100
         source.insert(label)
         source.insert(show)
         let present = DownloadItem(title: "Ep. 1", remoteURL: URL(string: "https://cdn.example/1.mp4")!,
-                                   sourcePageURL: URL(string: "https://***REMOVED***.to/anime/x/p-1-dub")!, kind: .video, status: .completed)
+                                   sourcePageURL: URL(string: "https://showsite.example/anime/x/p-1-dub")!, kind: .video, status: .completed)
         present.localFileName = fileName
         present.setWatched(true)
         present.labelIDs = [label.id]
         present.showID = show.id
         present.showOrder = 0
         let missing = DownloadItem(title: "Ep. 2", remoteURL: URL(string: "https://cdn.example/2.mp4")!,
-                                   sourcePageURL: URL(string: "https://***REMOVED***.to/anime/x/p-2-dub")!, kind: .video, status: .completed)
+                                   sourcePageURL: URL(string: "https://showsite.example/anime/x/p-2-dub")!, kind: .video, status: .completed)
         missing.localFileName = "gone-\(UUID().uuidString).mp4"
         missing.playbackPosition = 321
         missing.isMovie = true
@@ -49,7 +49,7 @@ final class LibraryBackupTests: XCTestCase {
         XCTAssertFalse(restored[0].isMovie)
         let restoredShow = try XCTUnwrap(target.fetch(FetchDescriptor<Show>()).first)
         XCTAssertEqual(restoredShow.introEnd, 100)
-        XCTAssertEqual(try target.fetch(FetchDescriptor<VideoLabel>()).first?.name, "***REMOVED***")
+        XCTAssertEqual(try target.fetch(FetchDescriptor<VideoLabel>()).first?.name, "Showsite")
 
         let again = try LibraryBackup.decode(data).restore(into: target)
         XCTAssertEqual(again.added, 0, "restoring twice merges")

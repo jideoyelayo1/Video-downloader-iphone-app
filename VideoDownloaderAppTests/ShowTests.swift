@@ -6,20 +6,20 @@ import XCTest
 final class ShowTests: XCTestCase {
     /// The titles of a real library (2026-10-02), as their sites named them.
     private let libraryTitles = [
-        "Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · ***REMOVED***",
-        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 1 · ***REMOVED***",
-        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 2 · ***REMOVED***",
-        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 3 · ***REMOVED***",
-        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 4 · ***REMOVED***",
-        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 5 · ***REMOVED***",
-        "Re:Zero kara Hajimeru Isekai Seikatsu Season 2 Ep. 12 · ***REMOVED***",
-        "Re:Zero kara Hajimeru Isekai Seikatsu Season 2 Ep. 13 · ***REMOVED***",
-        "Re:Zero kara Hajimeru Isekai Seikatsu Season 2 Ep. 9 · ***REMOVED***",
-        "***REMOVED*** Ep. 1 · ***REMOVED***",
-        "***REMOVED*** Ep. 10 · ***REMOVED***",
-        "***REMOVED*** Ep. 2 · ***REMOVED***",
-        "***REMOVED*** Ep. 3 · ***REMOVED***",
-        "Watch South Park (1997) S29E2 - Watch Series - My***REMOVED***",
+        "Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · Showsite",
+        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 1 · Showsite",
+        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 2 · Showsite",
+        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 3 · Showsite",
+        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 4 · Showsite",
+        "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 5 · Showsite",
+        "Re:Zero kara Hajimeru Isekai Seikatsu Season 2 Ep. 12 · Showsite",
+        "Re:Zero kara Hajimeru Isekai Seikatsu Season 2 Ep. 13 · Showsite",
+        "Re:Zero kara Hajimeru Isekai Seikatsu Season 2 Ep. 9 · Showsite",
+        "Sample Show Ep. 1 · Showsite",
+        "Sample Show Ep. 10 · Showsite",
+        "Sample Show Ep. 2 · Showsite",
+        "Sample Show Ep. 3 · Showsite",
+        "Watch South Park (1997) S29E2 - Watch Series - Seriessite",
     ]
     private var container: ModelContainer!
 
@@ -28,7 +28,7 @@ final class ShowTests: XCTestCase {
     }
 
     private func video(_ title: String) -> DownloadItem {
-        let page = title.hasSuffix("My***REMOVED***") ? "https://my***REMOVED***.lol/watch/tv/2190" : "https://***REMOVED***.to/anime/x/p-1-dub"
+        let page = title.hasSuffix("Seriessite") ? "https://seriessite.example/watch/tv/2190" : "https://showsite.example/anime/x/p-1-dub"
         let item = DownloadItem(title: title, remoteURL: URL(string: "https://cdn.example/\(UUID().uuidString).mp4")!,
                                 sourcePageURL: URL(string: page)!, kind: .video, status: .completed)
         container.mainContext.insert(item)
@@ -46,7 +46,7 @@ final class ShowTests: XCTestCase {
 
     func testSeriesAndEpisodeNumbersFromTitles() {
         func parse(_ title: String) -> ShowSuggestion.Parsed { ShowSuggestion.parse(title) }
-        XCTAssertEqual(parse("***REMOVED*** Ep. 10"), .init(series: "***REMOVED***", season: nil, episode: 10))
+        XCTAssertEqual(parse("Sample Show Ep. 10"), .init(series: "Sample Show", season: nil, episode: 10))
         XCTAssertEqual(parse("Re:Zero kara Hajimeru Isekai Seikatsu Season 2 Ep. 9").series, "Re:Zero kara Hajimeru Isekai Seikatsu Season 2")
         XCTAssertEqual(parse("Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2 Ep. 1"),
                        .init(series: "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2", season: nil, episode: 1))
@@ -61,10 +61,10 @@ final class ShowTests: XCTestCase {
         libraryTitles.forEach { _ = video($0) }
         let items = try! container.mainContext.fetch(FetchDescriptor<DownloadItem>())
         let suggestions = ShowSuggestion.suggestions(items: items, shows: [], dismissed: [])
-        XCTAssertEqual(suggestions.map(\.series), ["Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2", "***REMOVED***",
+        XCTAssertEqual(suggestions.map(\.series), ["Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2", "Sample Show",
                                                    "Re:Zero kara Hajimeru Isekai Seikatsu Season 2"],
                        "single episodes (Mushoku Tensei, South Park) aren't suggested")
-        XCTAssertEqual(suggestions[1].items.map(\.displayTitle), [1, 2, 3, 10].map { "***REMOVED*** Ep. \($0)" })
+        XCTAssertEqual(suggestions[1].items.map(\.displayTitle), [1, 2, 3, 10].map { "Sample Show Ep. \($0)" })
         XCTAssertEqual(suggestions[2].items.map(\.displayTitle).map { ShowSuggestion.parse($0).episode }, [9, 12, 13])
 
         let dismissed = ShowSuggestion.suggestions(items: items, shows: [], dismissed: [suggestions[0].key])
@@ -73,8 +73,8 @@ final class ShowTests: XCTestCase {
 
     func testShowsKeepTheViewersOrderAndSuggestNewEpisodes() throws {
         let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
-        let episodes = [3, 1, 2].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") }
-        let show = store.create(title: "***REMOVED***", with: ShowSuggestion.inEpisodeOrder(episodes))
+        let episodes = [3, 1, 2].map { video("Sample Show Ep. \($0) · Showsite") }
+        let show = store.create(title: "Sample Show", with: ShowSuggestion.inEpisodeOrder(episodes))
         func order() -> [Int?] { store.episodes(of: show).map { ShowSuggestion.parse($0.displayTitle).episode } }
         XCTAssertEqual(order(), [1, 2, 3])
 
@@ -83,7 +83,7 @@ final class ShowTests: XCTestCase {
         store.orderByEpisodeNumber(show)
         XCTAssertEqual(order(), [1, 2, 3])
 
-        let fourth = video("***REMOVED*** Ep. 4 · ***REMOVED***")
+        let fourth = video("Sample Show Ep. 4 · Showsite")
         let suggestion = try XCTUnwrap(store.suggestions.first)
         XCTAssertTrue(suggestion.existingShow === show)
         XCTAssertEqual(suggestion.items.map(\.id), [fourth.id])
@@ -108,9 +108,9 @@ final class ShowTests: XCTestCase {
 
     func testContinueWatchingOffersTheNextEpisodeOfAFinishedOne() throws {
         let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
-        let episodes = [1, 2, 3].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") }
-        store.create(title: "***REMOVED***", with: episodes)
-        let other = video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · ***REMOVED***")
+        let episodes = [1, 2, 3].map { video("Sample Show Ep. \($0) · Showsite") }
+        store.create(title: "Sample Show", with: episodes)
+        let other = video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · Showsite")
         other.playbackPosition = 300
         other.lastPlayedAt = Date(timeIntervalSince1970: 1_000)
         XCTAssertEqual(ShowPlaylist.continueWatching([other] + episodes).map(\.id), [other.id], "nothing of the show played yet")
@@ -130,9 +130,9 @@ final class ShowTests: XCTestCase {
         let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
         let downloads = DownloadManager(context: container.mainContext, directConfiguration: .ephemeral, restore: false)
         downloads.showStore = store
-        let episodes = [1, 2, 3].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") }
-        let show = store.create(title: "***REMOVED***", with: episodes)
-        let other = video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · ***REMOVED***")
+        let episodes = [1, 2, 3].map { video("Sample Show Ep. \($0) · Showsite") }
+        let show = store.create(title: "Sample Show", with: episodes)
+        let other = video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · Showsite")
         other.playbackPosition = 300
         other.lastPlayedAt = Date(timeIntervalSince1970: 1_000)
         func listed() -> [UUID] { ShowPlaylist.continueWatching(store.episodes(of: show) + [other], shows: store.shows).map(\.id) }
@@ -160,23 +160,23 @@ final class ShowTests: XCTestCase {
 
     func testNewEpisodesJoinTheirShow() {
         let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
-        let show = store.create(title: "My Smoking Show", with: [1, 2].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") })
-        let third = video("***REMOVED*** Ep. 3 · ***REMOVED***")
+        let show = store.create(title: "My Smoking Show", with: [1, 2].map { video("Sample Show Ep. \($0) · Showsite") })
+        let third = video("Sample Show Ep. 3 · Showsite")
         XCTAssertTrue(store.addToMatchingShow(third) === show, "matched by the episodes' series, though the show was renamed")
         XCTAssertEqual(third.showOrder, 2)
         XCTAssertEqual(show.followSourceURL, third.sourcePageURL, "the latest episode's page is followed")
-        XCTAssertNil(store.addToMatchingShow(video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · ***REMOVED***")))
+        XCTAssertNil(store.addToMatchingShow(video("Mushoku Tensei III: Isekai Ittara Honki Dasu Ep. 14 · Showsite")))
         XCTAssertNil(store.addToMatchingShow(video("Basic Video Page")), "no episode number")
     }
 
     func testMoviesLeaveShowsAndAreNeverSuggested() {
         let store = ShowStore(context: container.mainContext, preferences: UserDefaults(suiteName: "ShowTests-\(UUID().uuidString)")!)
-        let movies = [1, 2].map { video("***REMOVED*** Ep. \($0) · ***REMOVED***") }
+        let movies = [1, 2].map { video("Sample Show Ep. \($0) · Showsite") }
         movies.forEach { store.setMovie($0, true) }
         XCTAssertTrue(store.suggestions.isEmpty, "two movies of a series aren't a show")
         XCTAssertNil(store.addToMatchingShow(movies[0]))
 
-        let show = store.create(title: "Smoking", with: [video("***REMOVED*** Ep. 3 · ***REMOVED***")])
+        let show = store.create(title: "Smoking", with: [video("Sample Show Ep. 3 · Showsite")])
         store.add([movies[0]], to: show)
         XCTAssertFalse(movies[0].isMovie, "an episode isn't a movie")
         store.setMovie(movies[0], true)
@@ -193,9 +193,9 @@ final class ShowTests: XCTestCase {
             container.mainContext.insert(item)
             return item
         }
-        let seventh = episode("Watch Attack on Titan · ***REMOVED***", "https://www.***REMOVED***.to/watch/abc/attack-on-titan?ep=7")
-        let unnumbered = episode("Attack on Titan special", "https://www.***REMOVED***.to/info/abc/attack-on-titan")
-        let third = episode("Watch Attack on Titan · ***REMOVED***", "https://www.***REMOVED***.to/watch/abc/attack-on-titan?ep=3")
+        let seventh = episode("Watch Attack on Titan · Animesite", "https://www.animesite.example/watch/abc/attack-on-titan?ep=7")
+        let unnumbered = episode("Attack on Titan special", "https://www.animesite.example/info/abc/attack-on-titan")
+        let third = episode("Watch Attack on Titan · Animesite", "https://www.animesite.example/watch/abc/attack-on-titan?ep=3")
         let show = store.create(title: "Attack on Titan", with: [third, unnumbered, seventh])
         XCTAssertEqual(show.followSourceURL, seventh.sourcePageURL, "episode 7, from its address")
 

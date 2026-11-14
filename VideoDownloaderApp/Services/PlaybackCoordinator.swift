@@ -887,7 +887,7 @@ final class PlaybackCoordinator: NSObject, ObservableObject, @preconcurrency AVP
         return embedded + site.map { taken.contains($0) ? "\($0) (site)" : $0 }
     }
 
-    /// Viewer's language first: sites mark a default regardless of the viewer (***REMOVED*** marks Arabic).
+    /// Viewer's language first: sites mark a default regardless of the viewer.
     static func defaultSiteIndex(_ site: [SubtitleStore.Saved], preferredLanguages: [String] = Locale.preferredLanguages) -> Int {
         func base(_ tag: String?) -> String? { tag?.split(separator: "-").first.map { $0.lowercased() } }
         for language in preferredLanguages.compactMap(base) {

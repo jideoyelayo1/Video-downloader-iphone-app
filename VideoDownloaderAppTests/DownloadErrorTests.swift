@@ -113,7 +113,7 @@ final class DownloadErrorTests: XCTestCase {
         let mpd = Data(#"<?xml version="1.0" encoding="utf-8"?><MPD xmlns="urn:mpeg:dash:schema:mpd:2011">"#.utf8)
         XCTAssertEqual(DownloadResponseValidation.failure(statusCode: 200, mimeType: "application/octet-stream", prefixData: mpd), .dashStream)
         XCTAssertEqual(DownloadResponseValidation.playlistFailure(mimeType: "application/dash+xml", data: mpd), .dashStream)
-        // ***REMOVED*** answers its playlist URL as mpegurl with an encoded body.
+        // Some players answer their playlist URL as mpegurl with an encoded body.
         XCTAssertEqual(DownloadResponseValidation.playlistFailure(mimeType: "application/vnd.apple.mpegurl", data: Data("lOd3dA1id49b7zjrlyMAkfBq".utf8)), .scrambledStream)
         XCTAssertEqual(DownloadResponseValidation.playlistFailure(mimeType: "text/html", data: Data("<!doctype html><p>blocked".utf8)), .notVideo)
         XCTAssertEqual(DownloadResponseValidation.playlistFailure(mimeType: "application/vnd.apple.mpegurl", data: Data(#"{"error":"expired"}"#.utf8)), .notVideo)

@@ -1,19 +1,12 @@
 import Foundation
 
 enum SiteNames {
-    /// Display names for sites whose domain doesn't read well on its own.
-    private static let knownNames = ["my***REMOVED***": "My***REMOVED***", "***REMOVED***": "***REMOVED***", "***REMOVED***": "***REMOVED***"]
-
     static func name(for host: String) -> String {
         let site = normalized(host)
-        if let starter = Bookmark.knownSites.first(where: { $0.1.host.map(normalized).map { SiteMatch.matches(host: site, site: $0) } ?? false }) {
-            return starter.0
-        }
         let parts = site.split(separator: ".").map(String.init)
         // Addresses and single-word hosts such as "localhost" stay as they are.
         guard parts.count >= 2, Int(parts.last ?? "") == nil else { return site }
         let domain = parts[parts.count - 2]
-        if let known = knownNames[domain] { return known }
         return domain.prefix(1).uppercased() + domain.dropFirst()
     }
 

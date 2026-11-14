@@ -33,10 +33,10 @@ final class PersistenceTests: XCTestCase {
     func testWatchedLabelsAndShowsPersist() throws {
         let container = try makeContainer()
         let context = container.mainContext
-        let label = VideoLabel(name: "***REMOVED***", colorName: "purple", sites: ["***REMOVED***.to"], isSiteLabel: true)
-        let show = Show(title: "***REMOVED***")
-        let item = DownloadItem(title: "***REMOVED*** Ep. 2 · ***REMOVED***", remoteURL: URL(string: "https://cdn.example/2.mp4")!,
-                                sourcePageURL: URL(string: "https://***REMOVED***.to/anime/x/p-2-dub")!, kind: .video)
+        let label = VideoLabel(name: "Showsite", colorName: "purple", sites: ["showsite.example"], isSiteLabel: true)
+        let show = Show(title: "Sample Show")
+        let item = DownloadItem(title: "Sample Show Ep. 2 · Showsite", remoteURL: URL(string: "https://cdn.example/2.mp4")!,
+                                sourcePageURL: URL(string: "https://showsite.example/anime/x/p-2-dub")!, kind: .video)
         let watched = Date(timeIntervalSince1970: 1_790_000_000)
         item.watchedAt = watched
         item.lastPlayedAt = watched
@@ -58,7 +58,7 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(fetched.showID, show.id)
         XCTAssertEqual(fetched.showOrder, 1)
         let fetchedLabel = try XCTUnwrap(fresh.fetch(FetchDescriptor<VideoLabel>()).first)
-        XCTAssertEqual(fetchedLabel.sites, ["***REMOVED***.to"])
+        XCTAssertEqual(fetchedLabel.sites, ["showsite.example"])
         XCTAssertEqual(fetchedLabel.isSiteLabel, true)
         XCTAssertTrue(try XCTUnwrap(fresh.fetch(FetchDescriptor<Show>()).first).autoplayNext, "autoplay is on for new shows")
     }
@@ -98,7 +98,7 @@ final class PersistenceTests: XCTestCase {
     }
 
     func testOldSegmentDownloadIsRecognisedAsAFragment() {
-        let item = DownloadItem(title: "Episode", remoteURL: URL(string: "https://***REMOVED***.top/vd/episode/seg-57-s1080p-v1-a1.m4s")!,
+        let item = DownloadItem(title: "Episode", remoteURL: URL(string: "https://segments.example/vd/episode/seg-57-s1080p-v1-a1.m4s")!,
                                 sourcePageURL: URL(string: "https://example.com/watch")!, kind: .video)
         XCTAssertTrue(item.isStreamFragment)
     }

@@ -296,7 +296,7 @@ struct ShowScreen: View {
 
     private var newEpisodesFooter: String {
         guard let page = show.followSourceURL, EpisodeURL.next(after: page) != nil else {
-            return "Works for sites whose episode pages are numbered, such as ***REMOVED*** and ***REMOVED***."
+            return "Works for sites whose episode pages are numbered."
         }
         let checked = show.lastCheckedAt.map { " Last checked " + $0.formatted(.relative(presentation: .named)) + "." } ?? ""
         if show.lastCheckNeededVerification == true {

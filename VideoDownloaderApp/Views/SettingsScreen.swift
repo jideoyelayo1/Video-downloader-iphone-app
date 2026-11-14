@@ -119,7 +119,7 @@ struct SettingsScreen: View {
         } header: {
             Text("Labels")
         } footer: {
-            Text("Each new download gets a label named after the site it came from, such as ***REMOVED***. My Videos → Folders → Manage Labels has the rest.")
+            Text("Each new download gets a label named after the site it came from. My Videos → Folders → Manage Labels has the rest.")
         }
     }
 

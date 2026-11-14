@@ -9,80 +9,6 @@ final class BrowserCollectionsStoreTests: XCTestCase {
                            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     }
 
-    func testStarterMigrationReplacesOldEpisodeLinksAndKeepsPersonalBookmark() throws {
-        let container = try makeContainer()
-        let context = container.mainContext
-        for url in Bookmark.oldStarterURLs {
-            context.insert(Bookmark(title: "Old starter", url: URL(string: url)!))
-        }
-        let personal = URL(string: "https://example.com/my-show/episode-2")!
-        context.insert(Bookmark(title: "My show", url: personal))
-        try context.save()
-
-        let suiteName = "BrowserCollectionsStoreTests-\(UUID().uuidString)"
-        let preferences = UserDefaults(suiteName: suiteName)!
-        defer { preferences.removePersistentDomain(forName: suiteName) }
-        StarterBookmarks.install(in: context, preferences: preferences)
-
-        let bookmarks = try context.fetch(FetchDescriptor<Bookmark>())
-        let testedElsewhere = Bookmark.testedSites.filter { tested in
-            !Bookmark.starters.contains { SiteMatch.matches(host: $0.1.host!, site: tested.1.host!) }
-        }
-        XCTAssertEqual(bookmarks.count, Bookmark.starters.count + testedElsewhere.count + 1)
-        XCTAssertTrue(bookmarks.contains { $0.url == personal && $0.title == "My show" })
-        XCTAssertFalse(bookmarks.contains { Bookmark.oldStarterURLs.contains($0.url.absoluteString) })
-        for (_, url) in Bookmark.starters { XCTAssertTrue(bookmarks.contains { $0.url == url }) }
-        StarterBookmarks.install(in: context, preferences: preferences)
-        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Bookmark>()), bookmarks.count)
-    }
-
-    func testSitesFromALaterSurveyAreAddedWithoutRestoringDeletedOnes() throws {
-        let container = try makeContainer()
-        let context = container.mainContext
-        context.insert(Bookmark(title: "Mine", url: URL(string: "https://www.google.com/")!))
-        try context.save()
-        let suiteName = "BrowserCollectionsStoreTests-\(UUID().uuidString)"
-        let preferences = UserDefaults(suiteName: suiteName)!
-        defer { preferences.removePersistentDomain(forName: suiteName) }
-        for key in ["starterBookmarksV2", "seededBookmarks", "testedSiteBookmarksV3", "testedSiteBookmarksV4"] { preferences.set(true, forKey: key) }
-
-        StarterBookmarks.install(in: context, preferences: preferences)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Bookmark>()).map(\.title).sorted(), ["***REMOVED***", "***REMOVED***", "Mine", "***REMOVED***", "***REMOVED***s"])
-
-        try context.fetch(FetchDescriptor<Bookmark>()).filter { $0.title == "***REMOVED***" }.forEach(context.delete)
-        try context.save()
-        StarterBookmarks.install(in: context, preferences: preferences)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Bookmark>()).map(\.title).sorted(), ["***REMOVED***", "Mine", "***REMOVED***", "***REMOVED***s"])
-    }
-
-    func testTestedSitesAreAddedOnceBesideExistingBookmarks() throws {
-        let container = try makeContainer()
-        let context = container.mainContext
-        let own = ["https://www.google.com/", "https://www.***REMOVED***.tv/", "https://my***REMOVED***.lol/home/", "https://***REMOVED***.to/anime?tr=dub"]
-        for url in own { context.insert(Bookmark(title: "Mine", url: URL(string: url)!)) }
-        try context.save()
-
-        let suiteName = "BrowserCollectionsStoreTests-\(UUID().uuidString)"
-        let preferences = UserDefaults(suiteName: suiteName)!
-        defer { preferences.removePersistentDomain(forName: suiteName) }
-        // Set up by an earlier version, whose starters weren't added to a library with bookmarks.
-        preferences.set(true, forKey: "starterBookmarksV2")
-        preferences.set(true, forKey: "seededBookmarks")
-        StarterBookmarks.install(in: context, preferences: preferences)
-
-        let bookmarks = try context.fetch(FetchDescriptor<Bookmark>())
-        let added = bookmarks.filter { $0.title != "Mine" }.map(\.title).sorted()
-        // ***REMOVED*** moved to ***REMOVED***.to, a different site from the bookmarked ***REMOVED***.tv.
-        XCTAssertEqual(added, ["***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***", "***REMOVED***s"])
-        XCTAssertEqual(bookmarks.filter { $0.title == "Mine" }.count, own.count)
-
-        bookmarks.first { $0.title == "***REMOVED***" }.map(context.delete)
-        try context.save()
-        StarterBookmarks.install(in: context, preferences: preferences)
-        XCTAssertEqual(try context.fetchCount(FetchDescriptor<Bookmark>()), bookmarks.count - 1, "a deleted site stays deleted")
-        XCTAssertEqual(SiteNames.name(for: "www.***REMOVED***.com"), "***REMOVED***")
-    }
-
     func testHistoryKeepsLatestVisitPerPageAndCanBeCleared() throws {
         let container = try makeContainer()
         let context = container.mainContext
@@ -141,14 +67,5 @@ final class BrowserCollectionsStoreTests: XCTestCase {
         store.record(URL(string: "https://example.com/page/\(total - 1)")!, title: "Again", at: Date(timeIntervalSince1970: 1_000_000))
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<BrowsingHistoryEntry>()), BrowserHistoryStore.maximumEntries)
         XCTAssertTrue(try context.fetch(FetchDescriptor<BrowsingHistoryEntry>()).map(\.url.absoluteString).contains("https://example.com/page/3"))
-    }
-
-    func testBookmarksAreGroupedIntoFolders() {
-        for (title, url) in Bookmark.knownSites {
-            XCTAssertNotEqual(Bookmark(title: title, url: url).folder, .mine, "\(title) has no folder")
-        }
-        XCTAssertEqual(Bookmark(title: "Ep 2", url: URL(string: "https://www.***REMOVED***.to/watch/1/x?ep=2")!).folder, .autoDownload)
-        XCTAssertEqual(Bookmark(title: "***REMOVED***", url: URL(string: "https://***REMOVED***tv.to/watch/x/ep-3")!).folder, .needsTap)
-        XCTAssertEqual(Bookmark(title: "Mine", url: URL(string: "https://example.com/")!).folder, .mine)
     }
 }

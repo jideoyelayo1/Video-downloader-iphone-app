@@ -228,14 +228,6 @@ final class DownloadFlowUITests: XCTestCase {
         waitForReadyCandidates(1)
 
         app.buttons["browser.bookmarks"].tap()
-        XCTAssertTrue(app.staticTexts["***REMOVED***"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["***REMOVED***"].exists)
-        // Browse Only, the last folder, can be below the fold.
-        let ***REMOVED*** = app.staticTexts["***REMOVED***"]
-        for _ in 0..<3 where !***REMOVED***.exists { app.swipeUp() }
-        XCTAssertTrue(app.staticTexts["***REMOVED***"].exists)
-        XCTAssertTrue(***REMOVED***.exists)
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Lanterns S1E1'")).firstMatch.exists)
         for _ in 0..<3 where !app.buttons["Add This Page"].exists { app.swipeDown() }
         XCTAssertTrue(app.buttons["Add This Page"].waitForExistence(timeout: 5))
         app.buttons["Add This Page"].tap()

@@ -12,7 +12,7 @@ final class SeasonDownloader: ObservableObject {
     private let shows: ShowStore
     var diagnostics: DiagnosticsLog?
     var pageTimeout: TimeInterval = 30
-    /// Smaller videos are a player's ads, not the episode (My***REMOVED*** showed 0.3 and 1.4 MB ones).
+    /// Smaller videos are a player's ads, not the episode.
     var minimumEpisodeBytes: Int64 = 5_000_000
     private var task: Task<Void, Never>?
 
@@ -131,7 +131,7 @@ final class SeasonDownloader: ObservableObject {
             }
         }
         guard let best = model.bestReady(atLeast: minimumEpisodeBytes) else { return .noVideo }
-        // A site can send an episode that isn't out to another one: ***REMOVED*** opens episode 1.
+        // A site can send an episode that isn't out to another one, such as episode 1.
         if let wanted = EpisodeURL.number(in: page), EpisodeURL.number(in: best.candidate.sourcePageURL) != wanted { return .noVideo }
         return .found(best.candidate, best.probe, model.subtitleTracks, title: model.pageTitle, poster: model.posterURL)
     }
