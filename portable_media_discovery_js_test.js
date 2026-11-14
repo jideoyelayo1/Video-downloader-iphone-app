@@ -68,9 +68,7 @@ setTimeout(() => {
   console.log('WebKit discovery JavaScript fixture checks passed');
 }, 150);
 
-// Verbose diagnostics: every resource is reported once by the buffered observer.
-// A tap or Refresh must not re-post the whole buffer, and a playlist seen through
-// both its XHR/fetch response and its resource entry yields one candidate.
+// Verbose diagnostics: each resource is posted once; a playlist seen twice yields one candidate.
 (() => {
   const posted = [];
   const docListeners = {};
@@ -124,8 +122,7 @@ setTimeout(() => {
   }, 0));
 })();
 
-// Plyr-style <track> elements: subtitles and captions are reported with their labels once;
-// chapters and blob tracks are not.
+// <track> subtitles and captions are reported once with labels; chapters and blob tracks are not.
 (() => {
   const posted = [];
   const docListeners = {};
@@ -201,8 +198,7 @@ setTimeout(() => {
   console.log('WebKit discovery poster checks passed');
 })();
 
-// Subtitle files fetched by script (no <track>) and JW Player's subtitle list are reported;
-// HLS subtitle segments (X-TIMESTAMP-MAP) and non-subtitle text are not.
+// Script-fetched subtitle files and JW Player lists are reported; HLS subtitle segments are not.
 (() => {
   const posted = [];
   const docListeners = {};
@@ -249,8 +245,7 @@ setTimeout(() => {
   }, 0));
 })();
 
-// JSON subtitle lists: ***REMOVED***'s [{ label, file }] with numbered duplicates, and ***REMOVED***'s
-// [{ url, display, language, format }]; video source lists are not subtitles.
+// JSON subtitle lists (***REMOVED***'s and ***REMOVED***'s formats) are reported; video source lists are not.
 (() => {
   const posted = [];
   const lists = {

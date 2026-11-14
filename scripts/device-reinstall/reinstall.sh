@@ -1,14 +1,6 @@
 #!/bin/zsh
-# Rebuilds Video Downloader from the latest local `master` and installs it over the app on the
-# iPhone, so a free developer account's 7-day signing never runs out. Installing over the app
-# keeps its videos and library.
-#
-# launchd runs this every few hours (see setup.sh). It only installs once INTERVAL_DAYS have
-# passed since the last install, or when the installed build is about to stop opening, and it
-# waits while the app is open on the phone so a video isn't interrupted. `--now` installs at once.
-#
-# It runs from ~/Library/Application Support because macOS doesn't let background jobs read
-# ~/Documents; a git hook in the project keeps a copy of `master` there (setup.sh installs it).
+# Rebuilds the local `master` and installs it over the app on the iPhone, keeping its library.
+# Run by launchd (see setup.sh); installs every INTERVAL_DAYS or before the build expires. `--now` forces it.
 set -u
 
 SUPPORT="$HOME/Library/Application Support/VideoDownloaderReinstall"
@@ -44,9 +36,7 @@ if [[ $force != --now ]] && (( now - last_install < INTERVAL_DAYS * 86400 && exp
     exit 0
 fi
 
-# Reads devicectl's JSON rather than its table, whose columns changed in Xcode 27 (the table now
-# shows the hardware UDID instead of the CoreDevice identifier that setup.sh may have saved).
-# Also sets DEVICE_UDID, which xcodebuild needs to sign for this iPhone.
+# Reads devicectl's JSON (Xcode 27's table shows a different ID); also sets DEVICE_UDID for signing.
 DEVICE_UDID=""
 device_reachable() {
     local json=$(mktemp) i=0 id udid tunnel
@@ -86,8 +76,7 @@ git -C "$WORK" fetch -q origin "$BRANCH" && git -C "$WORK" checkout -q --detach 
 building=$(git -C "$WORK" rev-parse --short HEAD)
 log "Building $building ($BRANCH)…"
 
-# Xcode signs with a cached profile until it expires, so one for this app that ends within 5 days
-# is moved aside (kept in $SUPPORT/old-profiles) and Xcode makes a fresh 7-day profile.
+# Xcode reuses a cached profile until it expires, so move aside one ending within 5 days.
 PROFILES="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 for cached in "$PROFILES"/*.mobileprovision(N); do
     decoded=$(mktemp)
@@ -101,8 +90,7 @@ for cached in "$PROFILES"/*.mobileprovision(N); do
     fi
 done
 
-# A free account only makes a new profile for a build aimed at a particular iPhone ("Your team
-# has no devices…" for a generic build), which also registers the phone again.
+# A free account only issues a profile for a build aimed at a specific iPhone.
 destination='generic/platform=iOS'
 [[ -n $DEVICE_UDID ]] && destination="platform=iOS,id=$DEVICE_UDID"
 if ! xcodebuild -project "$WORK/VideoDownloaderApp.xcodeproj" -scheme VideoDownloaderApp -configuration Debug \
