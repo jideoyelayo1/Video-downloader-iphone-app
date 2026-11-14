@@ -1,6 +1,33 @@
+# macOS
+.DS_Store
+
+# Xcode
 build/
 DerivedData/
-*.xcresult
-*.xcuserstate
 xcuserdata/
-.DS_Store
+*.xcuserstate
+*.xcresult
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Swift Package Manager (Package.resolved stays tracked)
+.build/
+.swiftpm/
+
+# Signing material and local secrets
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
