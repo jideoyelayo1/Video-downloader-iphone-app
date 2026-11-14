@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Debug tool for the site compatibility gate: what each page and player frame loaded.
 struct DiagnosticsScreen: View {
     @EnvironmentObject private var diagnostics: DiagnosticsLog
     @Environment(\.dismiss) private var dismiss

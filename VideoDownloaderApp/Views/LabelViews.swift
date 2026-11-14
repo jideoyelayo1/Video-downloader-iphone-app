@@ -18,7 +18,6 @@ extension VideoLabel {
     }
 }
 
-/// A video's labels as small capsules: the first three, then "+N".
 struct LabelChips: View {
     let labels: [VideoLabel]
 
@@ -98,7 +97,6 @@ struct ManageLabelsSheet: View {
     private func count(for label: VideoLabel) -> Int { items.filter { $0.labelIDs?.contains(label.id) == true }.count }
 }
 
-/// Name, colour and the sites whose downloads get the label automatically.
 private struct LabelEditor: View {
     @Bindable var label: VideoLabel
     @EnvironmentObject private var store: LabelStore

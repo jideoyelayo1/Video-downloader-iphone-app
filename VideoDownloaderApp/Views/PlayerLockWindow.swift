@@ -1,8 +1,6 @@
 import UIKit
 
-/// The player's screen lock, as in Netflix: a window over the app that takes every touch, so
-/// water in the shower or a pocket can't pause, seek or close the video. A tap shows the lock;
-/// tapping it twice unlocks.
+/// Takes every touch so water in the shower or a pocket can't pause, seek or close the video.
 final class PlayerLockWindow: UIWindow {
     private weak var previousKey: UIWindow?
 
@@ -27,7 +25,6 @@ final class PlayerLockWindow: UIWindow {
 private final class PlayerLockViewController: UIViewController {
     private let unlock: () -> Void
     private let lockButton = UIButton(configuration: .filled())
-    /// The first tap on the lock asks for a second one.
     private var armed = false
     private var fade: Task<Void, Never>?
 

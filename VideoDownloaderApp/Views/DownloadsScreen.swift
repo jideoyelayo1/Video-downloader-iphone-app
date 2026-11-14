@@ -185,7 +185,6 @@ private struct DownloadRow: View {
         }
     }
 
-    /// Direct files resume from iOS's resume data; streams from the part of their package already saved.
     private var canResume: Bool {
         if item.kind == .hls { return !item.requiresReferer && item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } == true }
         return FileManager.default.fileExists(atPath: item.resumeDataURL.path)

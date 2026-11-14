@@ -111,8 +111,6 @@ struct BrowserScreen: View {
 
 }
 
-/// How many videos the page offers, beside the toolbar icon, so results show without opening the sheet.
-/// Green once one is ready to save.
 private struct FoundVideosCount: View {
     let total: Int
     let ready: Int
@@ -323,7 +321,6 @@ private struct CandidateRow: View {
         return parts.joined(separator: " · ")
     }
 
-    /// Shown before downloading when the video won't fit in the space left.
     private var spaceWarning: String? {
         guard let bytes = probe?.expectedBytes, let free = DownloadStorage.availableCapacity(), bytes > free else { return nil }
         return "Needs " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) + ", but only "

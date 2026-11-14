@@ -34,7 +34,6 @@ struct LibraryScreen: View {
     @State private var openedShow: Show?
     @State private var deletingShow: Show?
     @State private var deletingVideo: DownloadItem?
-    /// Select mode: tapping a video ticks it, for the actions in the bar at the bottom.
     @State private var selecting = false
     @State private var selection: Set<UUID> = []
     @State private var confirmingBulkDelete = false
@@ -66,7 +65,6 @@ struct LibraryScreen: View {
     }
 
     private var playableCompletedCount: Int { completed.filter { !$0.isStreamFragment }.count }
-    /// Started but not finished, most recently played first.
     private var continueWatching: [DownloadItem] { ShowPlaylist.continueWatching(completed, shows: shows) }
 
     var body: some View {
@@ -204,7 +202,6 @@ struct LibraryScreen: View {
         }
     }
 
-    /// Netflix's billboard: the video you'd carry on with, full width, with Play and Episodes.
     private func heroSection(_ item: DownloadItem) -> some View {
         let show = shows.first { $0.id == item.showID }
         let resuming = (item.playbackPosition ?? 0) > 10
@@ -252,7 +249,6 @@ struct LibraryScreen: View {
         return parts.joined(separator: " · ")
     }
 
-    /// Netflix-style section titles: bold and white, not small caps.
     private func rowHeader(_ title: String) -> some View {
         Text(title).font(.title3.bold()).foregroundStyle(.white).textCase(nil)
     }
@@ -262,7 +258,6 @@ struct LibraryScreen: View {
                 play: { start($0, at: $0.playbackPosition ?? 0) }) { rowHeader("Continue Watching") }
     }
 
-    /// Movies side by side, like Continue Watching; See All lists them with search and sort.
     @ViewBuilder private var moviesSection: some View {
         let movies = completed.filter { $0.isMovie && !$0.isStreamFragment }
         if !movies.isEmpty {
@@ -285,7 +280,6 @@ struct LibraryScreen: View {
         return item.fileSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? ""
     }
 
-    /// Netflix's row of thumbnails, each with its title, a menu and a caption.
     private func cardRow<Header: View>(_ items: [DownloadItem], caption: @escaping (DownloadItem) -> String,
                                        play: @escaping (DownloadItem) -> Void, @ViewBuilder header: () -> Header) -> some View {
         Section {
@@ -330,7 +324,6 @@ struct LibraryScreen: View {
         } header: { header() }
     }
 
-    /// Suggested shows to confirm, the viewer's shows, then the videos still to sort.
     @ViewBuilder private var showsSection: some View {
         let suggestions = ShowSuggestion.suggestions(items: completed, shows: shows, dismissed: showStore.dismissed)
         if !shows.isEmpty || !suggestions.isEmpty {
@@ -340,8 +333,7 @@ struct LibraryScreen: View {
                 }
                 ForEach(shows) { show in
                     let episodes = ShowPlaylist.episodes(of: show.id, in: completed)
-                    // A row button and a separate Play button, like video rows: a button inside a
-                    // navigation link takes the link's taps on iOS 18.
+                    // Play sits beside the row, not inside a navigation link: on iOS 18 the link takes its taps.
                     HStack(spacing: 4) {
                         Button { openedShow = show } label: { ShowRow(show: show, episodes: episodes) }
                             .buttonStyle(.plain)
@@ -463,7 +455,6 @@ struct LibraryScreen: View {
         if selection.contains(item.id) { selection.remove(item.id) } else { selection.insert(item.id) }
     }
 
-    /// The actions for the ticked videos, over the tab bar.
     private func selectionBar(_ displayed: [DownloadItem]) -> some View {
         let items = selectedItems
         let allSelected = !displayed.isEmpty && displayed.allSatisfy { selection.contains($0.id) }
@@ -533,7 +524,6 @@ struct LibraryScreen: View {
         if on { Label(title, systemImage: "checkmark") } else { Text(title) }
     }
 
-    /// What is narrowing the list, each removable on its own.
     private func filterChips(_ query: LibraryQuery) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -740,7 +730,6 @@ private struct LibraryRow: View {
     private var fileExists: Bool { item.localURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
 }
 
-/// Netflix's thin red bar along the bottom of a thumbnail, for a video started but not finished.
 struct PlaybackProgressBar: View {
     let item: DownloadItem
 

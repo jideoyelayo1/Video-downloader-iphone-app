@@ -1,14 +1,12 @@
 import SwiftData
 import SwiftUI
 
-/// What the New Show sheet starts with: a suggested name and videos, or a show to add to.
 struct NewShowSeed: Identifiable {
     let id = UUID()
     var title: String
     var selected: Set<UUID>
     var show: Show?
 
-    /// The video's series name, with the other saved episodes of that series ticked.
     static func around(_ item: DownloadItem, in items: [DownloadItem]) -> NewShowSeed {
         let parsed = ShowSuggestion.parse(item.displayTitle)
         let matches = items.filter { $0.showID == nil && !$0.isMovie && ShowSuggestion.parse($0.displayTitle).key == parsed.key }
@@ -16,7 +14,6 @@ struct NewShowSeed: Identifiable {
     }
 }
 
-/// A show in My Videos: the next episode's thumbnail and progress.
 struct ShowRow: View {
     let show: Show
     let episodes: [DownloadItem]
@@ -45,7 +42,6 @@ struct ShowRow: View {
     }
 }
 
-/// "13 videos look like a show" with Create Show (or Add, for a show that exists) and Not Now.
 struct ShowSuggestionRow: View {
     let suggestion: ShowSuggestion.Suggestion
     let accept: () -> Void
@@ -75,7 +71,6 @@ struct ShowSuggestionRow: View {
     }
 }
 
-/// Names a show and picks its episodes; suggestions arrive with both filled in.
 struct NewShowSheet: View {
     let seed: NewShowSeed
     @EnvironmentObject private var shows: ShowStore
@@ -135,7 +130,6 @@ struct NewShowSheet: View {
         }
     }
 
-    /// Ticked videos first, then the rest in natural title order; episodes of the show already in it are left out.
     private var listed: [DownloadItem] {
         items.filter { !$0.isStreamFragment && ($0.showID == nil || $0.showID != seed.show?.id) }
             .filter { searchText.isEmpty || $0.title.localizedStandardContains(searchText) }
@@ -161,8 +155,6 @@ struct NewShowSheet: View {
     }
 }
 
-/// A show's episodes in watch order: drag to reorder, play the next one, and choose whether
-/// episodes play on one after another.
 struct ShowScreen: View {
     @Bindable var show: Show
     @EnvironmentObject private var shows: ShowStore
@@ -187,7 +179,6 @@ struct ShowScreen: View {
         let watched = episodes.filter(\.isWatched).count
         let next = ShowPlaylist.upNext(in: episodes)
         List {
-            // Netflix's title page: artwork, the title, then a full-width Play.
             Section {
                 VStack(alignment: .leading, spacing: 10) {
                     if let art = next ?? episodes.first {
@@ -314,7 +305,6 @@ struct ShowScreen: View {
         return "Checks \(page.host ?? "the site") for the next episode when you open the app, and in the background now and then." + checked
     }
 
-    /// "Ep. 10" when the title has an episode number, else the episode's place in the show.
     static func episodeName(_ item: DownloadItem, in episodes: [DownloadItem]) -> String {
         if let episode = ShowSuggestion.parse(item.displayTitle).episode { return "Ep. \(episode)" }
         return "Episode \((episodes.firstIndex { $0.id == item.id } ?? 0) + 1)"
@@ -368,7 +358,6 @@ struct ShowScreen: View {
         return "Play \(name)"
     }
 
-    /// The Play button resumes where the viewer stopped.
     private func play(_ item: DownloadItem) {
         start(item, at: item.isWatched ? 0 : item.playbackPosition ?? 0)
     }
@@ -383,7 +372,7 @@ struct ShowScreen: View {
     }
 }
 
-/// Asks before deleting a video from this iPhone. An alert, so iOS 26 shows Cancel too (its action sheets have none).
+/// An alert, so iOS 26 shows Cancel too (its action sheets have none).
 struct DeleteVideoAlert: ViewModifier {
     @EnvironmentObject private var downloads: DownloadManager
     @Binding var item: DownloadItem?
@@ -397,10 +386,8 @@ struct DeleteVideoAlert: ViewModifier {
     }
 }
 
-/// Deletes a show with its episodes' videos, or leaves the videos in My Videos.
 struct DeleteShowDialog: ViewModifier {
     @Binding var show: Show?
-    /// Leaves a screen that shows the show, before it is deleted.
     var leave: (() -> Void)?
     @EnvironmentObject private var shows: ShowStore
     @EnvironmentObject private var downloads: DownloadManager
@@ -433,7 +420,6 @@ struct DeleteShowDialog: ViewModifier {
     }
 }
 
-/// Netflix's episode row: a 16:9 still with a play mark and progress bar, then "1. Title" and its length.
 private struct EpisodeRow: View {
     let number: Int
     let item: DownloadItem
