@@ -114,6 +114,6 @@ Keep the Mac's display on while UI tests run, for example by starting them with 
 
 Don't pass `CODE_SIGNING_ALLOWED=NO` when running tests: background `URLSession` downloads fail with `NSURLErrorUnknown` in an unsigned app. The simulator's default "Sign to Run Locally" is enough.
 
-The simulator can't download HLS for offline use (an Apple limitation), so HLS downloads, background transfers with the app suspended, and airplane-mode playback have to be checked on a physical iPhone. See `TEST_REPORT.md`.
+The simulator can't download HLS for offline use (an Apple limitation), so HLS downloads, background transfers with the app suspended, and airplane-mode playback have to be checked on a physical iPhone.
 
 Launch arguments used by tests and diagnostics: `-StartURL <url>` (opens in Browse), `-NoInitialLoad`, `-UITestInMemory` (in-memory store and separate, reset preferences), `-DiagnosticsAutoplay` (Debug only; muted autoplay in every frame), `-VerboseBrowserDiagnostics` (Debug only; detailed network events), `-BuildExpiresInHours <n>` (Debug only; shows the expiry warning as if the build expired in *n* hours), and `-KeepSiteSubtitleOverlay` (site subtitles stay drawn by the app, so UI tests can read where playback is).

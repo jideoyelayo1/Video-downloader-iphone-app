@@ -4,7 +4,7 @@
 
 name: Tests
 
-# Changes to documentation alone (such as TEST_REPORT.md) don't need a run.
+# Changes to documentation alone don't need a run.
 on:
   push:
     branches: [ "master" ]

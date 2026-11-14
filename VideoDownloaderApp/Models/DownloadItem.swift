@@ -334,7 +334,7 @@ final class Bookmark {
     ]
 
     /// Sites whose episode pages gave a video the app can download in the 2026-10-03 survey
-    /// (TEST_REPORT.md). ***REMOVED*** and My***REMOVED*** first need their Cloudflare check passed in
+    /// ***REMOVED*** and My***REMOVED*** first need their Cloudflare check passed in
     /// Browse; ***REMOVED*** and ***REMOVED*** need a tap on their play button.
     static let testedSites: [(String, URL)] = [
         ("***REMOVED***", URL(string: "https://www.***REMOVED***.to/")!),
@@ -388,7 +388,7 @@ final class Bookmark {
         }
     }
 
-    /// From the surveys in TEST_REPORT.md, keyed by the shipped site names above.
+    /// From the site surveys, keyed by the shipped site names above.
     private static let siteFolders: [String: Folder] = [
         "***REMOVED***": .autoDownload, "***REMOVED***": .autoDownload, "My***REMOVED***": .autoDownload, "***REMOVED***": .autoDownload,
         "***REMOVED***": .autoDownload, "***REMOVED***": .autoDownload,
