@@ -1,6 +1,6 @@
 # Video Downloader
 
-An iOS app with a built-in browser that finds the video a web page plays, downloads it and plays it offline.
+An iOS app with a built-in browser that finds the video a web page plays, downloads it and plays it offline. It is a general HLS and MP4 downloader for video you are entitled to save.
 
 ## What it does
 
@@ -11,9 +11,7 @@ An iOS app with a built-in browser that finds the video a web page plays, downlo
 
 ### Where it downloads from
 
-It works with any website whose player loads an unprotected video over HTTP(S): a direct file such as an MP4, or a finite HLS stream. It can't save DRM-protected video, DASH streams, live streams, players that only expose `blob:` addresses, or pages behind an anti-bot check it can't pass.
-
-The app comes with starter bookmarks for third-party anime and TV streaming sites: ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, My***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED***, ***REMOVED*** and ***REMOVED***s. They are listed in `Bookmark` in `VideoDownloaderApp/Models/DownloadItem.swift`. The project isn't affiliated with any of them, and their addresses change often.
+It works with any website you open whose player loads an unprotected video over HTTP(S): a direct file such as an MP4, or a finite HLS stream. It can't save DRM-protected video, DASH streams, live streams, players that only expose `blob:` addresses, or pages behind an anti-bot check it can't pass. It ships with no bookmarks or site list: you choose the sites.
 
 ## Requirements
 

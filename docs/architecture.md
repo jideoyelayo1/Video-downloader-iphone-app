@@ -18,7 +18,7 @@ A SwiftUI app with four tabs: My Videos, Browse, Downloads and Settings. SwiftDa
 | Shows and series | `Services/Shows.swift`, `Services/ShowStore.swift`, `Services/EpisodeURL.swift` (the next episode's address), `Services/SeasonDownloader.swift` (a hidden browser that finds each episode's video), `Services/NewEpisodeChecker.swift` (background refresh and notifications) |
 | Organising | `Services/LibraryQuery.swift`, `Services/LabelStore.swift`, `Services/SiteNames.swift`, `Services/WatchProgress.swift` (the watched rule) |
 | Storage | `Services/StorageCleanup.swift`, `Services/LibraryStats.swift`, `Services/LibraryBackup.swift`, `Services/ThumbnailCache.swift`, `Services/VideoThumbnailService.swift` |
-| Bookmarks | `Services/BrowserCollectionsStore.swift`; the starter sites are in `Bookmark` in `Models/DownloadItem.swift` |
+| Bookmarks and history | `Services/BrowserCollectionsStore.swift` (the app ships no bookmarks) |
 
 Direct downloads are saved in Application Support. HLS packages stay where AVFoundation puts them.
 
@@ -38,7 +38,6 @@ Direct downloads are saved in Application Support. HLS packages stay where AVFou
 | Argument | Effect |
 | --- | --- |
 | `-StartURL <url>` | Opens the address in Browse |
-| `-NoInitialLoad` | Starts with a blank browser |
 | `-UITestInMemory` | Uses an in-memory store and separate, reset preferences |
 | `-KeepSiteSubtitleOverlay` | Keeps site subtitles drawn by the app (used by UI tests) |
 | `-DiagnosticsAutoplay` | Debug builds: autoplays muted video in every frame |
